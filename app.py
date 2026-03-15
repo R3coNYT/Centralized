@@ -32,6 +32,7 @@ def create_app():
     from routes.hosts import hosts_bp
     from routes.api import api_bp
     from routes.clients import clients_bp
+    from routes.cve_search import cve_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(dashboard_bp)
@@ -40,6 +41,7 @@ def create_app():
     app.register_blueprint(hosts_bp)
     app.register_blueprint(api_bp)
     app.register_blueprint(clients_bp)
+    app.register_blueprint(cve_bp)
 
     # Import models here so SQLAlchemy sees them before create_all()
     import models  # noqa: F401

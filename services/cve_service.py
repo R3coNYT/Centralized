@@ -144,9 +144,28 @@ def _extract_cve(cve: dict) -> dict | None:
             )
             break
 
-    refs = [
-        r.get("url", "") for r in cve.get("references", []) if r.get("url")
+    refs = cve.get("references", [])
+    all_ref_urls = [r.get("url", "") for r in refs if r.get("url")]
+
+    # References tagged as patches / fixes / workarounds
+    PATCH_TAGS = {"Patch", "Fix", "Mitigation", "Vendor Advisory", "Third Party Advisory"}
+    patch_refs = [
+        r["url"] for r in refs
+        if r.get("url") and PATCH_TAGS.intersection(set(r.get("tags", [])))
     ]
+    patch_available = len(patch_refs) > 0
+
+    # CWE weaknesses
+    weaknesses = []
+    for w in cve.get("weaknesses", []):
+        for d in w.get("description", []):
+            val = d.get("value", "")
+            if d.get("lang") == "en" and val.startswith("CWE-") and val not in weaknesses:
+                weaknesses.append(val)
+
+    # CISA Known Exploited Vulnerability
+    exploited_in_wild = "cisaExploitAdd" in cve
+    cisa_remediation = cve.get("cisaRequiredAction")
 
     import json as _json
     return {
@@ -156,7 +175,15 @@ def _extract_cve(cve: dict) -> dict | None:
         "severity": severity.upper() if severity else "UNKNOWN",
         "cvss_score": cvss_score,
         "cvss_vector": cvss_vector,
-        "references": _json.dumps(refs[:10]),
+        "references": _json.dumps(all_ref_urls[:10]),
+        "patch_refs": patch_refs[:8],
+        "patch_available": patch_available,
+        "weaknesses": weaknesses,
+        "exploited_in_wild": exploited_in_wild,
+        "cisa_remediation": cisa_remediation,
+        "published": cve.get("published", ""),
+        "last_modified": cve.get("lastModified", ""),
+        "vuln_status": cve.get("vulnStatus", ""),
         "source": "nvd",
     }
 

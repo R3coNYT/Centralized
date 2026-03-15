@@ -1,0 +1,457 @@
+{% extends "base.html" %}
+{% block title %}CVE Search{% endblock %}
+{% block page_title %}CVE Search{% endblock %}
+
+{% block content %}
+
+{# ── Search panel ─────────────────────────────────────────────────────────── #}
+<div class="card mb-4">
+  <div class="card-body">
+    <div class="row g-3">
+
+      {# Keyword / CVE-ID search #}
+      <div class="col-lg-7">
+        <div class="small fw-semibold text-muted mb-2">
+          <i class="bi bi-search me-1"></i>Search by keyword, service version or CVE ID
+        </div>
+        <form method="GET" action="{{ url_for('cve.search_page') }}" class="d-flex gap-2">
+          <input type="text" name="q" value="{{ q or '' }}"
+                 class="form-control font-monospace"
+                 placeholder="e.g.  OpenSSH 8.4   |   Apache 2.4.51   |   CVE-2021-44228"
+                 list="dbServicesList" autocomplete="off"/>
+          <button class="btn btn-primary px-4" type="submit">
+            <i class="bi bi-search me-1"></i>Search NVD
+          </button>
+        </form>
+        <datalist id="dbServicesList">
+          {% for svc in db_services %}<option value="{{ svc }}">{% endfor %}
+        </datalist>
+        <div class="small text-muted mt-1 opacity-75">
+          Suggestions come from services discovered in your audits.
+        </div>
+      </div>
+
+      {# Separator #}
+      <div class="col-lg-1 d-none d-lg-flex align-items-center justify-content-center">
+        <div class="text-muted">— or —</div>
+      </div>
+
+      {# Auto-scan from audit #}
+      <div class="col-lg-4">
+        <div class="small fw-semibold text-muted mb-2">
+          <i class="bi bi-clipboard2-data me-1"></i>Auto-scan all services from an audit
+        </div>
+        <form method="GET" action="{{ url_for('cve.search_page') }}" class="d-flex gap-2">
+          <select name="audit_id" class="form-select form-select-sm">
+            <option value="">— Select audit —</option>
+            {% for a in audits %}
+            <option value="{{ a.id }}" {% if audit_id == a.id %}selected{% endif %}>
+              {{ a.name }}{% if a.target %} ({{ a.target }}){% endif %}
+            </option>
+            {% endfor %}
+          </select>
+          <button class="btn btn-outline-secondary btn-sm px-3" type="submit">
+            <i class="bi bi-magic me-1"></i>Scan
+          </button>
+        </form>
+        <div class="small text-muted mt-1 opacity-75">
+          Queries NVD for each discovered product+version (max 10 services).
+        </div>
+      </div>
+
+    </div>{# /row #}
+  </div>
+
+  {# NVD info bar #}
+  <div class="card-footer py-2 d-flex align-items-center gap-3 flex-wrap">
+    <span class="small text-muted">
+      <i class="bi bi-info-circle me-1 text-info"></i>
+      Data sourced from <a href="https://nvd.nist.gov" target="_blank" class="text-info">NVD (nvd.nist.gov)</a>.
+      Without an API key the rate limit is 5 req / 30 s — set <code>NVD_API_KEY</code> for 50 req / 30 s.
+    </span>
+    <a href="{{ url_for('cve.search_page') }}" class="btn btn-outline-secondary btn-sm ms-auto">
+      <i class="bi bi-x-circle me-1"></i>Clear
+    </a>
+  </div>
+</div>
+
+{# ── Error ────────────────────────────────────────────────────────────────── #}
+{% if error %}
+<div class="alert alert-danger d-flex align-items-center gap-2">
+  <i class="bi bi-exclamation-triangle-fill fs-5"></i>
+  <span>{{ error }}</span>
+</div>
+{% endif %}
+
+{# ── Services searched (audit mode) ──────────────────────────────────────── #}
+{% if services_searched %}
+<div class="alert alert-secondary d-flex align-items-start gap-2 py-2">
+  <i class="bi bi-layers me-1 mt-1 flex-shrink-0"></i>
+  <div class="small">
+    <span class="fw-semibold">Services queried:</span>
+    {% for s in services_searched %}
+    <span class="badge bg-secondary font-monospace me-1">{{ s }}</span>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+{# ── Results ──────────────────────────────────────────────────────────────── #}
+{% if searched_for %}
+
+  {# Summary bar #}
+  <div class="d-flex align-items-center gap-3 mb-3 flex-wrap">
+    <h6 class="mb-0 fw-semibold">
+      <i class="bi bi-shield-exclamation me-2 text-danger"></i>
+      {{ results|length }} CVE{{ 's' if results|length != 1 else '' }} found
+      {% if searched_for %}<span class="text-muted fw-normal"> for "{{ searched_for }}"</span>{% endif %}
+    </h6>
+    {% if results %}
+    <span class="ms-auto small text-muted">Sorted by CVSS score ↓</span>
+    {% endif %}
+  </div>
+
+  {% if results %}
+
+  {# Stats row #}
+  <div class="row g-3 mb-4">
+
+    {# Severity counts #}
+    <div class="col-md-4">
+      <div class="card h-100">
+        <div class="card-header fw-semibold small"><i class="bi bi-bar-chart-fill me-2"></i>Severity Breakdown</div>
+        <div class="card-body">
+          {% set order = ['CRITICAL','HIGH','MEDIUM','LOW','INFO','UNKNOWN'] %}
+          {% for sev in order %}
+          {% if sev_count.get(sev, 0) > 0 %}
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <span>{% set severity = sev %}{% include '_partials/sev_badge.html' %}</span>
+            <span class="fw-bold">{{ sev_count[sev] }}</span>
+          </div>
+          {% endif %}
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+
+    {# Severity doughnut #}
+    <div class="col-md-4">
+      <div class="card h-100">
+        <div class="card-header fw-semibold small"><i class="bi bi-pie-chart me-2"></i>Distribution</div>
+        <div class="card-body d-flex align-items-center justify-content-center" id="cveChartWrap">
+          <canvas id="cveDistChart" style="max-height:180px"></canvas>
+        </div>
+      </div>
+    </div>
+
+    {# Patch coverage #}
+    <div class="col-md-4">
+      <div class="card h-100">
+        <div class="card-header fw-semibold small"><i class="bi bi-patch-check me-2"></i>Patch Coverage</div>
+        <div class="card-body d-flex flex-column justify-content-center gap-3">
+          {%- set total = results|length -%}
+          {%- set pct = ((patch_count / total) * 100)|round|int if total else 0 -%}
+          <div>
+            <div class="d-flex justify-content-between small mb-1">
+              <span class="text-success fw-semibold">
+                <i class="bi bi-patch-check me-1"></i>Patch available
+              </span>
+              <span>{{ patch_count }} / {{ total }}</span>
+            </div>
+            <div class="progress" style="height:10px">
+              <div class="progress-bar bg-success" style="width:{{ pct }}%"></div>
+            </div>
+          </div>
+          {%- set exploited = results|selectattr('exploited_in_wild')|list|length -%}
+          {% if exploited > 0 %}
+          <div class="alert alert-danger py-2 small mb-0 d-flex align-items-center gap-2">
+            <i class="bi bi-fire fs-5 flex-shrink-0"></i>
+            <span><strong>{{ exploited }} CVE{{ 's' if exploited > 1 else '' }}</strong> in CISA KEV (actively exploited in the wild)</span>
+          </div>
+          {% else %}
+          <div class="text-muted small text-center">
+            <i class="bi bi-shield-check text-success me-1"></i>No CISA KEV entries
+          </div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+  </div>{# /stats row #}
+
+  {# ── CVE cards ──────────────────────────────────────────────────────────── #}
+  {% for r in results %}
+  {%- set sev = r.severity|upper -%}
+  {%- set border_cls = {
+      'CRITICAL': 'border-danger',
+      'HIGH':     'border-warning',
+      'MEDIUM':   'border-info',
+      'LOW':      'border-secondary',
+      'INFO':     'border-secondary'
+    }.get(sev, 'border-secondary') -%}
+
+  <div class="card mb-3 border-start border-3 {{ border_cls }}">
+
+    {# Card header #}
+    <div class="card-header d-flex align-items-center gap-2 flex-wrap py-2">
+      <a href="https://nvd.nist.gov/vuln/detail/{{ r.cve_id }}" target="_blank" rel="noopener"
+         class="fw-bold font-monospace text-decoration-none text-white me-1">
+        {{ r.cve_id }}
+        <i class="bi bi-box-arrow-up-right ms-1 small opacity-50"></i>
+      </a>
+
+      {# Severity badge #}
+      {% set severity = r.severity %}{% include '_partials/sev_badge.html' %}
+
+      {# CVSS score #}
+      {% if r.cvss_score %}
+      <span class="badge bg-secondary font-monospace">CVSS {{ r.cvss_score }}</span>
+      {% endif %}
+
+      {# Patch status #}
+      {% if r.patch_available %}
+      <span class="badge bg-success"><i class="bi bi-patch-check-fill me-1"></i>Patch Available</span>
+      {% else %}
+      <span class="badge bg-warning text-dark"><i class="bi bi-exclamation-triangle me-1"></i>No Known Patch</span>
+      {% endif %}
+
+      {# CISA KEV warning #}
+      {% if r.exploited_in_wild %}
+      <span class="badge bg-danger"><i class="bi bi-fire me-1"></i>CISA KEV — Actively Exploited</span>
+      {% endif %}
+
+      {# Vuln status #}
+      {% if r.vuln_status %}
+      <span class="badge border text-muted border-secondary small fw-normal">{{ r.vuln_status }}</span>
+      {% endif %}
+
+      {# Published date #}
+      <span class="ms-auto small text-muted">
+        <i class="bi bi-calendar3 me-1"></i>{{ r.published[:10] if r.published else '?' }}
+      </span>
+    </div>
+
+    {# Card body #}
+    <div class="card-body pb-0">
+
+      {# Description #}
+      <p class="small mb-2 text-secondary">
+        {{ r.description[:350] if r.description else '—' }}{% if r.description and r.description|length > 350 %}…{% endif %}
+      </p>
+
+      {# CWE badges #}
+      {% if r.weaknesses %}
+      <div class="mb-2 d-flex align-items-center gap-1 flex-wrap">
+        <span class="small text-muted me-1">Weakness:</span>
+        {% for cwe in r.weaknesses %}
+        <a href="https://cwe.mitre.org/data/definitions/{{ cwe.split('-')[1] }}.html"
+           target="_blank" rel="noopener"
+           class="badge bg-dark border border-secondary text-muted text-decoration-none font-monospace">{{ cwe }}</a>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      {# Expandable details #}
+      <div class="accordion accordion-flush border-top mt-2">
+        <div class="accordion-item bg-transparent">
+          <h2 class="accordion-header">
+            <button class="accordion-button collapsed bg-transparent text-muted small py-2 px-0"
+                    type="button" data-bs-toggle="collapse"
+                    data-bs-target="#det-{{ loop.index }}">
+              <i class="bi bi-chevron-down me-2"></i>Details, CVSS breakdown &amp; remediation
+            </button>
+          </h2>
+          <div id="det-{{ loop.index }}" class="accordion-collapse collapse">
+            <div class="accordion-body px-0 pt-2 pb-3">
+
+              <div class="row g-3">
+
+                {# Left — Full description + CISA action #}
+                <div class="col-lg-6">
+                  {% if r.description %}
+                  <div class="mb-3">
+                    <div class="small fw-semibold mb-1 text-muted">Description</div>
+                    <p class="small mb-0">{{ r.description }}</p>
+                  </div>
+                  {% endif %}
+
+                  {% if r.cisa_remediation %}
+                  <div class="alert alert-danger py-2 small mb-3">
+                    <div class="fw-semibold mb-1">
+                      <i class="bi bi-fire me-1"></i>CISA Required Action
+                    </div>
+                    {{ r.cisa_remediation }}
+                  </div>
+                  {% endif %}
+
+                  {# Patch references #}
+                  {% if r.patch_refs %}
+                  <div class="mb-2">
+                    <div class="small fw-semibold mb-1">
+                      <i class="bi bi-patch-check-fill text-success me-1"></i>Patch / Fix References
+                    </div>
+                    <ul class="list-unstyled small mb-0">
+                      {% for ref in r.patch_refs %}
+                      <li class="mb-1">
+                        <a href="{{ ref }}" target="_blank" rel="noopener"
+                           class="text-success text-break">
+                          <i class="bi bi-link-45deg me-1"></i>{{ ref }}
+                        </a>
+                      </li>
+                      {% endfor %}
+                    </ul>
+                  </div>
+                  {% else %}
+                  <div class="small text-warning mb-2">
+                    <i class="bi bi-exclamation-triangle me-1"></i>No patch references indexed in NVD.
+                    Check vendor advisories manually.
+                  </div>
+                  {% endif %}
+                </div>
+
+                {# Right — CVSS vector breakdown #}
+                <div class="col-lg-6">
+                  {% if r.cvss_vector %}
+                  <div class="mb-3">
+                    <div class="small fw-semibold mb-2 text-muted">CVSS Vector Breakdown</div>
+                    <code class="small text-info d-block mb-2">{{ r.cvss_vector }}</code>
+                    <div id="cvss-{{ loop.index }}" class="cvss-table"></div>
+                  </div>
+                  {% endif %}
+
+                  <div class="d-flex gap-2 mt-3 flex-wrap">
+                    <a href="https://nvd.nist.gov/vuln/detail/{{ r.cve_id }}"
+                       target="_blank" rel="noopener"
+                       class="btn btn-outline-primary btn-sm">
+                      <i class="bi bi-box-arrow-up-right me-1"></i>Full NVD Entry
+                    </a>
+                    {% if r.last_modified %}
+                    <span class="btn btn-outline-secondary btn-sm disabled pe-none">
+                      <i class="bi bi-clock-history me-1"></i>Updated {{ r.last_modified[:10] }}
+                    </span>
+                    {% endif %}
+                  </div>
+                </div>
+
+              </div>{# /row #}
+
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>{# /card-body #}
+  </div>
+  {% endfor %}{# /for results #}
+
+  {% else %}
+  {# No results #}
+  <div class="card">
+    <div class="card-body text-center py-5 text-muted">
+      <i class="bi bi-shield-check fs-1 d-block mb-3 opacity-25"></i>
+      <div class="fw-semibold fs-5">No CVEs found for "{{ searched_for }}"</div>
+      <div class="small mt-2 opacity-75">
+        Try a different keyword or version number.<br>
+        NVD may not have records for very new or niche software.
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+{% else %}
+{# Landing state — no search yet #}
+<div class="card">
+  <div class="card-body text-center py-5 text-muted">
+    <i class="bi bi-bug fs-1 d-block mb-3 opacity-25"></i>
+    <div class="fw-semibold fs-5">Enter a keyword above to search NVD</div>
+    <div class="small mt-2 opacity-75 mx-auto" style="max-width:440px">
+      You can search by product name, version, or CVE ID.<br>
+      Use <strong>Auto-scan</strong> to automatically query all services found in an audit.
+    </div>
+  </div>
+</div>
+{% endif %}
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+/* ── Severity doughnut ───────────────────────────────────── */
+(function() {
+  const sevCount = {{ sev_count | tojson }};
+  const ORDER    = ['CRITICAL','HIGH','MEDIUM','LOW','INFO','UNKNOWN'];
+  const COLORS   = {
+    CRITICAL: '#dc3545', HIGH: '#fd7e14', MEDIUM: '#ffc107',
+    LOW: '#0dcaf0', INFO: '#6c757d', UNKNOWN: '#495057',
+  };
+  const labels = ORDER.filter(k => sevCount[k]);
+  const values = labels.map(k => sevCount[k]);
+  const colors = labels.map(k => COLORS[k]);
+  const wrap   = document.getElementById('cveChartWrap');
+  const ctx    = document.getElementById('cveDistChart');
+  if (!ctx) return;
+  if (!values.length) {
+    if (wrap) wrap.innerHTML = '<div class="text-muted small text-center opacity-50">No data</div>';
+    return;
+  }
+  new Chart(ctx, {
+    type: 'doughnut',
+    data: { labels, datasets: [{ data: values, backgroundColor: colors, borderWidth: 2, borderColor: '#1a1d23' }] },
+    options: {
+      cutout: '65%',
+      plugins: { legend: { position: 'right', labels: { color: '#adb5bd', font: { size: 11 }, padding: 10 } } },
+    },
+  });
+})();
+
+/* ── CVSS vector parser ──────────────────────────────────── */
+const CVSS_MAP = {
+  AV: { label:'Attack Vector',       N:'Network',  A:'Adjacent Network', L:'Local',  P:'Physical' },
+  AC: { label:'Attack Complexity',   L:'Low',      H:'High' },
+  PR: { label:'Privileges Required', N:'None',     L:'Low',  H:'High' },
+  UI: { label:'User Interaction',    N:'None',     R:'Required' },
+  S:  { label:'Scope',               U:'Unchanged',C:'Changed' },
+  C:  { label:'Confidentiality',     N:'None',     L:'Low',  H:'High' },
+  I:  { label:'Integrity',           N:'None',     L:'Low',  H:'High' },
+  A:  { label:'Availability',        N:'None',     L:'Low',  H:'High' },
+};
+/* Colour by "badness" */
+const VAL_CLS = {
+  N:'text-success', L:'text-warning', H:'text-danger',
+  A:'text-warning', P:'text-warning', C:'text-danger',
+  R:'text-warning', U:'text-success',
+};
+
+function parseCvssHtml(vector) {
+  const parts = vector.split('/').slice(1); // skip "CVSS:3.1"
+  let rows = '';
+  for (const p of parts) {
+    const [k, v] = p.split(':');
+    const def = CVSS_MAP[k];
+    if (!def) continue;
+    const lbl   = def[v] || v;
+    const cls   = VAL_CLS[v] || 'text-muted';
+    rows += `<tr>
+      <td class="text-muted small pe-3 py-1">${def.label}</td>
+      <td class="small fw-semibold ${cls} py-1">${lbl}</td>
+    </tr>`;
+  }
+  return rows
+    ? `<table class="table table-sm table-borderless mb-0">${rows}</table>`
+    : '';
+}
+
+/* Render each card's CVSS table */
+{% for r in results %}
+{% if r.cvss_vector %}
+(function() {
+  const el = document.getElementById('cvss-{{ loop.index }}');
+  if (el) el.innerHTML = parseCvssHtml({{ r.cvss_vector | tojson }});
+})();
+{% endif %}
+{% endfor %}
+
+/* ── Bootstrap tooltips ──────────────────────────────────── */
+document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => new bootstrap.Tooltip(el));
+</script>
+{% endblock %}
