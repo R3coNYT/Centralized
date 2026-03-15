@@ -231,7 +231,7 @@ function Prune-Backups {
     $BackupRoot = Join-Path $InstallDir "backups"
     if (-not (Test-Path $BackupRoot)) { return }
 
-    $Entries = Get-ChildItem $BackupRoot -Directory | Sort-Object Name
+    $Entries = @(Get-ChildItem $BackupRoot -Directory | Sort-Object Name)
     $Count   = $Entries.Count
     if ($Count -le 5) { return }
 
