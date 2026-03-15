@@ -218,7 +218,13 @@
         <tbody>
         {% for uf in uploaded_files %}
         <tr>
-          <td class="small">{{ uf.original_filename }}</td>
+          <td class="small">
+            <a href="{{ url_for('uploads.view_file', audit_id=audit.id, file_id=uf.id) }}"
+               target="_blank" rel="noopener noreferrer"
+               title="Open in new tab">
+              <i class="bi bi-box-arrow-up-right me-1 text-muted" style="font-size:.75rem"></i>{{ uf.original_filename }}
+            </a>
+          </td>
           <td><span class="badge bg-secondary font-monospace">{{ uf.file_type }}</span></td>
           <td class="text-muted small">{{ (uf.file_size / 1024)|round(1) }} KB</td>
           <td>

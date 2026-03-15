@@ -1,6 +1,6 @@
 import os
 import uuid
-from flask import Blueprint, render_template, redirect, url_for, flash, request, current_app
+from flask import Blueprint, render_template, redirect, url_for, flash, request, current_app, send_file, abort
 from flask_login import login_required, current_user
 from werkzeug.utils import secure_filename
 from models import Audit, Host, Port, Vulnerability, HttpPage, UploadedFile
@@ -84,6 +84,26 @@ def upload(audit_id):
 
     uploaded_files = audit.uploaded_files.order_by("created_at").all()
     return render_template("uploads/index.html", audit=audit, uploaded_files=uploaded_files)
+
+
+@uploads_bp.route("/<int:audit_id>/view/<int:file_id>")
+@login_required
+def view_file(audit_id, file_id):
+    uf = UploadedFile.query.get_or_404(file_id)
+    if uf.audit_id != audit_id:
+        abort(403)
+    path = os.path.join(current_app.config["UPLOAD_FOLDER"], uf.stored_filename)
+    if not os.path.exists(path):
+        abort(404)
+    # Determine MIME type so the browser renders text/XML/JSON/PDF inline
+    ext = uf.original_filename.rsplit(".", 1)[-1].lower() if "." in uf.original_filename else ""
+    mime_map = {
+        "pdf":  "application/pdf",
+        "xml":  "text/xml",
+        "json": "application/json",
+    }
+    mime = mime_map.get(ext, "application/octet-stream")
+    return send_file(path, mimetype=mime, download_name=uf.original_filename, as_attachment=False)
 
 
 @uploads_bp.route("/<int:audit_id>/delete/<int:file_id>", methods=["POST"])
