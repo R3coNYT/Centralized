@@ -120,15 +120,34 @@ git_update() {
         info "Local file changes stashed: $stash_result"
     fi
 
-    # Fetch + reset to match remote exactly (safe because data files are in .gitignore)
+    # Protect data files before git reset: centralized.db / uploads/ may still
+    # be tracked in the remote repo if they were committed before .gitignore was
+    # added. git reset --hard would overwrite them.
+    local tmp_protect
+    tmp_protect="$(mktemp -d)"
+
+    [ -f "$INSTALL_DIR/centralized.db" ] && cp "$INSTALL_DIR/centralized.db" "$tmp_protect/"
+    [ -d "$INSTALL_DIR/uploads" ]        && cp -r "$INSTALL_DIR/uploads" "$tmp_protect/uploads"
+
+    # Fetch + reset to match remote
     git fetch origin
     local current_branch
     current_branch="$(git rev-parse --abbrev-ref HEAD)"
     git reset --hard "origin/$current_branch"
 
+    # Untrack data files so future resets never touch them
+    git rm --cached centralized.db -q 2>/dev/null || true
+    git rm --cached -r uploads/ -q 2>/dev/null || true
+
+    # Restore protected data files
+    [ -f "$tmp_protect/centralized.db" ] && cp -f "$tmp_protect/centralized.db" "$INSTALL_DIR/" && info "Database restored after git reset"
+    [ -d "$tmp_protect/uploads" ]        && cp -rf "$tmp_protect/uploads" "$INSTALL_DIR/"   && info "Uploads restored after git reset"
+    rm -rf "$tmp_protect"
+
     local new_commit
     new_commit="$(git rev-parse --short HEAD)"
     ok "Code updated → commit $new_commit (branch: $current_branch)"
+    ok "Data files are intact"
 }
 
 # ── Update Python dependencies ─────────────────────────────────────────────────
