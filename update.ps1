@@ -1,7 +1,7 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
-    Centralized — Update Script (Windows)
+    Centralized - Update Script (Windows)
 .DESCRIPTION
     Pulls the latest code from GitHub while preserving your database,
     uploaded files, and any local .env configuration.
@@ -11,15 +11,15 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-# ── Console helpers ────────────────────────────────────────────────────────────
+# -- Console helpers ------------------------------------------------------------
 
 function Write-Log  { param([string]$Msg) Write-Host "[+] $Msg" -ForegroundColor Cyan }
-function Write-Ok   { param([string]$Msg) Write-Host "[✓] $Msg" -ForegroundColor Green }
+function Write-Ok   { param([string]$Msg) Write-Host "[OK] $Msg" -ForegroundColor Green }
 function Write-Warn { param([string]$Msg) Write-Host "[!] $Msg" -ForegroundColor Yellow }
-function Write-Err  { param([string]$Msg) Write-Host "[✗] $Msg" -ForegroundColor Red }
+function Write-Err  { param([string]$Msg) Write-Host "[X] $Msg" -ForegroundColor Red }
 function Write-Info { param([string]$Msg) Write-Host "[i] $Msg" -ForegroundColor Gray }
 
-# ── Locate install directory ───────────────────────────────────────────────────
+# -- Locate install directory ---------------------------------------------------
 
 function Find-InstallDir {
     # 1) Directory where this script lives (preferred)
@@ -44,7 +44,7 @@ function Find-InstallDir {
     exit 1
 }
 
-# ── Backup data ────────────────────────────────────────────────────────────────
+# -- Backup data ----------------------------------------------------------------
 
 function Backup-Data {
     param([string]$InstallDir)
@@ -53,7 +53,7 @@ function Backup-Data {
     $BackupRoot = Join-Path $InstallDir "backups"
     $BackupDir  = Join-Path $BackupRoot $Timestamp
 
-    Write-Log "Creating backup → $BackupDir"
+    Write-Log "Creating backup -> $BackupDir"
     New-Item -ItemType Directory -Path $BackupDir -Force | Out-Null
 
     # SQLite database
@@ -63,7 +63,7 @@ function Backup-Data {
         $DbSize = [math]::Round((Get-Item $DbPath).Length / 1KB, 1)
         Write-Ok "Database backed up (${DbSize} KB)"
     } else {
-        Write-Warn "No database found — nothing to back up"
+        Write-Warn "No database found - nothing to back up"
     }
 
     # Uploaded files
@@ -72,7 +72,7 @@ function Backup-Data {
         $UploadsCount = (Get-ChildItem $UploadsPath -Recurse -File -ErrorAction SilentlyContinue).Count
         if ($UploadsCount -gt 0) {
             Copy-Item $UploadsPath -Destination (Join-Path $BackupDir "uploads") -Recurse
-            Write-Ok "Uploads backed up ($UploadsCount files)"
+            Write-Ok "Uploads backed up $($UploadsCount) files"
         }
     }
 
@@ -83,11 +83,11 @@ function Backup-Data {
         Write-Ok ".env backed up"
     }
 
-    Write-Ok "Backup complete → $BackupDir"
+    Write-Ok "Backup complete -> $BackupDir"
     return $BackupDir
 }
 
-# ── Git pull ───────────────────────────────────────────────────────────────────
+# -- Git pull -------------------------------------------------------------------
 
 function Update-Git {
     param([string]$InstallDir)
@@ -114,11 +114,11 @@ function Update-Git {
     git reset --hard "origin/$Branch" 2>&1 | Out-Null
 
     $Commit = (git rev-parse --short HEAD).Trim()
-    Write-Ok "Code updated → commit $Commit (branch: $Branch)"
+    Write-Ok "Code updated -> commit $Commit (branch: $Branch)"
     return $Commit
 }
 
-# ── Update Python dependencies ─────────────────────────────────────────────────
+# -- Update Python dependencies -------------------------------------------------
 
 function Update-Dependencies {
     param([string]$InstallDir)
@@ -150,7 +150,7 @@ function Update-Dependencies {
     return $VenvPython
 }
 
-# ── Apply DB migrations (create new tables) ────────────────────────────────────
+# -- Apply DB migrations (create new tables) ------------------------------------
 
 function Apply-DbMigrations {
     param([string]$VenvPython, [string]$InstallDir)
@@ -178,7 +178,7 @@ print('  Database schema up-to-date.')
     Write-Ok "Database migrations complete"
 }
 
-# ── Clean up old backups (keep last 5) ────────────────────────────────────────
+# -- Clean up old backups (keep last 5) ----------------------------------------
 
 function Prune-Backups {
     param([string]$InstallDir)
@@ -197,14 +197,14 @@ function Prune-Backups {
     Write-Info "Old backups pruned (kept last 5 of $Count)"
 }
 
-# ── Summary ───────────────────────────────────────────────────────────────────
+# -- Summary -------------------------------------------------------------------
 
 function Print-Done {
     param([string]$InstallDir, [string]$BackupDir, [string]$Commit)
 
     Write-Host ""
     Write-Host "========================================" -ForegroundColor Green
-    Write-Host "     Centralized — Update Complete" -ForegroundColor Green
+    Write-Host "     Centralized - Update Complete" -ForegroundColor Green
     Write-Host "========================================" -ForegroundColor Green
     Write-Host ""
     Write-Host "  Install dir : $InstallDir"
@@ -218,11 +218,11 @@ function Print-Done {
     Write-Host ""
 }
 
-# ── Entry point ───────────────────────────────────────────────────────────────
+# -- Entry point ---------------------------------------------------------------
 
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Blue
-Write-Host "   Centralized — Update Script" -ForegroundColor Blue
+Write-Host "   Centralized - Update Script" -ForegroundColor Blue
 Write-Host "========================================" -ForegroundColor Blue
 Write-Host ""
 
