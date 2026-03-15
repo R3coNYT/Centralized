@@ -1,0 +1,36 @@
+# ── Python ────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+
+# ── Virtual environment ──────────────────────────────────
+venv/
+.venv/
+env/
+autorecon_env/
+
+# ── Local data (NEVER commit — preserved on update) ─────
+centralized.db
+centralized.db-shm
+centralized.db-wal
+uploads/
+backups/
+
+# ── Local config overrides ───────────────────────────────
+.env
+instance/
+
+# ── Logs ────────────────────────────────────────────────
+*.log
+logs/
+
+# ── OS ──────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── IDE ─────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp

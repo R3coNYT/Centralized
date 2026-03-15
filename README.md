@@ -118,6 +118,62 @@ python app.py
 
 ---
 
+## Updating
+
+Centralized ships with update scripts that pull the latest code from GitHub **without touching your existing data** (clients, audits, uploaded files, database).
+
+Before each update the scripts create a timestamped backup of:
+- `centralized.db` — all your clients, audits, hosts and vulnerabilities
+- `uploads/` — all uploaded scan files
+- `.env` — any local configuration overrides
+
+---
+
+### Update — Linux / macOS
+
+```bash
+cd /opt/centralized          # or ~/Tools/Centralized on macOS
+bash update.sh
+```
+
+Or run it from anywhere if the script is inside the install directory:
+
+```bash
+bash /opt/centralized/update.sh
+```
+
+---
+
+### Update — Windows
+
+```powershell
+cd C:\Tools\Centralized
+.\update.ps1
+```
+
+> If you get an execution policy error, run first:
+> ```powershell
+> Set-ExecutionPolicy Bypass -Scope Process -Force
+> ```
+
+---
+
+### What the update scripts do
+
+| Step | Action |
+|---|---|
+| 1 | Locate the install directory automatically |
+| 2 | Create a timestamped backup → `backups/YYYYMMDD_HHMMSS/` |
+| 3 | `git fetch` + `git reset --hard origin/main` — pulls latest code |
+| 4 | `pip install -r requirements.txt --upgrade` — updates dependencies |
+| 5 | `db.create_all()` — applies any new database tables |
+| 6 | Prune old backups (keeps last 5) |
+
+> **Your database and uploads are in `.gitignore`** — `git reset --hard` never touches them.  
+> The backup is a safety net in case anything goes wrong mid-update.
+
+---
+
 ### First login
 
 The app starts on **http://127.0.0.1:5000**
@@ -165,6 +221,8 @@ Edit `config.py` or set environment variables:
 Centralized/
 ├── Centralized.sh          # Installer — Linux & macOS
 ├── Centralized.ps1         # Installer — Windows
+├── update.sh               # Updater — Linux & macOS
+├── update.ps1              # Updater — Windows
 ├── app.py                  # Flask factory + startup
 ├── config.py               # Configuration
 ├── models/__init__.py      # SQLAlchemy models
