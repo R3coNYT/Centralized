@@ -102,18 +102,36 @@ function Update-Git {
         exit 1
     }
 
+    # Git writes informational messages to stderr; suppress NativeCommandError
+    # for all git calls and rely on $LASTEXITCODE instead.
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+
     # Stash any accidental local changes to tracked files
-    $StashResult = git stash 2>&1
-    if ($StashResult -notmatch "No local changes") {
+    $StashResult = (git stash --quiet 2>&1) -join " "
+    if ($StashResult -and $StashResult -notmatch "No local changes") {
         Write-Info "Local tracked-file changes stashed: $StashResult"
     }
 
     # Fetch + hard reset to match remote (safe because data files are in .gitignore)
-    git fetch origin 2>&1 | Out-Null
-    $Branch = (git rev-parse --abbrev-ref HEAD).Trim()
-    git reset --hard "origin/$Branch" 2>&1 | Out-Null
+    git fetch origin --quiet 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        $ErrorActionPreference = $prev
+        Write-Err "git fetch failed (exit $LASTEXITCODE). Check network / remote URL."
+        exit 1
+    }
 
-    $Commit = (git rev-parse --short HEAD).Trim()
+    $Branch = (git rev-parse --abbrev-ref HEAD 2>$null).Trim()
+    git reset --hard "origin/$Branch" --quiet 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        $ErrorActionPreference = $prev
+        Write-Err "git reset failed (exit $LASTEXITCODE)."
+        exit 1
+    }
+
+    $ErrorActionPreference = $prev
+
+    $Commit = (git rev-parse --short HEAD 2>$null).Trim()
     Write-Ok "Code updated -> commit $Commit (branch: $Branch)"
     return $Commit
 }
