@@ -110,3 +110,47 @@ def delete_user(uid):
     db.session.commit()
     flash(f"User '{user.username}' deleted.", "success")
     return redirect(url_for("auth.users_list"))
+
+
+@auth_bp.route("/users/<int:uid>/edit", methods=["POST"])
+@login_required
+def edit_user(uid):
+    if current_user.role != "admin":
+        flash("Access denied.", "danger")
+        return redirect(url_for("dashboard.index"))
+
+    user = User.query.get_or_404(uid)
+
+    username = request.form.get("username", "").strip()
+    email    = request.form.get("email", "").strip()
+    role     = request.form.get("role", "analyst")
+    password = request.form.get("password", "").strip()
+
+    if not username or not email:
+        flash("Username and email are required.", "danger")
+        return redirect(url_for("auth.users_list"))
+
+    # Check uniqueness (exclude current user)
+    dup_username = User.query.filter(User.username == username, User.id != uid).first()
+    if dup_username:
+        flash("Username already taken.", "danger")
+        return redirect(url_for("auth.users_list"))
+
+    dup_email = User.query.filter(User.email == email, User.id != uid).first()
+    if dup_email:
+        flash("Email already in use.", "danger")
+        return redirect(url_for("auth.users_list"))
+
+    user.username = username
+    user.email    = email
+    user.role     = role if role in ("admin", "analyst") else "analyst"
+
+    if password:
+        if len(password) < 8:
+            flash("New password must be at least 8 characters.", "danger")
+            return redirect(url_for("auth.users_list"))
+        user.password_hash = generate_password_hash(password)
+
+    db.session.commit()
+    flash(f"User '{user.username}' updated.", "success")
+    return redirect(url_for("auth.users_list"))
