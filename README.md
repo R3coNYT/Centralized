@@ -77,12 +77,6 @@ centralized
 ```powershell
 # Run from PowerShell (as a regular user, no admin required)
 Set-ExecutionPolicy Bypass -Scope Process -Force
-.\Centralized.ps1
-```
-
-Or download and run in one shot:
-```powershell
-Set-ExecutionPolicy Bypass -Scope Process -Force
 irm https://raw.githubusercontent.com/R3coNYT/Centralized/main/Centralized.ps1 | iex
 ```
 

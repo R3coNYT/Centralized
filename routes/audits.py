@@ -71,9 +71,19 @@ def detail(audit_id):
         .group_by(Vulnerability.severity)
         .all()
     )
-    sev_map = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0, "INFO": 0}
+    sev_map = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0, "INFO": 0, "UNKNOWN": 0}
     for sev, cnt in sev_data:
-        sev_map[(sev or "INFO").upper()] = cnt
+        key = (sev or "UNKNOWN").upper()
+        sev_map[key] = sev_map.get(key, 0) + cnt
+
+    # Host risk level distribution (AutoRecon risk score, independent of CVE severity)
+    risk_data = (
+        db.session.query(Host.risk_level, func.count(Host.id))
+        .filter(Host.audit_id == audit_id, Host.risk_level.isnot(None))
+        .group_by(Host.risk_level)
+        .all()
+    )
+    risk_map = {row[0].upper(): row[1] for row in risk_data if row[0]}
 
     # Port distribution
     port_svc = (
@@ -94,6 +104,7 @@ def detail(audit_id):
         audit=audit,
         hosts=hosts,
         sev_map=sev_map,
+        risk_map=risk_map,
         port_svc=port_svc,
         findings=findings,
         uploaded_files=uploaded_files,
