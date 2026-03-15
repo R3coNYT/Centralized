@@ -106,17 +106,34 @@ function initAuditCharts(sevMap, svcLabels, svcValues) {
 
   const sevCtx = document.getElementById('auditSevChart');
   if (sevCtx) {
-    new Chart(sevCtx, {
-      type: 'doughnut',
-      data: {
-        labels,
-        datasets: [{ data: values, backgroundColor: colors, borderWidth: 2, borderColor: '#1a1d23' }],
-      },
-      options: {
-        plugins: { legend: { position: 'right', labels: { color: '#adb5bd', font: { size: 11 }, padding: 10 } } },
-        cutout: '65%',
-      },
-    });
+    const total = values.reduce((a, b) => a + b, 0);
+    if (total === 0) {
+      // Empty state — replace canvas with a placeholder message
+      const wrap = document.getElementById('sevChartWrap');
+      if (wrap) {
+        wrap.innerHTML = `
+          <div class="text-center text-muted py-3">
+            <i class="bi bi-shield-check fs-1 d-block mb-2 opacity-25"></i>
+            <div class="fw-semibold">No vulnerability records</div>
+            <div class="small mt-1 opacity-75">
+              No CVE findings were detected in the uploaded files.<br>
+              The host <em>Risk</em> score is based on port exposure, not specific CVEs.
+            </div>
+          </div>`;
+      }
+    } else {
+      new Chart(sevCtx, {
+        type: 'doughnut',
+        data: {
+          labels,
+          datasets: [{ data: values, backgroundColor: colors, borderWidth: 2, borderColor: '#1a1d23' }],
+        },
+        options: {
+          plugins: { legend: { position: 'right', labels: { color: '#adb5bd', font: { size: 11 }, padding: 10 } } },
+          cutout: '65%',
+        },
+      });
+    }
   }
 
   const svcCtx = document.getElementById('auditSvcChart');

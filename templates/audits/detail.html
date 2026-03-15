@@ -72,6 +72,26 @@
             <span class="small text-muted">Low / Info</span>
             <span class="badge bg-secondary fs-6">{{ sev_map.get('LOW', 0) + sev_map.get('INFO', 0) }}</span>
           </div>
+          {% if sev_map.get('UNKNOWN', 0) > 0 %}
+          <div class="d-flex justify-content-between align-items-center">
+            <span class="small text-muted">Unknown</span>
+            <span class="badge bg-dark border fs-6">{{ sev_map.get('UNKNOWN', 0) }}</span>
+          </div>
+          {% endif %}
+          {% if risk_map %}
+          <hr class="my-2">
+          <div class="small text-muted mb-1 d-flex align-items-center gap-1">
+            Risk Exposure
+            <i class="bi bi-info-circle" data-bs-toggle="tooltip"
+               title="Host-level risk score from AutoRecon (port exposure, attack surface). Independent of CVE vulnerabilities."></i>
+          </div>
+          {% for level, cnt in risk_map.items() %}
+          <div class="d-flex justify-content-between align-items-center">
+            <span class="small text-muted">{{ level|title }}</span>
+            <span class="badge bg-secondary">{{ cnt }} host{{ 's' if cnt > 1 else '' }}</span>
+          </div>
+          {% endfor %}
+          {% endif %}
         </div>
       </div>
     </div>
@@ -82,8 +102,12 @@
 <div class="row g-3 mb-4">
   <div class="col-md-5">
     <div class="card h-100">
-      <div class="card-header fw-semibold"><i class="bi bi-pie-chart me-2"></i>Severity Distribution</div>
-      <div class="card-body d-flex align-items-center justify-content-center" style="min-height:220px">
+      <div class="card-header fw-semibold">
+        <i class="bi bi-pie-chart me-2"></i>Severity Distribution
+        <i class="bi bi-info-circle ms-1 text-muted" style="font-size:.8rem" data-bs-toggle="tooltip"
+           title="CVE vulnerability severity from Nuclei / Nmap scripts / Nikto. The host Risk score (POTENTIAL, etc.) is a separate exposure metric."></i>
+      </div>
+      <div class="card-body d-flex align-items-center justify-content-center" style="min-height:220px" id="sevChartWrap">
         <canvas id="auditSevChart" style="max-height:200px"></canvas>
       </div>
     </div>
