@@ -1,0 +1,9 @@
+{% if audit.status == 'in_progress' %}
+  <span class="badge bg-primary">In Progress</span>
+{% elif audit.status == 'completed' %}
+  <span class="badge bg-success">Completed</span>
+{% elif audit.status == 'archived' %}
+  <span class="badge bg-secondary">Archived</span>
+{% else %}
+  <span class="badge bg-secondary">{{ audit.status }}</span>
+{% endif %}

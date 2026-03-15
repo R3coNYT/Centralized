@@ -1,0 +1,298 @@
+{% extends "base.html" %}
+{% block title %}{{ audit.name }}{% endblock %}
+{% block page_title %}{{ audit.name }}{% endblock %}
+
+{% block topbar_actions %}
+<a href="{{ url_for('uploads.upload', audit_id=audit.id) }}" class="btn btn-sm btn-primary">
+  <i class="bi bi-upload me-1"></i>Upload Files
+</a>
+<a href="{{ url_for('audits.edit_audit', audit_id=audit.id) }}" class="btn btn-sm btn-outline-secondary">
+  <i class="bi bi-pencil me-1"></i>Edit
+</a>
+{% endblock %}
+
+{% block content %}
+
+<!-- Audit info -->
+<div class="row g-3 mb-4">
+  <div class="col-md-8">
+    <div class="card h-100">
+      <div class="card-body">
+        <div class="row g-3">
+          <div class="col-sm-6">
+            <div class="small text-muted mb-1">Target</div>
+            <code class="fs-6">{{ audit.target or '—' }}</code>
+          </div>
+          <div class="col-sm-6">
+            <div class="small text-muted mb-1">Client</div>
+            <div>{% if audit.client %}<a href="{{ url_for('clients.detail', client_id=audit.client_id) }}">{{ audit.client.name }}</a>{% else %}—{% endif %}</div>
+          </div>
+          <div class="col-sm-6">
+            <div class="small text-muted mb-1">Status</div>
+            {% include '_partials/status_badge.html' %}
+          </div>
+          <div class="col-sm-6">
+            <div class="small text-muted mb-1">Period</div>
+            <div class="small">
+              {{ audit.start_date.strftime('%Y-%m-%d') if audit.start_date else '?' }}
+              → {{ audit.end_date.strftime('%Y-%m-%d') if audit.end_date else 'ongoing' }}
+            </div>
+          </div>
+          {% if audit.scope %}
+          <div class="col-12">
+            <div class="small text-muted mb-1">Scope</div>
+            <div class="small text-wrap">{{ audit.scope }}</div>
+          </div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="card h-100">
+      <div class="card-body">
+        <div class="d-flex flex-column gap-2">
+          <div class="d-flex justify-content-between align-items-center">
+            <span class="small text-muted">Hosts</span>
+            <span class="badge bg-info text-dark fs-6">{{ hosts|length }}</span>
+          </div>
+          <div class="d-flex justify-content-between align-items-center">
+            <span class="small text-muted">Critical</span>
+            <span class="badge sev-critical fs-6">{{ sev_map.get('CRITICAL', 0) }}</span>
+          </div>
+          <div class="d-flex justify-content-between align-items-center">
+            <span class="small text-muted">High</span>
+            <span class="badge sev-high fs-6">{{ sev_map.get('HIGH', 0) }}</span>
+          </div>
+          <div class="d-flex justify-content-between align-items-center">
+            <span class="small text-muted">Medium</span>
+            <span class="badge sev-medium fs-6">{{ sev_map.get('MEDIUM', 0) }}</span>
+          </div>
+          <div class="d-flex justify-content-between align-items-center">
+            <span class="small text-muted">Low / Info</span>
+            <span class="badge bg-secondary fs-6">{{ sev_map.get('LOW', 0) + sev_map.get('INFO', 0) }}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Charts -->
+<div class="row g-3 mb-4">
+  <div class="col-md-5">
+    <div class="card h-100">
+      <div class="card-header fw-semibold"><i class="bi bi-pie-chart me-2"></i>Severity Distribution</div>
+      <div class="card-body d-flex align-items-center justify-content-center" style="min-height:220px">
+        <canvas id="auditSevChart" style="max-height:200px"></canvas>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-7">
+    <div class="card h-100">
+      <div class="card-header fw-semibold"><i class="bi bi-bar-chart me-2"></i>Services Found</div>
+      <div class="card-body" style="min-height:220px">
+        <canvas id="auditSvcChart" style="max-height:200px"></canvas>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Hosts table -->
+<div class="card mb-4">
+  <div class="card-header fw-semibold"><i class="bi bi-hdd-network me-2"></i>Hosts ({{ hosts|length }})</div>
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table table-hover align-middle mb-0">
+        <thead class="table-header">
+          <tr><th>IP</th><th>Hostname</th><th>OS</th><th>Risk</th><th>CMS/WAF</th><th class="text-center">Ports</th><th class="text-center">Vulns</th><th></th></tr>
+        </thead>
+        <tbody>
+        {% for host in hosts %}
+        {% set h_vulns = host.vulnerabilities.count() %}
+        <tr>
+          <td class="fw-semibold font-monospace">
+            <a href="{{ url_for('hosts.detail', host_id=host.id) }}" class="text-decoration-none">{{ host.ip }}</a>
+          </td>
+          <td class="text-muted small">{{ host.hostname or '—' }}</td>
+          <td class="text-muted small">{{ host.os_info or '—' }}</td>
+          <td>
+            {% if host.risk_level %}
+              {% set severity = host.risk_level %}{% include '_partials/sev_badge.html' %}
+              {% if host.risk_score %}<small class="text-muted ms-1">{{ host.risk_score|round(1) }}</small>{% endif %}
+            {% else %}—{% endif %}
+          </td>
+          <td class="small text-muted">
+            {% if host.cms %}<span class="badge bg-secondary me-1">{{ host.cms }}</span>{% endif %}
+            {% if host.waf %}<span class="badge bg-warning text-dark">WAF: {{ host.waf }}</span>{% endif %}
+          </td>
+          <td class="text-center"><span class="badge bg-info text-dark">{{ host.ports.count() }}</span></td>
+          <td class="text-center">
+            {% if h_vulns > 0 %}<span class="badge {% if h_vulns > 5 %}sev-high{% else %}bg-warning text-dark{% endif %}">{{ h_vulns }}</span>
+            {% else %}<span class="text-muted">0</span>{% endif %}
+          </td>
+          <td><a href="{{ url_for('hosts.detail', host_id=host.id) }}" class="btn btn-sm btn-outline-secondary"><i class="bi bi-eye"></i></a></td>
+        </tr>
+        {% else %}
+        <tr><td colspan="8" class="text-center text-muted py-4">No hosts yet. Upload scan files to populate.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Findings -->
+<div class="card mb-4">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span class="fw-semibold"><i class="bi bi-card-checklist me-2"></i>Analyst Findings ({{ findings|length }})</span>
+    <button class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#addFindingModal">
+      <i class="bi bi-plus-lg me-1"></i>Add Finding
+    </button>
+  </div>
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table table-hover align-middle mb-0">
+        <thead class="table-header"><tr><th>Title</th><th>Host</th><th>Severity</th><th>Status</th><th>Date</th><th></th></tr></thead>
+        <tbody>
+        {% for f in findings %}
+        <tr>
+          <td class="fw-semibold small">{{ f.title }}</td>
+          <td class="text-muted small">{{ f.host.ip if f.host else '—' }}</td>
+          <td>{% set severity = f.severity %}{% include '_partials/sev_badge.html' %}</td>
+          <td><span class="badge bg-secondary">{{ f.status }}</span></td>
+          <td class="text-muted small">{{ f.created_at.strftime('%Y-%m-%d') }}</td>
+          <td>
+            <form method="POST" action="{{ url_for('audits.delete_finding', audit_id=audit.id, finding_id=f.id) }}"
+                  onsubmit="return confirm('Delete this finding?')">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+              <button class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
+            </form>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" class="text-center text-muted py-4">No manual findings yet.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Uploaded Files -->
+<div class="card">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span class="fw-semibold"><i class="bi bi-file-earmark-arrow-up me-2"></i>Uploaded Files ({{ uploaded_files|length }})</span>
+    <a href="{{ url_for('uploads.upload', audit_id=audit.id) }}" class="btn btn-sm btn-outline-primary">
+      <i class="bi bi-upload me-1"></i>Upload More
+    </a>
+  </div>
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table table-hover align-middle mb-0">
+        <thead class="table-header"><tr><th>Filename</th><th>Type</th><th>Size</th><th>Parsed</th><th>Date</th><th></th></tr></thead>
+        <tbody>
+        {% for uf in uploaded_files %}
+        <tr>
+          <td class="small">{{ uf.original_filename }}</td>
+          <td><span class="badge bg-secondary font-monospace">{{ uf.file_type }}</span></td>
+          <td class="text-muted small">{{ (uf.file_size / 1024)|round(1) }} KB</td>
+          <td>
+            {% if uf.parsed %}<span class="badge bg-success"><i class="bi bi-check2"></i> OK</span>
+            {% elif uf.parse_error %}<span class="badge bg-danger" title="{{ uf.parse_error }}">Error</span>
+            {% else %}<span class="badge bg-secondary">Pending</span>{% endif %}
+          </td>
+          <td class="text-muted small">{{ uf.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+          <td>
+            <form method="POST" action="{{ url_for('uploads.delete_file', audit_id=audit.id, file_id=uf.id) }}"
+                  onsubmit="return confirm('Delete this file?')">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+              <button class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
+            </form>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" class="text-center text-muted py-4">No files uploaded yet.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Add Finding Modal -->
+<div class="modal fade" id="addFindingModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <form method="POST" action="{{ url_for('audits.add_finding', audit_id=audit.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+        <div class="modal-header">
+          <h5 class="modal-title"><i class="bi bi-plus-circle me-2"></i>Add Finding</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="mb-3">
+            <label class="form-label fw-semibold" for="f_title">Title <span class="text-danger">*</span></label>
+            <input type="text" class="form-control" id="f_title" name="title" required/>
+          </div>
+          <div class="row mb-3">
+            <div class="col-md-6">
+              <label class="form-label fw-semibold">Host</label>
+              <select class="form-select" name="host_id">
+                <option value="">— Global finding —</option>
+                {% for h in hosts %}<option value="{{ h.id }}">{{ h.ip }}{% if h.hostname %} ({{ h.hostname }}){% endif %}</option>{% endfor %}
+              </select>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label fw-semibold">Severity</label>
+              <select class="form-select" name="severity">
+                <option value="CRITICAL">Critical</option>
+                <option value="HIGH">High</option>
+                <option value="MEDIUM" selected>Medium</option>
+                <option value="LOW">Low</option>
+                <option value="INFO">Info</option>
+              </select>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label fw-semibold">Status</label>
+              <select class="form-select" name="status">
+                <option value="open" selected>Open</option>
+                <option value="confirmed">Confirmed</option>
+                <option value="mitigated">Mitigated</option>
+                <option value="false_positive">False Positive</option>
+              </select>
+            </div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Description</label>
+            <textarea class="form-control" name="description" rows="3"></textarea>
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Evidence / PoC</label>
+            <textarea class="form-control font-monospace" name="evidence" rows="2"></textarea>
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Recommendation</label>
+            <textarea class="form-control" name="recommendation" rows="2"></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-primary"><i class="bi bi-check2 me-1"></i>Save Finding</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+{% include '_partials/cve_modal.html' %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+const sevMap = {{ sev_map | tojson }};
+const svcLabels = [{% for svc, cnt in port_svc %}'{{ svc }}',{% endfor %}];
+const svcValues = [{% for svc, cnt in port_svc %}{{ cnt }},{% endfor %}];
+initAuditCharts(sevMap, svcLabels, svcValues);
+</script>
+{% endblock %}

@@ -1,0 +1,182 @@
+{% extends "base.html" %}
+{% block title %}{{ host.ip }}{% endblock %}
+{% block page_title %}Host: {{ host.ip }}{% endblock %}
+
+{% block topbar_actions %}
+<a href="{{ url_for('audits.detail', audit_id=host.audit_id) }}" class="btn btn-sm btn-outline-secondary">
+  <i class="bi bi-arrow-left me-1"></i>Back to Audit
+</a>
+{% endblock %}
+
+{% block content %}
+
+<!-- Host Summary -->
+<div class="row g-3 mb-4">
+  <div class="col-md-6">
+    <div class="card h-100">
+      <div class="card-header fw-semibold"><i class="bi bi-hdd me-2"></i>Host Information</div>
+      <div class="card-body">
+        <table class="table table-borderless mb-0 small">
+          <tr><td class="text-muted w-40">IP Address</td><td class="fw-semibold font-monospace">{{ host.ip }}</td></tr>
+          <tr><td class="text-muted">Hostname</td><td>{{ host.hostname or '—' }}</td></tr>
+          <tr><td class="text-muted">OS</td><td>{{ host.os_info or '—' }}</td></tr>
+          <tr><td class="text-muted">MAC</td><td class="font-monospace">{{ host.mac_address or '—' }}{% if host.mac_vendor %} <span class="text-muted">({{ host.mac_vendor }})</span>{% endif %}</td></tr>
+          <tr><td class="text-muted">CMS</td><td>{{ host.cms or '—' }}</td></tr>
+          <tr><td class="text-muted">WAF</td><td>{% if host.waf %}<span class="badge bg-warning text-dark">{{ host.waf }}</span>{% else %}—{% endif %}</td></tr>
+          <tr><td class="text-muted">Risk Score</td><td>
+            {% if host.risk_level %}
+              {% set severity = host.risk_level %}{% include '_partials/sev_badge.html' %}
+              {% if host.risk_score %}<span class="text-muted ms-1">{{ host.risk_score|round(1) }}</span>{% endif %}
+            {% else %}—{% endif %}
+          </td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-6">
+    <div class="card h-100">
+      <div class="card-header fw-semibold"><i class="bi bi-pie-chart me-2"></i>Vulnerabilities</div>
+      <div class="card-body d-flex align-items-center justify-content-center" style="min-height:200px">
+        {% set crit = vulns|selectattr('severity','equalto','CRITICAL')|list|length %}
+        {% set high = vulns|selectattr('severity','equalto','HIGH')|list|length %}
+        {% set med = vulns|selectattr('severity','equalto','MEDIUM')|list|length %}
+        {% set low = vulns|selectattr('severity','equalto','LOW')|list|length %}
+        {% set info = vulns|selectattr('severity','equalto','INFO')|list|length %}
+        {% if vulns %}
+        <canvas id="hostSevChart" style="max-height:180px"></canvas>
+        {% else %}
+        <div class="text-muted text-center"><i class="bi bi-check-circle fs-1 text-success d-block mb-2"></i>No vulnerabilities found.</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Open Ports -->
+<div class="card mb-4">
+  <div class="card-header fw-semibold"><i class="bi bi-ethernet me-2"></i>Open Ports ({{ ports|length }})</div>
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table table-hover align-middle mb-0">
+        <thead class="table-header">
+          <tr><th>Port</th><th>Protocol</th><th>Service</th><th>Product</th><th>Version</th><th>CPE</th></tr>
+        </thead>
+        <tbody>
+        {% for p in ports %}
+        <tr>
+          <td class="fw-bold font-monospace">{{ p.port }}</td>
+          <td><span class="badge bg-secondary">{{ p.protocol }}</span></td>
+          <td>{{ p.service or '—' }}</td>
+          <td>{{ p.product or '—' }}</td>
+          <td class="font-monospace small text-muted">{{ p.version or '—' }}</td>
+          <td class="small text-muted">
+            {% if p.cpe %}<code>{{ p.cpe }}</code>{% else %}—{% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" class="text-center text-muted py-4">No open ports.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- HTTP Pages -->
+{% if pages %}
+<div class="card mb-4">
+  <div class="card-header fw-semibold"><i class="bi bi-globe me-2"></i>HTTP Pages ({{ pages|length }})</div>
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table table-hover align-middle mb-0">
+        <thead class="table-header"><tr><th>URL</th><th>Status</th><th>Title</th><th>Content-Type</th><th>Tech</th></tr></thead>
+        <tbody>
+        {% for page in pages %}
+        <tr>
+          <td class="small"><a href="{{ page.url }}" target="_blank" rel="noopener noreferrer" class="text-break">{{ page.url }}</a></td>
+          <td>
+            {% if page.status_code %}
+              <span class="badge {% if page.status_code < 300 %}bg-success{% elif page.status_code < 400 %}bg-info text-dark{% elif page.status_code < 500 %}bg-warning text-dark{% else %}bg-danger{% endif %}">
+                {{ page.status_code }}
+              </span>
+            {% else %}—{% endif %}
+          </td>
+          <td class="small">{{ page.title or '—' }}</td>
+          <td class="small text-muted">{{ page.content_type or '—' }}</td>
+          <td class="small text-muted">{{ page.technology or '—' }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<!-- Vulnerabilities -->
+<div class="card">
+  <div class="card-header fw-semibold"><i class="bi bi-shield-exclamation me-2"></i>Vulnerabilities ({{ vulns|length }})</div>
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table table-hover align-middle mb-0">
+        <thead class="table-header">
+          <tr><th>CVE / Title</th><th>Severity</th><th>CVSS</th><th>Source</th><th>Description</th><th></th></tr>
+        </thead>
+        <tbody>
+        {% for v in vulns %}
+        <tr>
+          <td class="fw-semibold small">
+            {% if v.cve_id %}
+              <a href="#" class="text-decoration-none" onclick="lookupCve('{{ v.cve_id }}');return false;">{{ v.cve_id }}</a>
+            {% else %}
+              {{ v.title[:60] }}
+            {% endif %}
+          </td>
+          <td>{% set severity = v.severity %}{% include '_partials/sev_badge.html' %}</td>
+          <td class="small">
+            {% if v.cvss_score %}<span class="fw-bold {% if v.cvss_score >= 9 %}text-danger{% elif v.cvss_score >= 7 %}text-warning{% else %}text-info{% endif %}">{{ v.cvss_score }}</span>{% else %}—{% endif %}
+          </td>
+          <td><span class="badge bg-secondary small">{{ v.source }}</span></td>
+          <td class="small text-muted" style="max-width:300px">{{ (v.description or '')[:120] }}{% if v.description and v.description|length > 120 %}…{% endif %}</td>
+          <td>
+            {% if v.cve_id %}
+            <button class="btn btn-sm btn-outline-secondary" onclick="lookupCve('{{ v.cve_id }}')">
+              <i class="bi bi-info-circle"></i>
+            </button>
+            {% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" class="text-center text-muted py-4">No vulnerabilities for this host.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+{% include '_partials/cve_modal.html' %}
+{% endblock %}
+
+{% block scripts %}
+{% if vulns %}
+<script>
+const hostSevData = {
+  labels: ['Critical','High','Medium','Low','Info'],
+  values: [
+    {{ vulns|selectattr('severity','equalto','CRITICAL')|list|length }},
+    {{ vulns|selectattr('severity','equalto','HIGH')|list|length }},
+    {{ vulns|selectattr('severity','equalto','MEDIUM')|list|length }},
+    {{ vulns|selectattr('severity','equalto','LOW')|list|length }},
+    {{ vulns|selectattr('severity','equalto','INFO')|list|length }}
+  ],
+  colors: ['#dc3545','#fd7e14','#ffc107','#0dcaf0','#6c757d']
+};
+new Chart(document.getElementById('hostSevChart'), {
+  type: 'doughnut',
+  data: { labels: hostSevData.labels, datasets: [{ data: hostSevData.values, backgroundColor: hostSevData.colors, borderWidth: 2 }] },
+  options: { plugins: { legend: { position: 'right', labels: { color: '#adb5bd', font: { size: 12 } } } }, cutout: '65%' }
+});
+</script>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,265 @@
+import os
+import uuid
+from flask import Blueprint, render_template, redirect, url_for, flash, request, current_app
+from flask_login import login_required, current_user
+from werkzeug.utils import secure_filename
+from models import Audit, Host, Port, Vulnerability, HttpPage, UploadedFile
+from extensions import db
+from parsers import detect_file_type, parse_file
+
+uploads_bp = Blueprint("uploads", __name__, url_prefix="/uploads")
+
+ALLOWED_EXTENSIONS = {"xml", "json", "pdf"}
+
+
+def _allowed_file(filename: str) -> bool:
+    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+@uploads_bp.route("/<int:audit_id>", methods=["GET", "POST"])
+@login_required
+def upload(audit_id):
+    audit = Audit.query.get_or_404(audit_id)
+
+    if request.method == "POST":
+        files = request.files.getlist("files")
+        if not files or all(f.filename == "" for f in files):
+            flash("No files selected.", "warning")
+            return redirect(request.url)
+
+        enrich_nvd = bool(request.form.get("enrich_nvd"))
+        saved_count = 0
+        errors = []
+
+        for file in files:
+            if file.filename == "":
+                continue
+            if not _allowed_file(file.filename):
+                errors.append(f"{file.filename}: unsupported extension (only xml, json, pdf).")
+                continue
+
+            original_name = secure_filename(file.filename)
+            stored_name = f"{uuid.uuid4().hex}_{original_name}"
+            save_path = os.path.join(current_app.config["UPLOAD_FOLDER"], stored_name)
+            file.save(save_path)
+            file_size = os.path.getsize(save_path)
+
+            # Detect type
+            file_type = detect_file_type(save_path, original_name)
+
+            uploaded = UploadedFile(
+                audit_id=audit_id,
+                original_filename=original_name,
+                stored_filename=stored_name,
+                file_type=file_type,
+                file_size=file_size,
+                parsed=False,
+            )
+            db.session.add(uploaded)
+            db.session.flush()  # get ID before parse
+
+            # Parse
+            result = parse_file(save_path, file_type, audit_id, db.session)
+            if result.get("error"):
+                uploaded.parse_error = result["error"]
+                errors.append(f"{original_name}: {result['error']}")
+            else:
+                try:
+                    _persist_parsed_data(audit_id, result["hosts"], enrich_nvd)
+                    uploaded.parsed = True
+                    saved_count += 1
+                except Exception as exc:
+                    db.session.rollback()
+                    uploaded.parse_error = str(exc)
+                    errors.append(f"{original_name}: DB error – {exc}")
+
+            db.session.commit()
+
+        if saved_count:
+            flash(f"{saved_count} file(s) uploaded and parsed successfully.", "success")
+        for err in errors:
+            flash(err, "danger")
+
+        return redirect(url_for("audits.detail", audit_id=audit_id))
+
+    uploaded_files = audit.uploaded_files.order_by("created_at").all()
+    return render_template("uploads/index.html", audit=audit, uploaded_files=uploaded_files)
+
+
+@uploads_bp.route("/<int:audit_id>/delete/<int:file_id>", methods=["POST"])
+@login_required
+def delete_file(audit_id, file_id):
+    uf = UploadedFile.query.get_or_404(file_id)
+    # Remove from disk
+    path = os.path.join(current_app.config["UPLOAD_FOLDER"], uf.stored_filename)
+    if os.path.exists(path):
+        os.remove(path)
+    db.session.delete(uf)
+    db.session.commit()
+    flash("File deleted.", "success")
+    return redirect(url_for("audits.detail", audit_id=audit_id))
+
+
+# ---------------------------------------------------------------------------
+# Internal: persist parsed data into DB
+# ---------------------------------------------------------------------------
+
+def _persist_parsed_data(audit_id: int, parsed_hosts: list, enrich_nvd: bool):
+    """Merge parsed host data into the database for the given audit."""
+    for host_data in parsed_hosts:
+        ip = str(host_data.get("ip", "")).strip()
+        if not ip:
+            continue
+
+        # Find or create host
+        host = Host.query.filter_by(audit_id=audit_id, ip=ip).first()
+        if not host:
+            host = Host(audit_id=audit_id, ip=ip)
+            db.session.add(host)
+            db.session.flush()
+
+        # Update host fields if new data is available
+        if host_data.get("hostname") and not host.hostname:
+            host.hostname = host_data["hostname"]
+        if host_data.get("os_info"):
+            host.os_info = host_data["os_info"]
+        if host_data.get("mac_address"):
+            host.mac_address = host_data["mac_address"]
+        if host_data.get("mac_vendor"):
+            host.mac_vendor = host_data["mac_vendor"]
+        if host_data.get("risk_score") is not None:
+            host.risk_score = host_data["risk_score"]
+        if host_data.get("risk_level"):
+            host.risk_level = host_data["risk_level"]
+        if host_data.get("cms"):
+            host.cms = host_data["cms"]
+        if host_data.get("waf"):
+            host.waf = host_data["waf"]
+
+        db.session.flush()
+
+        # Ports
+        existing_ports = {(p.port, p.protocol): p for p in host.ports}
+        for pdata in host_data.get("ports", []):
+            key = (pdata.get("port"), pdata.get("protocol", "tcp"))
+            if key[0] is None:
+                continue
+            if key not in existing_ports:
+                port_obj = Port(
+                    host_id=host.id,
+                    port=key[0],
+                    protocol=key[1],
+                    service=pdata.get("service"),
+                    product=pdata.get("product"),
+                    version=pdata.get("version"),
+                    extra_info=pdata.get("extra_info"),
+                    state=pdata.get("state", "open"),
+                    cpe=pdata.get("cpe"),
+                )
+                db.session.add(port_obj)
+                db.session.flush()
+                existing_ports[key] = port_obj
+
+                # NVD enrichment for this port
+                if enrich_nvd and pdata.get("product"):
+                    _nvd_enrich_port(host.id, port_obj.id, pdata.get("product"), pdata.get("version"))
+
+        db.session.flush()
+
+        # HTTP pages
+        for page in host_data.get("http_pages", []):
+            if not page.get("url"):
+                continue
+            existing_page = HttpPage.query.filter_by(host_id=host.id, url=page["url"]).first()
+            if not existing_page:
+                db.session.add(HttpPage(
+                    host_id=host.id,
+                    url=page["url"],
+                    status_code=page.get("status_code"),
+                    title=page.get("title"),
+                    content_type=page.get("content_type"),
+                    content_length=page.get("content_length"),
+                    technology=page.get("technology"),
+                    redirect_location=page.get("redirect_location"),
+                ))
+
+        # Vulnerabilities
+        for vdata in host_data.get("vulnerabilities", []):
+            # Deduplicate: same CVE+host or same title+host
+            cve_id = vdata.get("cve_id")
+            title = vdata.get("title", "")
+            dup = None
+            if cve_id:
+                dup = Vulnerability.query.filter_by(host_id=host.id, cve_id=cve_id).first()
+            if not dup and title:
+                dup = Vulnerability.query.filter_by(host_id=host.id, title=title).first()
+            if dup:
+                continue
+
+            vuln = Vulnerability(
+                host_id=host.id,
+                cve_id=cve_id,
+                title=title or cve_id or "Unknown",
+                severity=(vdata.get("severity") or "UNKNOWN").upper(),
+                cvss_score=vdata.get("cvss_score"),
+                cvss_vector=vdata.get("cvss_vector"),
+                description=vdata.get("description"),
+                references=vdata.get("references"),
+                source=vdata.get("source", "unknown"),
+                template_id=vdata.get("template_id"),
+                evidence=vdata.get("evidence"),
+            )
+            db.session.add(vuln)
+
+            # If we have a CVE ID and want NVD enrichment, enrich severity/desc
+            if enrich_nvd and cve_id and vuln.severity in ("UNKNOWN", None):
+                _nvd_enrich_vuln(vuln, cve_id)
+
+        db.session.flush()
+
+
+def _nvd_enrich_port(host_id: int, port_id: int, product: str, version: str | None):
+    """Search NVD for CVEs related to a port's product/version."""
+    from services.cve_service import enrich_vulnerabilities
+    try:
+        cves = enrich_vulnerabilities(product, version)
+        for cve_data in cves:
+            cve_id = cve_data.get("cve_id")
+            if not cve_id:
+                continue
+            exists = Vulnerability.query.filter_by(host_id=host_id, cve_id=cve_id).first()
+            if not exists:
+                db.session.add(Vulnerability(
+                    host_id=host_id,
+                    port_id=port_id,
+                    cve_id=cve_id,
+                    title=cve_id,
+                    severity=cve_data.get("severity", "UNKNOWN"),
+                    cvss_score=cve_data.get("cvss_score"),
+                    cvss_vector=cve_data.get("cvss_vector"),
+                    description=cve_data.get("description"),
+                    references=cve_data.get("references"),
+                    source="nvd",
+                ))
+    except Exception:
+        pass  # NVD lookup is best-effort
+
+
+def _nvd_enrich_vuln(vuln, cve_id: str):
+    """Fetch full CVE details from NVD and update the vulnerability object."""
+    from services.cve_service import lookup_cve
+    try:
+        data = lookup_cve(cve_id)
+        if data:
+            if data.get("severity") and data["severity"] != "UNKNOWN":
+                vuln.severity = data["severity"]
+            if data.get("cvss_score"):
+                vuln.cvss_score = data["cvss_score"]
+            if data.get("cvss_vector"):
+                vuln.cvss_vector = data["cvss_vector"]
+            if data.get("description") and not vuln.description:
+                vuln.description = data["description"]
+            if data.get("references"):
+                vuln.references = data["references"]
+    except Exception:
+        pass
