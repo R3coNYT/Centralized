@@ -41,8 +41,8 @@
       </a>
     </li>
     <li>
-      <a href="{{ url_for('api.cve_search') }}?q=CVE"
-         class="nav-link" id="cve-nav-link">
+      <a href="{{ url_for('cve.search_page') }}"
+         class="nav-link {% if request.blueprint == 'cve' %}active{% endif %}">
         <i class="bi bi-bug me-2"></i>CVE Search
       </a>
     </li>
