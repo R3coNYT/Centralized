@@ -18,7 +18,7 @@
           <div class="drop-zone mb-3" id="dropZone">
             <i class="bi bi-cloud-upload fs-1 text-muted mb-2 d-block"></i>
             <p class="mb-1 fw-semibold">Drag & drop files here</p>
-            <p class="text-muted small mb-3">or click to browse</p>
+            <p class="text-muted small mb-3">or click to browse — <strong>you can add files in multiple batches</strong></p>
             <input type="file" id="fileInput" name="files" multiple
                    accept=".xml,.json,.pdf" class="d-none"/>
             <button type="button" class="btn btn-outline-primary btn-sm" onclick="document.getElementById('fileInput').click()">
@@ -27,7 +27,27 @@
           </div>
 
           <!-- File list preview -->
-          <div id="fileList" class="mb-3"></div>
+          <div id="fileList" class="mb-2"></div>
+
+          <!-- File counter + clear -->
+          <div id="fileBar" class="d-none d-flex justify-content-between align-items-center mb-3">
+            <span id="fileCount" class="small text-muted"></span>
+            <button type="button" class="btn btn-outline-secondary btn-sm" id="clearBtn">
+              <i class="bi bi-x-circle me-1"></i>Clear all
+            </button>
+          </div>
+
+          <!-- Upload progress (hidden until submit) -->
+          <div id="progressWrap" class="mb-3 d-none">
+            <div class="d-flex justify-content-between small mb-1">
+              <span>Uploading…</span>
+              <span id="progressPct">0%</span>
+            </div>
+            <div class="progress" style="height:8px">
+              <div id="progressBar" class="progress-bar progress-bar-striped progress-bar-animated"
+                   role="progressbar" style="width:0%"></div>
+            </div>
+          </div>
 
           <!-- Supported formats info -->
           <div class="card bg-body-secondary mb-3">
@@ -116,40 +136,195 @@
 
 {% block scripts %}
 <script>
-const dropZone = document.getElementById('dropZone');
-const fileInput = document.getElementById('fileInput');
-const fileList = document.getElementById('fileList');
-const uploadBtn = document.getElementById('uploadBtn');
+// ── State ──────────────────────────────────────────────────────────────────────
+let fileMap = new Map(); // name → File  (deduplication by filename)
 
-function updateFileList(files) {
-  fileList.innerHTML = '';
-  if (!files.length) { uploadBtn.disabled = true; return; }
-  const ul = document.createElement('ul');
-  ul.className = 'list-group list-group-flush';
-  Array.from(files).forEach(f => {
-    const li = document.createElement('li');
-    li.className = 'list-group-item list-group-item-action d-flex justify-content-between align-items-center py-2';
-    li.innerHTML = `<span class="small"><i class="bi bi-file-earmark me-2 text-muted"></i>${f.name}</span><span class="badge bg-secondary">${(f.size/1024).toFixed(1)} KB</span>`;
-    ul.appendChild(li);
-  });
-  fileList.appendChild(ul);
-  uploadBtn.disabled = false;
+const dropZone   = document.getElementById('dropZone');
+const fileInput  = document.getElementById('fileInput');
+const fileList   = document.getElementById('fileList');
+const fileBar    = document.getElementById('fileBar');
+const fileCount  = document.getElementById('fileCount');
+const clearBtn   = document.getElementById('clearBtn');
+const uploadBtn  = document.getElementById('uploadBtn');
+const uploadForm = document.getElementById('uploadForm');
+const progressWrap = document.getElementById('progressWrap');
+const progressBar  = document.getElementById('progressBar');
+const progressPct  = document.getElementById('progressPct');
+
+const ALLOWED = new Set(['xml', 'json', 'pdf']);
+
+function ext(name) {
+  return name.split('.').pop().toLowerCase();
 }
 
-fileInput.addEventListener('change', function() { updateFileList(this.files); });
+// ── Merge new files into the map ───────────────────────────────────────────────
+function addFiles(newFiles) {
+  let rejected = 0;
+  Array.from(newFiles).forEach(f => {
+    if (!ALLOWED.has(ext(f.name))) { rejected++; return; }
+    fileMap.set(f.name, f); // overwrite same name → keeps latest
+  });
+  if (rejected) {
+    showToast(`${rejected} file(s) skipped — only .xml, .json and .pdf are accepted.`, 'warning');
+  }
+  renderList();
+  syncInput();
+}
 
-dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drop-zone-active'); });
+// ── Render the file preview list ───────────────────────────────────────────────
+function renderList() {
+  fileList.innerHTML = '';
+  fileBar.classList.toggle('d-none', fileMap.size === 0);
+  uploadBtn.disabled = fileMap.size === 0;
+
+  if (!fileMap.size) { return; }
+
+  let totalBytes = 0;
+  const ul = document.createElement('ul');
+  ul.className = 'list-group list-group-flush mb-1';
+
+  fileMap.forEach((f, name) => {
+    totalBytes += f.size;
+    const li = document.createElement('li');
+    li.className = 'list-group-item list-group-item-action d-flex justify-content-between align-items-center py-2';
+
+    const icon = iconForExt(ext(name));
+    li.innerHTML = `
+      <span class="small d-flex align-items-center gap-2">
+        <i class="bi ${icon} text-muted"></i>
+        <span>${escHtml(name)}</span>
+        <span class="badge bg-secondary font-monospace">${formatSize(f.size)}</span>
+      </span>
+      <button type="button" class="btn btn-link btn-sm p-0 text-danger remove-btn"
+              data-name="${escHtml(name)}" title="Remove">
+        <i class="bi bi-x-circle"></i>
+      </button>`;
+    ul.appendChild(li);
+  });
+
+  fileList.appendChild(ul);
+
+  fileCount.textContent = `${fileMap.size} file${fileMap.size > 1 ? 's' : ''} — ${formatSize(totalBytes)} total`;
+
+  // Attach remove buttons
+  ul.querySelectorAll('.remove-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      fileMap.delete(btn.dataset.name);
+      renderList();
+      syncInput();
+    });
+  });
+}
+
+// ── Write fileMap back into the <input> so it submits ────────────────────────
+function syncInput() {
+  const dt = new DataTransfer();
+  fileMap.forEach(f => dt.items.add(f));
+  fileInput.files = dt.files;
+}
+
+// ── Helpers ────────────────────────────────────────────────────────────────────
+function iconForExt(e) {
+  return e === 'pdf' ? 'bi-file-earmark-pdf' :
+         e === 'xml' ? 'bi-file-earmark-code' :
+         'bi-file-earmark-text';
+}
+
+function formatSize(bytes) {
+  return bytes < 1024 ? bytes + ' B' :
+         bytes < 1048576 ? (bytes / 1024).toFixed(1) + ' KB' :
+         (bytes / 1048576).toFixed(1) + ' MB';
+}
+
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function showToast(msg, type) {
+  const container = document.getElementById('toastContainer') || (() => {
+    const d = document.createElement('div');
+    d.id = 'toastContainer';
+    d.style.cssText = 'position:fixed;top:1rem;right:1rem;z-index:9999';
+    document.body.appendChild(d);
+    return d;
+  })();
+  const t = document.createElement('div');
+  t.className = `toast align-items-center text-bg-${type === 'warning' ? 'warning' : 'danger'} border-0 show`;
+  t.setAttribute('role', 'alert');
+  t.innerHTML = `<div class="d-flex"><div class="toast-body small">${escHtml(msg)}</div>
+    <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button></div>`;
+  container.appendChild(t);
+  setTimeout(() => t.remove(), 5000);
+}
+
+// ── Events ─────────────────────────────────────────────────────────────────────
+fileInput.addEventListener('change', function() {
+  if (this.files.length) addFiles(this.files);
+  this.value = ''; // reset so same file can be re-added after remove
+});
+
+clearBtn.addEventListener('click', () => {
+  fileMap.clear();
+  renderList();
+  syncInput();
+});
+
+dropZone.addEventListener('click', e => {
+  if (!e.target.closest('button')) fileInput.click();
+});
+dropZone.addEventListener('dragover', e => {
+  e.preventDefault();
+  dropZone.classList.add('drop-zone-active');
+});
 dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drop-zone-active'));
 dropZone.addEventListener('drop', e => {
   e.preventDefault();
   dropZone.classList.remove('drop-zone-active');
-  const dt = new DataTransfer();
-  Array.from(e.dataTransfer.files).forEach(f => dt.items.add(f));
-  fileInput.files = dt.files;
-  updateFileList(fileInput.files);
+  if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files);
 });
 
-// Bootstrap tooltips
+// ── XHR upload with progress bar ───────────────────────────────────────────────
+uploadForm.addEventListener('submit', function(e) {
+  e.preventDefault();
+  if (!fileMap.size) return;
+
+  uploadBtn.disabled = true;
+  uploadBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Uploading…';
+  progressWrap.classList.remove('d-none');
+
+  const fd = new FormData(this);
+
+  const xhr = new XMLHttpRequest();
+  xhr.open('POST', this.action || window.location.href);
+
+  xhr.upload.addEventListener('progress', ev => {
+    if (ev.lengthComputable) {
+      const pct = Math.round(ev.loaded / ev.total * 100);
+      progressBar.style.width = pct + '%';
+      progressPct.textContent = pct + '%';
+    }
+  });
+
+  xhr.addEventListener('load', () => {
+    // Server returns redirect (302) — follow it
+    if (xhr.responseURL) {
+      window.location.href = xhr.responseURL;
+    } else {
+      window.location.reload();
+    }
+  });
+
+  xhr.addEventListener('error', () => {
+    showToast('Upload failed — network error.', 'danger');
+    uploadBtn.disabled = false;
+    uploadBtn.innerHTML = '<i class="bi bi-upload me-1"></i>Upload & Parse';
+    progressWrap.classList.add('d-none');
+  });
+
+  xhr.send(fd);
+});
+
+// ── Bootstrap tooltips ─────────────────────────────────────────────────────────
 document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => new bootstrap.Tooltip(el));
 </script>
 {% endblock %}
