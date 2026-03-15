@@ -174,25 +174,16 @@ function Apply-DbMigrations {
     param([string]$VenvPython, [string]$InstallDir)
 
     Write-Log "Applying database migrations"
-    Set-Location $InstallDir
 
-    $PythonCode = @"
-from app import create_app
-app = create_app()
-print('  Database schema up-to-date.')
-"@
+    # Pass the install dir via sys.path so Python finds 'app' regardless of cwd
+    $PythonCode = "import sys; sys.path.insert(0, r'$InstallDir'); from app import create_app; app = create_app(); print('  Database schema up-to-date.')"
 
-    $TempScript = Join-Path $env:TEMP "centralized_migrate.py"
-    $PythonCode | Set-Content -Path $TempScript -Encoding UTF8
-
-    & $VenvPython $TempScript
+    & $VenvPython -c $PythonCode
     if ($LASTEXITCODE -ne 0) {
-        Remove-Item $TempScript -ErrorAction SilentlyContinue
         Write-Err "Database migration failed"
         exit 1
     }
 
-    Remove-Item $TempScript -ErrorAction SilentlyContinue
     Write-Ok "Database migrations complete"
 }
 
