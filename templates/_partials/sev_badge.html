@@ -1,0 +1,14 @@
+{% set sev = severity if severity is defined else (v.severity if v is defined else '') %}
+{% if sev == 'CRITICAL' %}
+  <span class="badge sev-critical">CRITICAL</span>
+{% elif sev == 'HIGH' %}
+  <span class="badge sev-high">HIGH</span>
+{% elif sev == 'MEDIUM' %}
+  <span class="badge sev-medium">MEDIUM</span>
+{% elif sev == 'LOW' %}
+  <span class="badge sev-low">LOW</span>
+{% elif sev == 'INFO' %}
+  <span class="badge sev-info">INFO</span>
+{% else %}
+  <span class="badge bg-secondary">{{ sev or 'UNKNOWN' }}</span>
+{% endif %}

@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Users{% endblock %}
+{% block page_title %}User Management{% endblock %}
+
+{% block topbar_actions %}
+<a href="{{ url_for('auth.register') }}" class="btn btn-sm btn-primary">
+  <i class="bi bi-person-plus me-1"></i>New User
+</a>
+{% endblock %}
+
+{% block content %}
+<div class="card">
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table table-hover align-middle mb-0">
+        <thead class="table-header">
+          <tr><th>Username</th><th>Email</th><th>Role</th><th>Created</th><th></th></tr>
+        </thead>
+        <tbody>
+        {% for u in users %}
+        <tr>
+          <td class="fw-semibold">
+            <div class="d-flex align-items-center gap-2">
+              <div class="avatar-circle avatar-sm">{{ u.username[0].upper() }}</div>
+              {{ u.username }}
+              {% if u.id == current_user.id %}<span class="badge bg-primary">You</span>{% endif %}
+            </div>
+          </td>
+          <td class="text-muted">{{ u.email }}</td>
+          <td><span class="badge {% if u.role == 'admin' %}bg-danger{% else %}bg-secondary{% endif %}">{{ u.role }}</span></td>
+          <td class="text-muted small">{{ u.created_at.strftime('%Y-%m-%d') }}</td>
+          <td>
+            {% if u.id != current_user.id %}
+            <form method="POST" action="{{ url_for('auth.delete_user', uid=u.id) }}"
+                  onsubmit="return confirm('Delete user \'{{ u.username }}\'?')">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+              <button class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

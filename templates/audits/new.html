@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}New Audit{% endblock %}
+{% block page_title %}New Audit{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-lg-7">
+    <div class="card">
+      <div class="card-header fw-semibold"><i class="bi bi-clipboard2-plus me-2"></i>Create New Audit</div>
+      <div class="card-body">
+        <form method="POST" novalidate>
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+
+          <div class="mb-3">
+            <label class="form-label fw-semibold" for="name">Audit Name <span class="text-danger">*</span></label>
+            <input type="text" class="form-control" id="name" name="name" placeholder="e.g. Web App Pentest – March 2026" required/>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label fw-semibold" for="client_id">Client</label>
+            <select class="form-select" id="client_id" name="client_id">
+              <option value="">— No client —</option>
+              {% for c in clients %}
+              <option value="{{ c.id }}">{{ c.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label fw-semibold" for="target">Target (IP / range / domain)</label>
+            <input type="text" class="form-control font-monospace" id="target" name="target" placeholder="192.168.1.0/24 or example.com"/>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label fw-semibold" for="scope">Scope</label>
+            <textarea class="form-control" id="scope" name="scope" rows="2" placeholder="In-scope IPs, domains, exclusions…"></textarea>
+          </div>
+
+          <div class="row">
+            <div class="col-md-6 mb-3">
+              <label class="form-label fw-semibold" for="start_date">Start Date</label>
+              <input type="date" class="form-control" id="start_date" name="start_date"/>
+            </div>
+            <div class="col-md-6 mb-3">
+              <label class="form-label fw-semibold" for="end_date">End Date</label>
+              <input type="date" class="form-control" id="end_date" name="end_date"/>
+            </div>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label fw-semibold" for="status">Status</label>
+            <select class="form-select" id="status" name="status">
+              <option value="in_progress" selected>In Progress</option>
+              <option value="completed">Completed</option>
+              <option value="archived">Archived</option>
+            </select>
+          </div>
+
+          <div class="mb-4">
+            <label class="form-label fw-semibold" for="notes">Notes</label>
+            <textarea class="form-control" id="notes" name="notes" rows="3"></textarea>
+          </div>
+
+          <div class="d-flex gap-2">
+            <button type="submit" class="btn btn-primary"><i class="bi bi-check2 me-1"></i>Create Audit</button>
+            <a href="{{ url_for('audits.list_audits') }}" class="btn btn-outline-secondary">Cancel</a>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

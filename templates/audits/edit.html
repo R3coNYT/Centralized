@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}Edit {{ audit.name }}{% endblock %}
+{% block page_title %}Edit Audit{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-lg-7">
+    <div class="card">
+      <div class="card-header fw-semibold"><i class="bi bi-pencil me-2"></i>Edit Audit</div>
+      <div class="card-body">
+        <form method="POST" novalidate>
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Audit Name <span class="text-danger">*</span></label>
+            <input type="text" class="form-control" name="name" value="{{ audit.name }}" required/>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Client</label>
+            <select class="form-select" name="client_id">
+              <option value="">— No client —</option>
+              {% for c in clients %}
+              <option value="{{ c.id }}" {% if audit.client_id == c.id %}selected{% endif %}>{{ c.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Target</label>
+            <input type="text" class="form-control font-monospace" name="target" value="{{ audit.target or '' }}"/>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Scope</label>
+            <textarea class="form-control" name="scope" rows="2">{{ audit.scope or '' }}</textarea>
+          </div>
+
+          <div class="row">
+            <div class="col-md-6 mb-3">
+              <label class="form-label fw-semibold">Start Date</label>
+              <input type="date" class="form-control" name="start_date"
+                     value="{{ audit.start_date.strftime('%Y-%m-%d') if audit.start_date else '' }}"/>
+            </div>
+            <div class="col-md-6 mb-3">
+              <label class="form-label fw-semibold">End Date</label>
+              <input type="date" class="form-control" name="end_date"
+                     value="{{ audit.end_date.strftime('%Y-%m-%d') if audit.end_date else '' }}"/>
+            </div>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Status</label>
+            <select class="form-select" name="status">
+              <option value="in_progress" {% if audit.status == 'in_progress' %}selected{% endif %}>In Progress</option>
+              <option value="completed" {% if audit.status == 'completed' %}selected{% endif %}>Completed</option>
+              <option value="archived" {% if audit.status == 'archived' %}selected{% endif %}>Archived</option>
+            </select>
+          </div>
+
+          <div class="mb-4">
+            <label class="form-label fw-semibold">Notes</label>
+            <textarea class="form-control" name="notes" rows="3">{{ audit.notes or '' }}</textarea>
+          </div>
+
+          <div class="d-flex gap-2">
+            <button type="submit" class="btn btn-primary"><i class="bi bi-check2 me-1"></i>Save Changes</button>
+            <a href="{{ url_for('audits.detail', audit_id=audit.id) }}" class="btn btn-outline-secondary">Cancel</a>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
