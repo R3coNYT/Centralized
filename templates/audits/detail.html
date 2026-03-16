@@ -145,8 +145,9 @@
                    data-host-id="{{ host.id }}"
                    value="{{ host.tag or '' }}"
                    placeholder="tag"
-                   maxlength="100"
-                   style="position:absolute;top:50%;right:.4rem;transform:translateY(-50%);width:5rem;font-size:.7rem;padding:.1rem .3rem;border:1px dashed #6c757d;border-radius:.25rem;background:transparent;color:inherit;outline:none;"
+                   maxlength="35"
+                   size="3"
+                   style="position:absolute;top:50%;right:.4rem;transform:translateY(-50%);min-width:2.5rem;max-width:12rem;font-size:.7rem;padding:.1rem .3rem;border:1px dashed #6c757d;border-radius:.25rem;background:transparent;color:inherit;outline:none;"
                    title="Assign a label to this host (e.g. printer, dc, web)">
           </td>
           <td class="text-muted small">{{ host.hostname or '—' }}</td>
@@ -337,8 +338,25 @@ const svcValues = [{% for svc, cnt in port_svc %}{{ cnt }},{% endfor %}];
 initAuditCharts(sevMap, svcLabels, svcValues);
 
 // ── Host tag ──────────────────────────────────────────────────────────────
+function resizeTagInput(input) {
+  // Use a hidden ruler span to measure the actual text width
+  let ruler = document.getElementById('_tag_ruler');
+  if (!ruler) {
+    ruler = document.createElement('span');
+    ruler.id = '_tag_ruler';
+    ruler.style.cssText = 'position:absolute;visibility:hidden;white-space:pre;font-size:.7rem;padding:.1rem .3rem;pointer-events:none';
+    document.body.appendChild(ruler);
+  }
+  ruler.textContent = input.value || input.placeholder;
+  const w = Math.max(ruler.offsetWidth + 8, 40);
+  input.style.width = w + 'px';
+}
+
 document.querySelectorAll('.host-tag-input').forEach(input => {
   let lastValue = input.value;
+  resizeTagInput(input);
+
+  input.addEventListener('input', () => resizeTagInput(input));
 
   input.addEventListener('blur', async () => {
     const val = input.value.trim();
