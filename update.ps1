@@ -1,4 +1,4 @@
-Requires -Version 5.1
+#Requires -Version 5.1
 <#
 .SYNOPSIS
     Centralized - Update Script (Windows)
@@ -206,7 +206,7 @@ function Restore-Data {
         Copy-Item $BackupDb -Destination $TargetDb -Force
         Write-Ok "Database restored"
     } else {
-        Write-Warn "No database found in backup – skipping DB restore"
+        Write-Warn "No database found in backup - skipping DB restore"
     }
 
     # Uploaded files
