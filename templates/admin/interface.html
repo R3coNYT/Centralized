@@ -1,0 +1,168 @@
+{% extends "base.html" %}
+{% block title %}Interface{% endblock %}
+{% block page_title %}Interface Customization{% endblock %}
+
+{% block content %}
+<div class="row g-4 justify-content-center">
+
+  <!-- Color pickers -->
+  <div class="col-lg-6">
+    <div class="card">
+      <div class="card-header fw-semibold"><i class="bi bi-palette me-2"></i>Color Theme</div>
+      <div class="card-body">
+        <form method="POST" action="{{ url_for('admin.interface') }}" id="themeForm">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+
+          {% set fields = [
+            ('accent_color', 'Accent / Primary Color',  'Primary buttons, active nav links, icons.'),
+            ('sidebar_bg',   'Sidebar Background',       'Background of the sidebar and top bar.'),
+            ('bg_card',      'Card Background',          'Background color of all cards.'),
+            ('bg_surface',   'Body Background',          'Main page background surface.'),
+          ] %}
+
+          {% for key, label, hint in fields %}
+          <div class="mb-4">
+            <label class="form-label fw-semibold small" for="{{ key }}">{{ label }}</label>
+            <div class="d-flex align-items-center gap-3">
+              <input type="color"
+                     class="form-control form-control-color flex-shrink-0 theme-picker"
+                     id="{{ key }}"
+                     name="{{ key }}"
+                     value="{{ settings[key] }}"
+                     style="width:48px;height:38px;padding:2px 4px"/>
+              <code class="small text-muted" id="{{ key }}_val">{{ settings[key] }}</code>
+              {% if settings[key] != defaults[key] %}
+              <span class="badge bg-secondary ms-auto" title="Default: {{ defaults[key] }}">custom</span>
+              {% endif %}
+            </div>
+            <div class="form-text">{{ hint }}</div>
+          </div>
+          {% endfor %}
+
+          <div class="d-flex gap-2 mt-4">
+            <button type="submit" class="btn btn-primary">
+              <i class="bi bi-check2 me-1"></i>Save Changes
+            </button>
+          </div>
+        </form>
+
+        <hr class="my-4"/>
+
+        <form method="POST" action="{{ url_for('admin.interface_reset') }}"
+              onsubmit="return confirm('Reset all colors to defaults?')">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+          <button type="submit" class="btn btn-outline-secondary btn-sm">
+            <i class="bi bi-arrow-counterclockwise me-1"></i>Reset to Defaults
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Live preview -->
+  <div class="col-lg-4">
+    <div class="card">
+      <div class="card-header fw-semibold"><i class="bi bi-eye me-2"></i>Live Preview</div>
+      <div class="card-body d-flex flex-column gap-3">
+        <div>
+          <div class="small text-muted mb-2">Buttons</div>
+          <div class="d-flex flex-wrap gap-2">
+            <button class="btn btn-primary btn-sm" id="previewBtnPrimary">Primary</button>
+            <button class="btn btn-outline-secondary btn-sm">Secondary</button>
+            <button class="btn btn-sm btn-outline-info">Info</button>
+          </div>
+        </div>
+        <div>
+          <div class="small text-muted mb-2">Badges</div>
+          <div class="d-flex flex-wrap gap-2">
+            <span class="badge bg-primary" id="previewBadge">badge</span>
+            <span class="badge sev-critical">critical</span>
+            <span class="badge sev-high">high</span>
+          </div>
+        </div>
+        <div>
+          <div class="small text-muted mb-2">Card surface</div>
+          <div class="p-3 rounded" id="previewCard" style="border:1px solid rgba(255,255,255,.07)">
+            <div class="small fw-semibold">Sample card</div>
+            <div class="text-muted" style="font-size:.8rem">Color updates live as you pick.</div>
+          </div>
+        </div>
+        <div>
+          <div class="small text-muted mb-2">Active nav link</div>
+          <a href="#" id="previewNav"
+             class="d-flex align-items-center gap-2 text-decoration-none px-3 py-2 rounded"
+             onclick="return false"
+             style="font-size:.875rem">
+            <i class="bi bi-speedometer2"></i>Dashboard
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const pickers = document.querySelectorAll('.theme-picker');
+
+pickers.forEach(input => {
+  const label = document.getElementById(input.id + '_val');
+  input.addEventListener('input', () => {
+    if (label) label.textContent = input.value;
+    applyPreview();
+  });
+});
+
+function hexToRgb(hex) {
+  const h = hex.replace('#', '');
+  return [parseInt(h.slice(0,2),16), parseInt(h.slice(2,4),16), parseInt(h.slice(4,6),16)];
+}
+
+function applyPreview() {
+  const accent    = document.getElementById('accent_color').value;
+  const sidebarBg = document.getElementById('sidebar_bg').value;
+  const bgCard    = document.getElementById('bg_card').value;
+  const bgSurface = document.getElementById('bg_surface').value;
+
+  const root = document.documentElement;
+  root.style.setProperty('--bg-card',    bgCard);
+  root.style.setProperty('--bg-surface', bgSurface);
+
+  const [r, g, b] = hexToRgb(accent);
+  root.style.setProperty('--bs-primary',     accent);
+  root.style.setProperty('--bs-primary-rgb', `${r},${g},${b}`);
+  root.style.setProperty('--bs-link-color',  accent);
+
+  document.querySelectorAll('.sidebar').forEach(el => el.style.backgroundColor = sidebarBg);
+  document.querySelectorAll('.topbar').forEach(el  => el.style.backgroundColor = sidebarBg);
+
+  // Preview widgets
+  const btnPrimary = document.getElementById('previewBtnPrimary');
+  if (btnPrimary) { btnPrimary.style.backgroundColor = accent; btnPrimary.style.borderColor = accent; }
+
+  const badge = document.getElementById('previewBadge');
+  if (badge) badge.style.backgroundColor = accent;
+
+  const card = document.getElementById('previewCard');
+  if (card) card.style.backgroundColor = bgCard;
+
+  const nav = document.getElementById('previewNav');
+  if (nav) {
+    nav.style.backgroundColor = `rgba(${r},${g},${b},0.25)`;
+    nav.style.color = accent;
+  }
+
+  document.querySelectorAll('.btn-primary').forEach(btn => {
+    btn.style.backgroundColor = accent;
+    btn.style.borderColor = accent;
+  });
+
+  document.querySelectorAll('.sidebar .nav-link.active').forEach(link => {
+    link.style.backgroundColor = `rgba(${r},${g},${b},0.25)`;
+    link.style.color = accent;
+  });
+}
+</script>
+{% endblock %}

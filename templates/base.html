@@ -12,6 +12,8 @@
   <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet"/>
   <!-- Custom -->
   <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet"/>
+  <!-- Dynamic theme overrides -->
+  {% if theme_css %}<style>{{ theme_css | safe }}</style>{% endif %}
 </head>
 <body>
 
@@ -53,6 +55,18 @@
       <a href="{{ url_for('auth.users_list') }}"
          class="nav-link {% if request.blueprint == 'auth' and request.endpoint != 'auth.login' %}active{% endif %}">
         <i class="bi bi-person-gear me-2"></i>Users
+      </a>
+    </li>
+    <li>
+      <a href="{{ url_for('admin.interface') }}"
+         class="nav-link {% if request.endpoint == 'admin.interface' or request.endpoint == 'admin.interface_reset' %}active{% endif %}">
+        <i class="bi bi-palette me-2"></i>Interface
+      </a>
+    </li>
+    <li>
+      <a href="{{ url_for('admin.update_page') }}"
+         class="nav-link {% if request.endpoint == 'admin.update_page' %}active{% endif %}">
+        <i class="bi bi-arrow-repeat me-2"></i>Update
       </a>
     </li>
     {% endif %}

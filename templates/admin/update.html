@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+{% block title %}Update{% endblock %}
+{% block page_title %}Application Update{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-lg-7">
+
+    <!-- Version status -->
+    <div class="card mb-4">
+      <div class="card-header fw-semibold"><i class="bi bi-git me-2"></i>Version Status</div>
+      <div class="card-body">
+
+        <div class="row g-4 mb-4">
+          <div class="col-sm-6">
+            <div class="small text-muted mb-1">Current (installed)</div>
+            {% if current_short %}
+              <code class="fs-6">{{ current_short }}</code>
+              <div class="text-muted mt-1" style="font-size:.7rem;word-break:break-all">{{ current_hash }}</div>
+            {% else %}
+              <span class="text-muted fst-italic">Unable to read local git state</span>
+            {% endif %}
+          </div>
+          <div class="col-sm-6">
+            <div class="small text-muted mb-1">Latest (GitHub <code>main</code>)</div>
+            {% if latest_short %}
+              <code class="fs-6">{{ latest_short }}</code>
+              <div class="text-muted mt-1" style="font-size:.7rem;word-break:break-all">{{ latest_hash }}</div>
+              {% if latest_message %}
+              <div class="small text-muted mt-1 fst-italic">{{ latest_message }}</div>
+              {% endif %}
+            {% else %}
+              <span class="text-muted fst-italic">Unable to reach GitHub</span>
+            {% endif %}
+          </div>
+        </div>
+
+        {% if up_to_date %}
+          <div class="alert alert-success d-flex align-items-center gap-2 mb-0 py-2">
+            <i class="bi bi-check-circle-fill fs-5"></i>
+            <span><strong>Up to date.</strong> You are running the latest version.</span>
+          </div>
+
+        {% elif is_outdated %}
+          <div class="alert alert-warning d-flex align-items-center gap-2 mb-3 py-2">
+            <i class="bi bi-exclamation-triangle-fill fs-5"></i>
+            <span><strong>Update available.</strong> A newer version is on GitHub.</span>
+          </div>
+          <button class="btn btn-warning" id="updateBtn" onclick="runUpdate()">
+            <i class="bi bi-arrow-repeat me-1"></i>Update Now
+          </button>
+
+        {% else %}
+          <div class="alert alert-secondary d-flex align-items-center gap-2 mb-0 py-2">
+            <i class="bi bi-wifi-off fs-5 text-muted"></i>
+            <span>Could not determine update status — check your internet connection.</span>
+          </div>
+        {% endif %}
+
+      </div>
+    </div>
+
+    <!-- Output console (hidden until update is triggered) -->
+    <div class="card d-none" id="outputCard">
+      <div class="card-header fw-semibold d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-terminal me-2"></i>Update Output</span>
+        <span class="badge bg-warning text-dark" id="outputStatus">running…</span>
+      </div>
+      <div class="card-body p-0">
+        <pre id="outputConsole"
+             class="m-0 p-3 small"
+             style="background:#080a0e;color:#a8ff78;border-radius:0 0 12px 12px;
+                    max-height:420px;overflow-y:auto;white-space:pre-wrap;word-break:break-word;
+                    font-family:'Cascadia Code','Fira Mono',monospace;font-size:.8rem"></pre>
+      </div>
+    </div>
+
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function runUpdate() {
+  const btn         = document.getElementById('updateBtn');
+  const card        = document.getElementById('outputCard');
+  const console_    = document.getElementById('outputConsole');
+  const statusBadge = document.getElementById('outputStatus');
+
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Updating…';
+  card.classList.remove('d-none');
+  console_.textContent = '$ bash update.sh\n\n';
+  statusBadge.textContent = 'running…';
+  statusBadge.className   = 'badge bg-warning text-dark';
+
+  try {
+    const resp = await fetch('/admin/update/run', {
+      method: 'POST',
+      headers: { 'X-CSRFToken': getCsrfToken() },
+    });
+    const data = await resp.json();
+
+    if (data.error) {
+      appendOutput('[ERROR] ' + data.error, 'text-danger');
+      statusBadge.textContent = 'error';
+      statusBadge.className   = 'badge bg-danger';
+      btn.disabled = false;
+      btn.innerHTML = '<i class="bi bi-arrow-repeat me-1"></i>Update Now';
+      return;
+    }
+
+    if (data.stdout) appendOutput(data.stdout);
+    if (data.stderr) appendOutput('\n--- stderr ---\n' + data.stderr, 'text-warning');
+
+    if (data.returncode === 0) {
+      appendOutput('\n✔ Update complete. Reloading in 3 seconds…');
+      statusBadge.textContent = 'success';
+      statusBadge.className   = 'badge bg-success';
+      setTimeout(() => location.reload(), 3000);
+    } else {
+      statusBadge.textContent = `exit ${data.returncode}`;
+      statusBadge.className   = 'badge bg-danger';
+      btn.disabled = false;
+      btn.innerHTML = '<i class="bi bi-arrow-repeat me-1"></i>Retry';
+    }
+
+  } catch (_) {
+    // Connection lost — server may have restarted
+    appendOutput('\n[Connection lost — server may be restarting…]', 'text-info');
+    statusBadge.textContent = 'restarting?';
+    statusBadge.className   = 'badge bg-info text-dark';
+    let countdown = 6;
+    const iv = setInterval(() => {
+      countdown--;
+      appendOutput('.');
+      if (countdown <= 0) { clearInterval(iv); location.reload(); }
+    }, 1000);
+  }
+}
+
+function appendOutput(text, cls) {
+  const el = document.getElementById('outputConsole');
+  if (cls) {
+    const span = document.createElement('span');
+    span.className = cls;
+    span.textContent = text;
+    el.appendChild(span);
+  } else {
+    el.appendChild(document.createTextNode(text));
+  }
+  el.scrollTop = el.scrollHeight;
+}
+
+function getCsrfToken() {
+  const m = document.querySelector('meta[name="csrf-token"]');
+  return m ? m.getAttribute('content') : '';
+}
+</script>
+{% endblock %}

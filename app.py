@@ -33,6 +33,7 @@ def create_app():
     from routes.api import api_bp
     from routes.clients import clients_bp
     from routes.cve_search import cve_bp
+    from routes.admin import admin_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(dashboard_bp)
@@ -42,6 +43,18 @@ def create_app():
     app.register_blueprint(api_bp)
     app.register_blueprint(clients_bp)
     app.register_blueprint(cve_bp)
+    app.register_blueprint(admin_bp)
+
+    # Inject theme CSS into every template
+    from routes.admin import get_all_settings, build_theme_css
+
+    @app.context_processor
+    def inject_theme():
+        try:
+            css = build_theme_css(get_all_settings())
+        except Exception:
+            css = ""
+        return {"theme_css": css}
 
     # Import models here so SQLAlchemy sees them before create_all()
     import models  # noqa: F401
