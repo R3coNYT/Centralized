@@ -188,84 +188,90 @@ function Update-UserPath {
     Write-Ok "User PATH updated"
 }
 
-# ── Windows Service registration ─────────────────────────────────────────────
+# ── Windows Service registration (via NSSM) ───────────────────────────────────
+# pythonservice.exe (pywin32) fails under the SYSTEM account because the base
+# Python Lib\ directory is not found at runtime. NSSM wraps venv\Scripts\python.exe
+# directly, avoiding all DLL / PATH issues.
+
+function Get-Nssm {
+    # If already present in the install dir, reuse it
+    $NssmExe = "$InstallDir\nssm.exe"
+    if (Test-Path $NssmExe) { return $NssmExe }
+
+    Write-Info "Downloading NSSM (Windows service manager)"
+    $Zip  = "$env:TEMP\nssm.zip"
+    $Dest = "$env:TEMP\nssm_extract"
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        Invoke-WebRequest "https://nssm.cc/release/nssm-2.24.zip" -OutFile $Zip -UseBasicParsing
+        Expand-Archive $Zip -DestinationPath $Dest -Force
+        Copy-Item "$Dest\nssm-2.24\win64\nssm.exe" $NssmExe -Force
+        Write-Ok "NSSM ready"
+    } catch {
+        Write-Warn "Could not download NSSM: $_"
+        return $null
+    } finally {
+        Remove-Item $Zip  -Force -ErrorAction SilentlyContinue
+        Remove-Item $Dest -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    return $NssmExe
+}
 
 function Install-CentralizedService {
-    $ServiceName   = "Centralized"
-    $VenvPython    = "$InstallDir\venv\Scripts\python.exe"
-    $ServiceScript = "$InstallDir\centralized_service.py"
+    $ServiceName = "Centralized"
+    $VenvPython  = "$InstallDir\venv\Scripts\python.exe"
+    $NssmExe     = Get-Nssm
 
-    Write-Info "Registering Centralized as a Windows service"
-
-    if (-not (Test-Path $ServiceScript)) {
-        Write-Warn "centralized_service.py not found — skipping service registration"
+    if (-not $NssmExe) {
+        Write-Warn "NSSM not available — service registration skipped"
         Write-Warn "Start the app manually: $InstallDir\centralized.bat"
         return
     }
 
-    # -- Copy Python DLLs next to pythonservice.exe ----------------------------
-    # pythonservice.exe lives in $InstallDir\venv\  and is linked to python3xx.dll.
-    # When the SCM starts it (as SYSTEM), the DLL search path does not include
-    # the user's PATH, so python3xx.dll and pywintypes3xx.dll must be in the
-    # same directory as the executable.
-    $VenvRoot    = "$InstallDir\venv"
-    $PyvenvCfg   = "$VenvRoot\pyvenv.cfg"
-    if (Test-Path $PyvenvCfg) {
-        $homeLine = Get-Content $PyvenvCfg | Where-Object { $_ -match "^home\s*=" } | Select-Object -First 1
-        if ($homeLine) {
-            $BasePyDir = (($homeLine -split "=", 2)[1]).Trim()
-            if (Test-Path $BasePyDir) {
-                Get-ChildItem $BasePyDir -Filter "python3*.dll" -ErrorAction SilentlyContinue | ForEach-Object {
-                    Copy-Item $_.FullName "$VenvRoot\" -Force -ErrorAction SilentlyContinue
-                }
-                Write-Ok "Python runtime DLL copied to venv root"
-            }
-        }
-    }
-    # pywintypes3xx.dll (pywin32 helper DLL)
-    $PyWin32Sys = "$VenvRoot\Lib\site-packages\pywin32_system32"
-    if (Test-Path $PyWin32Sys) {
-        Get-ChildItem $PyWin32Sys -Filter "*.dll" -ErrorAction SilentlyContinue | ForEach-Object {
-            Copy-Item $_.FullName "$VenvRoot\" -Force -ErrorAction SilentlyContinue
-        }
-        Write-Ok "pywin32 DLLs copied to venv root"
-    }
+    Write-Info "Registering Centralized as a Windows service (NSSM)"
 
-    # Remove any existing service first
+    # Remove any existing service first (pywin32 or NSSM)
     $existing = Get-Service $ServiceName -ErrorAction SilentlyContinue
     if ($existing) {
         Write-Warn "Existing service found — reinstalling"
         if ($existing.Status -eq "Running") {
-            & sc.exe stop $ServiceName | Out-Null
+            Stop-Service $ServiceName -Force -ErrorAction SilentlyContinue
             Start-Sleep -Seconds 3
         }
-        & $VenvPython $ServiceScript remove 2>$null | Out-Null
+        & $NssmExe remove $ServiceName confirm 2>$null | Out-Null
+        # Also attempt pywin32 removal in case it was registered that way
+        if (Test-Path "$InstallDir\centralized_service.py") {
+            & $VenvPython "$InstallDir\centralized_service.py" remove 2>$null | Out-Null
+        }
         Start-Sleep -Seconds 1
     }
 
-    # Register service (uses the venv Python so all dependencies are available)
-    & $VenvPython $ServiceScript install
-    if ($LASTEXITCODE -ne 0) {
-        Write-Warn "Service installation failed — you can still launch manually: $InstallDir\centralized.bat"
-        return
-    }
+    # Ensure logs directory exists (NSSM will write stdout/stderr there)
+    New-Item -ItemType Directory -Path "$InstallDir\logs" -Force | Out-Null
 
-    # Set startup type to Automatic (delayed start)
-    & sc.exe config $ServiceName start= delayed-auto | Out-Null
-    # Set service description
-    & sc.exe description $ServiceName "R3coNYT Centralized pentest audit management platform" | Out-Null
+    # Register via NSSM — points directly at the venv Python, no DLL tricks needed
+    & $NssmExe install     $ServiceName $VenvPython
+    & $NssmExe set         $ServiceName AppParameters   "-m waitress --port=$AppPort --call app:create_app"
+    & $NssmExe set         $ServiceName AppDirectory    $InstallDir
+    & $NssmExe set         $ServiceName DisplayName     "Centralized - Pentest Audit Platform"
+    & $NssmExe set         $ServiceName Description     "R3coNYT Centralized pentest audit management platform"
+    & $NssmExe set         $ServiceName Start           SERVICE_DELAYED_AUTO_START
+    & $NssmExe set         $ServiceName AppStdout       "$InstallDir\logs\service.log"
+    & $NssmExe set         $ServiceName AppStderr       "$InstallDir\logs\service.log"
+    & $NssmExe set         $ServiceName AppRotateFiles  1
+    & $NssmExe set         $ServiceName AppRotateBytes  1048576
 
     # Start the service now
-    & sc.exe start $ServiceName | Out-Null
+    & $NssmExe start $ServiceName | Out-Null
     Start-Sleep -Seconds 5
 
     $svc = Get-Service $ServiceName -ErrorAction SilentlyContinue
     if ($svc -and $svc.Status -eq "Running") {
         Write-Ok "Service running  ->  http://127.0.0.1:$AppPort"
     } else {
-        Write-Warn "Service installed but may need a moment to start"
-        Write-Warn "  Check : Get-Service $ServiceName"
-        Write-Warn "  Logs  : Get-EventLog Application -Source $ServiceName -Newest 10"
+        Write-Warn "Service installed — check status in a moment:"
+        Write-Warn "  Get-Service Centralized"
+        Write-Warn "  Logs: $InstallDir\logs\service.log"
     }
 }
 
