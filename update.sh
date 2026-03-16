@@ -139,6 +139,8 @@ git_update() {
     git rm --cached centralized.db -q 2>/dev/null || true
     git rm --cached -r uploads/ -q 2>/dev/null || true
 
+    chmod +x "$INSTALL_DIR/update.sh"
+
     # Restore protected data files
     if [ -f "$tmp_protect/centralized.db" ]; then
         cp -f "$tmp_protect/centralized.db" "$INSTALL_DIR/"
