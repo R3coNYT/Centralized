@@ -2,6 +2,7 @@ import os
 import re
 import uuid
 import shutil
+import ipaddress
 from flask import Blueprint, render_template, redirect, url_for, flash, request, current_app, send_file, abort
 from flask_login import login_required, current_user
 from werkzeug.utils import secure_filename
@@ -243,11 +244,20 @@ def _compute_host_risk(host: Host) -> tuple[float, str]:
     return score, level
 
 
+def _is_plausible_host_ip(ip: str) -> bool:
+    """Return False for IPs that are clearly not scannable hosts (loopback, multicast, unspecified)."""
+    try:
+        addr = ipaddress.ip_address(ip)
+        return not (addr.is_loopback or addr.is_multicast or addr.is_unspecified or addr.is_reserved)
+    except ValueError:
+        return False
+
+
 def _persist_parsed_data(audit_id: int, parsed_hosts: list, enrich_nvd: bool):
     """Merge parsed host data into the database for the given audit."""
     for host_data in parsed_hosts:
         ip = str(host_data.get("ip", "")).strip()
-        if not ip:
+        if not ip or not _is_plausible_host_ip(ip):
             continue
 
         # Find or create host
