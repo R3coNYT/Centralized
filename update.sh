@@ -140,9 +140,35 @@ git_update() {
     git rm --cached -r uploads/ -q 2>/dev/null || true
 
     # Restore protected data files
-    [ -f "$tmp_protect/centralized.db" ] && cp -f "$tmp_protect/centralized.db" "$INSTALL_DIR/" && info "Database restored after git reset"
-    [ -d "$tmp_protect/uploads" ]        && cp -rf "$tmp_protect/uploads" "$INSTALL_DIR/"   && info "Uploads restored after git reset"
+    if [ -f "$tmp_protect/centralized.db" ]; then
+        cp -f "$tmp_protect/centralized.db" "$INSTALL_DIR/"
+        ok "Database restored ($(du -sh "$INSTALL_DIR/centralized.db" | cut -f1))"
+    else
+        warn "No database to restore — was not present before update"
+    fi
+
+    if [ -d "$tmp_protect/uploads" ]; then
+        cp -rf "$tmp_protect/uploads" "$INSTALL_DIR/"
+        ok "Uploads restored ($(du -sh "$INSTALL_DIR/uploads" | cut -f1))"
+    else
+        warn "No uploads directory to restore — was not present before update"
+    fi
+
     rm -rf "$tmp_protect"
+
+    # Verify data integrity after restore
+    if [ -f "$BACKUP_DIR/centralized.db" ] && [ -f "$INSTALL_DIR/centralized.db" ]; then
+        local backup_size install_size
+        backup_size="$(stat -c%s "$BACKUP_DIR/centralized.db" 2>/dev/null || stat -f%z "$BACKUP_DIR/centralized.db")"
+        install_size="$(stat -c%s "$INSTALL_DIR/centralized.db" 2>/dev/null || stat -f%z "$INSTALL_DIR/centralized.db")"
+        if [ "$backup_size" -eq "$install_size" ]; then
+            ok "Database integrity verified (${install_size} bytes)"
+        else
+            err "Database size mismatch after restore! Backup: ${backup_size}B, Installed: ${install_size}B"
+            err "Manually restore from: $BACKUP_DIR/centralized.db"
+            exit 1
+        fi
+    fi
 
     local new_commit
     new_commit="$(git rev-parse --short HEAD)"
@@ -199,6 +225,30 @@ prune_backups() {
     ok "Old backups pruned"
 }
 
+# ── Restart service ──────────────────────────────────────────────────────────
+
+restart_service() {
+    if [ "$PLATFORM" != "linux" ]; then return; fi
+    if ! command -v systemctl >/dev/null 2>&1; then return; fi
+    if ! systemctl list-unit-files centralized.service >/dev/null 2>&1; then
+        warn "systemd service 'centralized' not found — skipping restart"
+        warn "Start manually with: centralized"
+        return
+    fi
+
+    log "Restarting centralized service"
+    sudo systemctl restart centralized
+    # Give it a moment to come up
+    sleep 2
+    if systemctl is-active --quiet centralized; then
+        ok "Service restarted and running"
+    else
+        err "Service failed to start after restart"
+        err "Check logs: sudo journalctl -u centralized -n 50"
+        exit 1
+    fi
+}
+
 # ── Summary ───────────────────────────────────────────────────────────────────
 
 print_done() {
@@ -213,8 +263,11 @@ print_done() {
     echo
     echo "  Your clients, audits and uploaded files are intact."
     echo
-    echo "  Restart the app to apply changes:"
-    echo "    centralized"
+    if [ "$PLATFORM" = "linux" ] && command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet centralized 2>/dev/null; then
+        echo "  Service     : running (sudo systemctl status centralized)"
+    else
+        echo "  Start the app: centralized"
+    fi
     echo
 }
 
@@ -236,6 +289,7 @@ main() {
     update_deps
     apply_db_migrations
     prune_backups
+    restart_service
     print_done
 }
 
