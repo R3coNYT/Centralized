@@ -109,6 +109,73 @@ def analyze_host(host_id):
     })
 
 
+@api_bp.route("/audits/<int:audit_id>/analyze", methods=["POST"])
+@login_required
+def analyze_audit(audit_id):
+    """
+    Re-run port-based risk scoring and auto CVE lookup for ALL hosts of an audit.
+    """
+    audit = Audit.query.get_or_404(audit_id)
+    hosts = Host.query.filter_by(audit_id=audit_id).all()
+
+    from routes.uploads import _nvd_enrich_port, _AUTO_CVE_SERVICES, _compute_host_risk, _clean_str, _is_blank, _nvd_enrich_vuln
+    from models import UploadedFile
+
+    total_cves = 0
+    total_cvss = 0
+
+    for host in hosts:
+        original_level = host.risk_level
+
+        # Auto CVE lookup
+        for port_obj in host.ports.filter_by(state="open"):
+            product = _clean_str(port_obj.product)
+            service = (port_obj.service or "").lower()
+            if not product and not service:
+                continue
+            search_term = product or service
+            if service in _AUTO_CVE_SERVICES or product:
+                existing = Vulnerability.query.filter_by(host_id=host.id, port_id=port_obj.id).count()
+                if existing == 0:
+                    before = Vulnerability.query.filter_by(host_id=host.id).count()
+                    _nvd_enrich_port(host.id, port_obj.id, search_term, _clean_str(port_obj.version))
+                    after = Vulnerability.query.filter_by(host_id=host.id).count()
+                    total_cves += after - before
+
+        db.session.flush()
+
+        # Refresh CVSS for existing vulns missing scores
+        for vuln in host.vulnerabilities:
+            if vuln.cve_id and (vuln.cvss_score is None or vuln.severity in ("UNKNOWN", None)):
+                _nvd_enrich_vuln(vuln, vuln.cve_id)
+                total_cvss += 1
+
+        db.session.flush()
+
+        # Recompute risk score
+        score, level = _compute_host_risk(host)
+
+        if original_level == "POTENTIAL" and score < 60:
+            has_autorecon = UploadedFile.query.filter(
+                UploadedFile.audit_id == audit_id,
+                UploadedFile.file_type.in_(["autorecon_json", "pdf"]),
+            ).first() is not None
+            if has_autorecon:
+                level = "POTENTIAL"
+
+        host.risk_score = score
+        host.risk_level = level
+
+    db.session.commit()
+
+    return jsonify({
+        "audit_id": audit_id,
+        "hosts_analyzed": len(hosts),
+        "new_cves_found": total_cves,
+        "cvss_refreshed": total_cvss,
+    })
+
+
 @api_bp.route("/cve/lookup")
 @login_required
 def cve_lookup():

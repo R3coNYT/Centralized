@@ -6,7 +6,10 @@
 <a href="{{ url_for('uploads.upload', audit_id=audit.id) }}" class="btn btn-sm btn-primary">
   <i class="bi bi-upload me-1"></i>Upload Files
 </a>
-<a href="{{ url_for('audits.edit_audit', audit_id=audit.id) }}" class="btn btn-sm btn-outline-secondary">
+<button class="btn btn-sm btn-outline-info ms-2" id="analyzeAuditBtn" onclick="analyzeAudit({{ audit.id }})">
+  <i class="bi bi-cpu me-1"></i>Analyze Risk &amp; CVEs
+</button>
+<a href="{{ url_for('audits.edit_audit', audit_id=audit.id) }}" class="btn btn-sm btn-outline-secondary ms-2">
   <i class="bi bi-pencil me-1"></i>Edit
 </a>
 {% endblock %}
@@ -324,5 +327,54 @@ const sevMap = {{ sev_map | tojson }};
 const svcLabels = [{% for svc, cnt in port_svc %}'{{ svc }}',{% endfor %}];
 const svcValues = [{% for svc, cnt in port_svc %}{{ cnt }},{% endfor %}];
 initAuditCharts(sevMap, svcLabels, svcValues);
+
+async function analyzeAudit(auditId) {
+  const btn = document.getElementById('analyzeAuditBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Analyzing…';
+  try {
+    const resp = await fetch(`/api/audits/${auditId}/analyze`, {
+      method: 'POST',
+      headers: { 'X-CSRFToken': getCsrfToken() },
+    });
+    const data = await resp.json();
+    if (!resp.ok) {
+      showToast('danger', data.error || 'Analysis failed');
+      return;
+    }
+    let parts = [];
+    if (data.new_cves_found > 0) parts.push(`${data.new_cves_found} new CVE(s) found`);
+    if (data.cvss_refreshed > 0)  parts.push(`${data.cvss_refreshed} CVSS score(s) updated from NVD`);
+    const msg = parts.length
+      ? `Analysis complete (${data.hosts_analyzed} host(s)) — ${parts.join(', ')}. Reloading…`
+      : `Analysis complete — risk scores updated for ${data.hosts_analyzed} host(s). No new CVEs found.`;
+    showToast('success', msg);
+    setTimeout(() => location.reload(), 2500);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-cpu me-1"></i>Analyze Risk &amp; CVEs';
+  }
+}
+
+function getCsrfToken() {
+  const meta = document.querySelector('meta[name="csrf-token"]');
+  return meta ? meta.getAttribute('content') : '';
+}
+
+function showToast(type, msg) {
+  let container = document.getElementById('toast-container');
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'toast-container';
+    container.style.cssText = 'position:fixed;bottom:1.5rem;right:1.5rem;z-index:9999;display:flex;flex-direction:column;gap:.5rem';
+    document.body.appendChild(container);
+  }
+  const t = document.createElement('div');
+  t.className = `alert alert-${type} alert-dismissible shadow mb-0 py-2 px-3`;
+  t.style.minWidth = '260px';
+  t.innerHTML = `${msg}<button type="button" class="btn-close btn-close-white ms-2" onclick="this.closest('.alert').remove()"></button>`;
+  container.appendChild(t);
+  setTimeout(() => t.remove(), 3500);
+}
 </script>
 {% endblock %}
