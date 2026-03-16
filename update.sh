@@ -182,6 +182,9 @@ update_deps() {
 apply_db_migrations() {
     log "Applying database migrations"
     cd "$INSTALL_DIR"
+    # create_app() calls db.create_all() (new tables) then _migrate_db() which
+    # auto-detects every missing column across all models and runs ALTER TABLE.
+    # No manual maintenance needed — any column added to models is handled here.
     "$INSTALL_DIR/venv/bin/python" - <<'PYEOF'
 from app import create_app
 app = create_app()

@@ -116,18 +116,62 @@ def _migrate_uploads():
 
 
 def _migrate_db():
-    """Apply lightweight column migrations for existing databases."""
-    from sqlalchemy import text
+    """
+    Auto-detect and apply any schema changes to the existing database.
+    - New tables  : handled by db.create_all() above
+    - New columns : detected via SQLAlchemy inspect(), added with ALTER TABLE
+    - Removed cols: intentionally ignored (SQLite limitation + data safety)
+    """
+    from sqlalchemy import inspect as sa_inspect, text
+
+    inspector = sa_inspect(db.engine)
+    added = []
+
     with db.engine.connect() as conn:
-        for stmt in [
-            "ALTER TABLE vulnerabilities ADD COLUMN cve_status VARCHAR(30) NOT NULL DEFAULT 'active'",
-            "ALTER TABLE hosts ADD COLUMN tag VARCHAR(100)",
-        ]:
-            try:
-                conn.execute(text(stmt))
-                conn.commit()
-            except Exception:
-                pass  # Column already exists
+        for table in db.metadata.sorted_tables:
+            if not inspector.has_table(table.name):
+                continue  # new tables are created by create_all()
+
+            existing = {col["name"] for col in inspector.get_columns(table.name)}
+
+            for col in table.columns:
+                if col.name in existing:
+                    continue
+
+                col_type = col.type.compile(dialect=db.engine.dialect)
+
+                # Build DEFAULT clause (required when adding NOT NULL columns to filled tables)
+                default_clause = ""
+                if col.default is not None and col.default.is_scalar:
+                    val = col.default.arg
+                    if isinstance(val, str):
+                        default_clause = f" DEFAULT '{val}'"
+                    elif isinstance(val, bool):
+                        default_clause = f" DEFAULT {1 if val else 0}"
+                    elif val is not None:
+                        default_clause = f" DEFAULT {val}"
+                elif not col.nullable:
+                    # NOT NULL with no explicit default — pick a safe fallback
+                    ct = col_type.upper()
+                    if any(t in ct for t in ("INT", "REAL", "NUMERIC", "FLOAT")):
+                        default_clause = " DEFAULT 0"
+                    else:
+                        default_clause = " DEFAULT ''"
+
+                nullable_clause = "" if col.nullable else " NOT NULL"
+                stmt = (
+                    f"ALTER TABLE {table.name} ADD COLUMN "
+                    f"{col.name} {col_type}{nullable_clause}{default_clause}"
+                )
+                try:
+                    conn.execute(text(stmt))
+                    conn.commit()
+                    added.append(f"{table.name}.{col.name}")
+                except Exception:
+                    pass  # column already exists or type not supported
+
+    if added:
+        print(f"  Schema updated — added {len(added)} column(s): {', '.join(added)}")
 
 
 def _seed_admin():
