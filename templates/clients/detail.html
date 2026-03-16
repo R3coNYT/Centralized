@@ -26,19 +26,50 @@
   <div class="card-body p-0">
     <div class="table-responsive">
       <table class="table table-hover align-middle mb-0">
-        <thead class="table-header"><tr><th>Name</th><th>Target</th><th>Status</th><th>Hosts</th><th>Created</th><th></th></tr></thead>
+        <thead class="table-header">
+          <tr>
+            <th>Name</th><th>Target</th><th>Status</th>
+            <th class="text-center">Hosts</th>
+            <th class="text-center">Vulns</th>
+            <th class="text-center">Critical</th>
+            <th>Created</th>
+            <th></th>
+          </tr>
+        </thead>
         <tbody>
         {% for audit in audits %}
         <tr>
           <td><a href="{{ url_for('audits.detail', audit_id=audit.id) }}" class="fw-semibold text-decoration-none">{{ audit.name }}</a></td>
           <td class="font-monospace small text-muted">{{ audit.target or '—' }}</td>
           <td>{% include '_partials/status_badge.html' %}</td>
-          <td><span class="badge bg-info text-dark">{{ audit.host_count }}</span></td>
+          <td class="text-center"><span class="badge bg-info text-dark">{{ audit.host_count }}</span></td>
+          <td class="text-center"><span class="badge bg-warning text-dark">{{ audit.vuln_count }}</span></td>
+          <td class="text-center">
+            {% if audit.critical_count > 0 %}
+              <span class="badge sev-critical">{{ audit.critical_count }}</span>
+            {% else %}
+              <span class="text-muted">0</span>
+            {% endif %}
+          </td>
           <td class="text-muted small">{{ audit.created_at.strftime('%Y-%m-%d') }}</td>
-          <td><a href="{{ url_for('audits.detail', audit_id=audit.id) }}" class="btn btn-sm btn-outline-secondary"><i class="bi bi-eye"></i></a></td>
+          <td>
+            <div class="d-flex gap-1">
+              <a href="{{ url_for('audits.detail', audit_id=audit.id) }}" class="btn btn-sm btn-outline-secondary" title="View">
+                <i class="bi bi-eye"></i>
+              </a>
+              <a href="{{ url_for('uploads.upload', audit_id=audit.id) }}" class="btn btn-sm btn-outline-primary" title="Upload files">
+                <i class="bi bi-upload"></i>
+              </a>
+              <form method="POST" action="{{ url_for('audits.delete_audit', audit_id=audit.id) }}"
+                    onsubmit="return confirm('Delete audit \'{{ audit.name }}\'?')">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                <button class="btn btn-sm btn-outline-danger" title="Delete"><i class="bi bi-trash"></i></button>
+              </form>
+            </div>
+          </td>
         </tr>
         {% else %}
-        <tr><td colspan="6" class="text-center text-muted py-4">No audits for this client.</td></tr>
+        <tr><td colspan="8" class="text-center text-muted py-4">No audits for this client.</td></tr>
         {% endfor %}
         </tbody>
       </table>
