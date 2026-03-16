@@ -3,6 +3,56 @@
 {% block page_title %}Interface Customization{% endblock %}
 
 {% block content %}
+
+<!-- Image Color Extraction -->
+<div class="row g-4 mb-2">
+  <div class="col-12">
+    <div class="card">
+      <div class="card-header fw-semibold">
+        <i class="bi bi-image me-2"></i>Extract Colors from Image
+        <span class="text-muted fw-normal ms-2" style="font-size:.8rem">Drop a wallpaper or screenshot — the dominant colors will be auto-assigned to the theme.</span>
+      </div>
+      <div class="card-body">
+        <div id="imgDropZone" class="drop-zone" onclick="document.getElementById('imgInput').click()" ondragover="event.preventDefault();this.classList.add('drop-zone-active')" ondragleave="this.classList.remove('drop-zone-active')" ondrop="handleImageDrop(event)">
+          <i class="bi bi-cloud-arrow-up fs-2 d-block mb-2 text-muted"></i>
+          <div class="fw-semibold">Drop an image here</div>
+          <div class="small text-muted mt-1">or <u style="cursor:pointer">click to browse</u> &mdash; PNG, JPG, WEBP, GIF&hellip;</div>
+        </div>
+        <input type="file" id="imgInput" accept="image/*" style="display:none" onchange="handleImageFile(this.files[0])"/>
+
+        <!-- Extraction result (hidden until an image is loaded) -->
+        <div id="extractResult" class="d-none mt-4">
+          <div class="row g-4 align-items-start">
+
+            <!-- Thumbnail -->
+            <div class="col-auto">
+              <img id="imgThumb" class="rounded" style="max-height:130px;max-width:200px;object-fit:cover;border:1px solid rgba(255,255,255,.1)"/>
+            </div>
+
+            <!-- Palette + assignment -->
+            <div class="col">
+              <div class="small text-muted text-uppercase fw-semibold mb-2" style="letter-spacing:.06em;font-size:.7rem">Extracted palette</div>
+              <div id="paletteSwatches" class="d-flex gap-2 flex-wrap mb-4"></div>
+
+              <div class="small text-muted text-uppercase fw-semibold mb-2" style="letter-spacing:.06em;font-size:.7rem">Suggested assignment</div>
+              <div id="assignmentRows" class="d-flex flex-column gap-2 mb-4" style="max-width:420px"></div>
+
+              <div class="d-flex gap-2">
+                <button class="btn btn-primary btn-sm" onclick="applyExtracted()">
+                  <i class="bi bi-check2-circle me-1"></i>Apply to Interface
+                </button>
+                <button class="btn btn-outline-secondary btn-sm" onclick="clearExtraction()">
+                  <i class="bi bi-x me-1"></i>Clear
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="row g-4 justify-content-center">
 
   <!-- Color pickers -->
@@ -105,8 +155,9 @@
 
 {% block scripts %}
 <script>
-const pickers = document.querySelectorAll('.theme-picker');
+/* ── Color picker live preview ───────────────────────────────────────── */
 
+const pickers = document.querySelectorAll('.theme-picker');
 pickers.forEach(input => {
   const label = document.getElementById(input.id + '_val');
   input.addEventListener('input', () => {
@@ -118,6 +169,18 @@ pickers.forEach(input => {
 function hexToRgb(hex) {
   const h = hex.replace('#', '');
   return [parseInt(h.slice(0,2),16), parseInt(h.slice(2,4),16), parseInt(h.slice(4,6),16)];
+}
+
+function toHex(r, g, b) {
+  return '#' + [r, g, b].map(v => Math.max(0,Math.min(255,Math.round(v))).toString(16).padStart(2,'0')).join('');
+}
+
+function setPickerValue(id, hex) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.value = hex;
+  const lbl = document.getElementById(id + '_val');
+  if (lbl) lbl.textContent = hex;
 }
 
 function applyPreview() {
@@ -138,7 +201,6 @@ function applyPreview() {
   document.querySelectorAll('.sidebar').forEach(el => el.style.backgroundColor = sidebarBg);
   document.querySelectorAll('.topbar').forEach(el  => el.style.backgroundColor = sidebarBg);
 
-  // Preview widgets
   const btnPrimary = document.getElementById('previewBtnPrimary');
   if (btnPrimary) { btnPrimary.style.backgroundColor = accent; btnPrimary.style.borderColor = accent; }
 
@@ -163,6 +225,194 @@ function applyPreview() {
     link.style.backgroundColor = `rgba(${r},${g},${b},0.25)`;
     link.style.color = accent;
   });
+}
+
+
+/* ── Image color extraction ─────────────────────────────────────────── */
+
+let _extractedAssignment = null;
+
+function handleImageDrop(evt) {
+  evt.preventDefault();
+  document.getElementById('imgDropZone').classList.remove('drop-zone-active');
+  const file = evt.dataTransfer.files[0];
+  if (file && file.type.startsWith('image/')) handleImageFile(file);
+}
+
+function handleImageFile(file) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    const img = new Image();
+    img.onload = () => processImage(img);
+    img.src = e.target.result;
+    document.getElementById('imgThumb').src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+function processImage(img) {
+  // Downsample to 150×150 for speed
+  const W = 150, H = 150;
+  const canvas = document.createElement('canvas');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(img, 0, 0, W, H);
+  const data = ctx.getImageData(0, 0, W, H).data;
+
+  // Quantize pixels to 5-bit per channel and count frequencies
+  const freq = {};
+  for (let i = 0; i < data.length; i += 4) {
+    if (data[i+3] < 128) continue;           // skip transparent
+    const r = (data[i]   >> 3) << 3;
+    const g = (data[i+1] >> 3) << 3;
+    const b = (data[i+2] >> 3) << 3;
+    const k = `${r},${g},${b}`;
+    freq[k] = (freq[k] || 0) + 1;
+  }
+
+  // Sort by frequency, keep most common
+  const entries = Object.entries(freq)
+    .map(([k, count]) => { const [r,g,b] = k.split(',').map(Number); return {r,g,b,count}; })
+    .sort((a,b) => b.count - a.count);
+
+  // Greedily pick up to 12 visually distinct colors
+  const colorDist = (a, b) => Math.sqrt((a.r-b.r)**2 + (a.g-b.g)**2 + (a.b-b.b)**2);
+  const palette = [];
+  for (const e of entries) {
+    if (palette.every(p => colorDist(p, e) > 35)) {
+      palette.push(e);
+      if (palette.length >= 12) break;
+    }
+  }
+
+  const assignment = buildAssignment(palette);
+  _extractedAssignment = assignment;
+
+  renderPaletteSwatches(palette);
+  renderAssignmentRows(assignment);
+  document.getElementById('extractResult').classList.remove('d-none');
+}
+
+function lum({r,g,b})  { return 0.299*r + 0.587*g + 0.114*b; }
+function sat({r,g,b})  { const mx=Math.max(r,g,b),mn=Math.min(r,g,b); return mx===0?0:(mx-mn)/mx; }
+function vivid(c)      { return sat(c) * (1 - Math.abs(lum(c)/255 - 0.5) * 2); } // saturation weighted by mid-lightness
+
+function darkenTo(c, targetLum) {
+  const l = lum(c);
+  if (l <= targetLum || l === 0) return c;
+  const f = targetLum / l;
+  return { r: c.r*f, g: c.g*f, b: c.b*f };
+}
+
+function lightenBy(c, amount) {
+  return { r: c.r+amount, g: c.g+amount, b: c.b+amount };
+}
+
+function buildAssignment(palette) {
+  const byLum  = [...palette].sort((a,b) => lum(a)-lum(b));
+  const byVivid = [...palette].sort((a,b) => vivid(b)-vivid(a));
+
+  // bg_surface — darkest (force lum ≤ 30)
+  let bgSurface = byLum[0] || palette[0];
+  if (lum(bgSurface) > 30) bgSurface = darkenTo(bgSurface, 20);
+
+  // sidebar_bg — slightly lighter dark (force lum ≤ 50)
+  let sidebarBg = byLum[1] || bgSurface;
+  if (lum(sidebarBg) > 50) sidebarBg = darkenTo(sidebarBg, 40);
+  if (lum(sidebarBg) < lum(bgSurface) + 4) sidebarBg = lightenBy(bgSurface, 15);
+
+  // bg_card — medium dark (force lum ≤ 70)
+  let bgCard = byLum[2] || sidebarBg;
+  if (lum(bgCard) > 70) bgCard = darkenTo(bgCard, 55);
+  if (lum(bgCard) < lum(sidebarBg) + 3) bgCard = lightenBy(sidebarBg, 12);
+
+  // accent — most vibrant color that isn't too dark (lum > 55) and not near-white (< 230)
+  let accent = byVivid.find(c => lum(c) > 55 && lum(c) < 230) ||
+               byVivid.find(c => lum(c) > 30) ||
+               byVivid[0] || palette[0];
+
+  return {
+    bg_surface:   toHex(bgSurface.r, bgSurface.g, bgSurface.b),
+    sidebar_bg:   toHex(sidebarBg.r, sidebarBg.g, sidebarBg.b),
+    bg_card:      toHex(bgCard.r,    bgCard.g,    bgCard.b),
+    accent_color: toHex(accent.r,    accent.g,    accent.b),
+  };
+}
+
+const ASSIGNMENT_LABELS = {
+  accent_color: 'Accent / Primary',
+  sidebar_bg:   'Sidebar Background',
+  bg_card:      'Card Background',
+  bg_surface:   'Body Background',
+};
+
+function renderPaletteSwatches(palette) {
+  const container = document.getElementById('paletteSwatches');
+  container.innerHTML = '';
+  palette.forEach(c => {
+    const hex = toHex(c.r, c.g, c.b);
+    const swatch = document.createElement('div');
+    swatch.title = hex;
+    swatch.style.cssText = `width:32px;height:32px;border-radius:6px;background:${hex};border:1px solid rgba(255,255,255,.12);cursor:pointer;flex-shrink:0`;
+    swatch.addEventListener('click', () => {
+      // Clicking a swatch copies its hex into the most recently focused picker,
+      // or opens a mini-picker tooltip
+      showSwatchPicker(swatch, hex);
+    });
+    container.appendChild(swatch);
+  });
+}
+
+function renderAssignmentRows(assignment) {
+  const container = document.getElementById('assignmentRows');
+  container.innerHTML = '';
+  for (const [key, hex] of Object.entries(assignment)) {
+    const row = document.createElement('div');
+    row.className = 'd-flex align-items-center gap-2';
+    row.innerHTML = `
+      <div style="width:24px;height:24px;border-radius:5px;background:${hex};border:1px solid rgba(255,255,255,.15);flex-shrink:0"></div>
+      <code class="small" style="width:72px">${hex}</code>
+      <span class="small text-muted">${ASSIGNMENT_LABELS[key] || key}</span>
+    `;
+    container.appendChild(row);
+  }
+}
+
+function applyExtracted() {
+  if (!_extractedAssignment) return;
+  for (const [key, hex] of Object.entries(_extractedAssignment)) {
+    setPickerValue(key, hex);
+  }
+  applyPreview();
+  // Scroll to the save button
+  document.getElementById('themeForm').scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+function clearExtraction() {
+  _extractedAssignment = null;
+  document.getElementById('extractResult').classList.add('d-none');
+  document.getElementById('imgInput').value = '';
+}
+
+// Clicking a palette swatch shows a small popover to assign it to a specific slot
+function showSwatchPicker(swatchEl, hex) {
+  document.querySelectorAll('.swatch-popover').forEach(p => p.remove());
+  const pop = document.createElement('div');
+  pop.className = 'swatch-popover card shadow';
+  pop.style.cssText = 'position:absolute;z-index:9999;padding:.5rem;min-width:170px;font-size:.8rem';
+  pop.innerHTML = '<div class="small text-muted mb-2 fw-semibold">Assign to&hellip;</div>' +
+    Object.entries(ASSIGNMENT_LABELS).map(([id, label]) =>
+      `<div class="py-1 px-2 rounded" style="cursor:pointer" onmouseenter="this.style.background=\'rgba(255,255,255,.05)\'" onmouseleave="this.style.background=\'\'"
+        onclick="setPickerValue('${id}','${hex}');applyPreview();this.closest('.swatch-popover').remove()">${label}</div>`
+    ).join('') +
+    '<hr style="margin:.4rem 0"/><div class="py-1 px-2 rounded text-muted" style="cursor:pointer" onclick="this.closest(\'.swatch-popover\').remove()">Cancel</div>';
+
+  const rect = swatchEl.getBoundingClientRect();
+  pop.style.top  = (rect.bottom + window.scrollY + 4) + 'px';
+  pop.style.left = (rect.left  + window.scrollX) + 'px';
+  document.body.appendChild(pop);
+  setTimeout(() => document.addEventListener('click', () => pop.remove(), { once: true }), 0);
 }
 </script>
 {% endblock %}
