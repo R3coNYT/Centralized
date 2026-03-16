@@ -166,7 +166,7 @@ function lookupCve(cveId) {
   const modal = new bootstrap.Modal(document.getElementById('cveModal'));
   const body = document.getElementById('cveModalBody');
   document.getElementById('cveModalLabel').innerHTML =
-    `<i class="bi bi-shield-exclamation me-2"></i>${cveId}`;
+    `<i class="bi bi-shield-exclamation me-2"></i><a href="https://nvd.nist.gov/vuln/detail/${encodeURIComponent(cveId)}" target="_blank" rel="noopener noreferrer" class="text-decoration-none text-reset">${escHtml(cveId)} <i class="bi bi-box-arrow-up-right small"></i></a>`;
   body.innerHTML = '<div class="text-center py-4"><div class="spinner-border text-primary" role="status"></div></div>';
   modal.show();
 
