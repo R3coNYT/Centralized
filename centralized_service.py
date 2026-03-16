@@ -17,9 +17,31 @@ To re-enable auto-start:
 import os
 import sys
 
-# Ensure the install directory is always on sys.path
+# Absolute path of the Centralized install directory (where app.py lives)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, BASE_DIR)
+
+# ── Activate the virtualenv for the service process ───────────────────────────
+# pythonservice.exe uses the *base* Python, not the venv Python, so it cannot
+# find pywin32, Flask, waitress, etc. unless we prepend the venv paths manually.
+_venv_site = os.path.join(BASE_DIR, "venv", "Lib", "site-packages")
+if os.path.isdir(_venv_site):
+    sys.path.insert(0, _venv_site)
+    # pywin32 .pyd extensions live in site-packages\win32\
+    _win32_dir = os.path.join(_venv_site, "win32")
+    if os.path.isdir(_win32_dir):
+        sys.path.insert(0, _win32_dir)
+    # Python 3.8+ uses a restricted DLL search: add pywin32 DLL dirs explicitly
+    if hasattr(os, "add_dll_directory"):
+        for _dll_dir in (
+            os.path.join(_venv_site, "pywin32_system32"),
+            os.path.join(_venv_site, "win32"),
+        ):
+            if os.path.isdir(_dll_dir):
+                os.add_dll_directory(_dll_dir)
+
+if BASE_DIR not in sys.path:
+    sys.path.insert(0, BASE_DIR)
+# ─────────────────────────────────────────────────────────────────────────────
 
 import socket
 
