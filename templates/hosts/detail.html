@@ -242,11 +242,14 @@ async function analyzeHost(hostId) {
       return;
     }
     updateRiskBadge(data.risk_score, data.risk_level);
-    const msg = data.new_cves_found > 0
-      ? `Analysis complete — ${data.new_cves_found} new CVE(s) found. Reload to see them.`
+    let parts = [];
+    if (data.new_cves_found > 0) parts.push(`${data.new_cves_found} new CVE(s) found`);
+    if (data.cvss_refreshed > 0)  parts.push(`${data.cvss_refreshed} CVSS score(s) updated from NVD`);
+    const msg = parts.length
+      ? `Analysis complete — ${parts.join(', ')}. Reload to see changes.`
       : `Analysis complete — risk score updated. No new CVEs found.`;
     showToast('success', msg);
-    if (data.new_cves_found > 0) {
+    if (data.new_cves_found > 0 || data.cvss_refreshed > 0) {
       setTimeout(() => location.reload(), 2500);
     }
   } finally {

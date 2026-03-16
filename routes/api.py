@@ -70,6 +70,17 @@ def analyze_host(host_id):
 
     db.session.flush()
 
+    # Refresh CVSS/severity from NVD for all vulns on this host that have a
+    # cve_id but are missing cvss_score or still showing UNKNOWN severity.
+    from routes.uploads import _nvd_enrich_vuln
+    cvss_updated = 0
+    for vuln in host.vulnerabilities:
+        if vuln.cve_id and (vuln.cvss_score is None or vuln.severity in ("UNKNOWN", None)):
+            _nvd_enrich_vuln(vuln, vuln.cve_id)
+            cvss_updated += 1
+
+    db.session.flush()
+
     # Recompute risk from ports + all vulns
     score, level = _compute_host_risk(host)
 
@@ -94,6 +105,7 @@ def analyze_host(host_id):
         "risk_score": host.risk_score,
         "risk_level": host.risk_level,
         "new_cves_found": new_cves,
+        "cvss_refreshed": cvss_updated,
     })
 
 

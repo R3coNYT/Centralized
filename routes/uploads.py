@@ -380,7 +380,9 @@ def _persist_parsed_data(audit_id: int, parsed_hosts: list, enrich_nvd: bool):
             )
             db.session.add(vuln)
 
-            if enrich_nvd and cve_id and vuln.severity in ("UNKNOWN", None):
+            # Always fetch authoritative CVSS/severity from NVD for known CVE IDs.
+            # This is independent of enrich_nvd (which controls keyword-based searches).
+            if cve_id:
                 _nvd_enrich_vuln(vuln, cve_id)
 
         db.session.flush()
@@ -446,17 +448,23 @@ def _nvd_enrich_port(host_id: int, port_id: int, product: str, version: str | No
 
 
 def _nvd_enrich_vuln(vuln, cve_id: str):
-    """Fetch full CVE details from NVD and update the vulnerability object."""
+    """Fetch authoritative CVE data from NVD and update the vulnerability object.
+
+    Always overwrites CVSS score/vector/severity with NVD values (they are the
+    authoritative source).  Only fills description/references when absent.
+    """
     from services.cve_service import lookup_cve
     try:
         data = lookup_cve(cve_id)
         if data:
+            # Always take NVD's authoritative severity and CVSS
             if data.get("severity") and data["severity"] != "UNKNOWN":
                 vuln.severity = data["severity"]
-            if data.get("cvss_score"):
+            if data.get("cvss_score") is not None:
                 vuln.cvss_score = data["cvss_score"]
             if data.get("cvss_vector"):
                 vuln.cvss_vector = data["cvss_vector"]
+            # Only fill description / references when the vuln doesn't have them yet
             if data.get("description") and not vuln.description:
                 vuln.description = data["description"]
             if data.get("references"):
