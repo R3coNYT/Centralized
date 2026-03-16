@@ -146,8 +146,7 @@
                    value="{{ host.tag or '' }}"
                    placeholder="tag"
                    maxlength="35"
-                   size="3"
-                   style="position:absolute;top:50%;right:.4rem;transform:translateY(-50%);min-width:2.5rem;max-width:12rem;font-size:.7rem;padding:.1rem .3rem;border:1px dashed #6c757d;border-radius:.25rem;background:transparent;color:inherit;outline:none;"
+                   style="position:absolute;top:50%;right:.4rem;transform:translateY(-50%);min-width:2.5rem;max-width:13rem;font-size:.7rem;padding:.1rem .3rem;border:1px dashed #6c757d;border-radius:.25rem;background:transparent;color:inherit;outline:none;"
                    title="Assign a label to this host (e.g. printer, dc, web)">
           </td>
           <td class="text-muted small">{{ host.hostname or '—' }}</td>
@@ -339,16 +338,20 @@ initAuditCharts(sevMap, svcLabels, svcValues);
 
 // ── Host tag ──────────────────────────────────────────────────────────────
 function resizeTagInput(input) {
-  // Use a hidden ruler span to measure the actual text width
   let ruler = document.getElementById('_tag_ruler');
   if (!ruler) {
     ruler = document.createElement('span');
     ruler.id = '_tag_ruler';
-    ruler.style.cssText = 'position:absolute;visibility:hidden;white-space:pre;font-size:.7rem;padding:.1rem .3rem;pointer-events:none';
+    ruler.style.cssText = 'position:absolute;top:-9999px;left:-9999px;visibility:hidden;white-space:pre;pointer-events:none';
     document.body.appendChild(ruler);
   }
+  // Mirror the input's exact font so measurement is pixel-accurate
+  const cs = getComputedStyle(input);
+  ruler.style.font          = cs.font;
+  ruler.style.letterSpacing = cs.letterSpacing;
+  ruler.style.padding       = cs.padding;
   ruler.textContent = input.value || input.placeholder;
-  const w = Math.max(ruler.offsetWidth + 8, 40);
+  const w = Math.max(ruler.offsetWidth + 12, 40);
   input.style.width = w + 'px';
 }
 
