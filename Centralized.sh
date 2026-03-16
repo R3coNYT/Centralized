@@ -84,7 +84,7 @@ install_base_deps_linux() {
     log "Installing Linux system dependencies"
     retry 3 $SUDO apt-get update -qq
 
-    local deps=(git curl python3 python3-pip python3-venv ca-certificates)
+    local deps=(git curl python3 python3-pip python3-venv ca-certificates libxml2-dev libxslt1-dev)
     for pkg in "${deps[@]}"; do
         if dpkg -s "$pkg" >/dev/null 2>&1; then
             ok "$pkg already installed"
