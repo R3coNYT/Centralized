@@ -69,7 +69,7 @@ function Backup-Data {
     # Uploaded files
     $UploadsPath = Join-Path $InstallDir "uploads"
     if (Test-Path $UploadsPath) {
-        $UploadsCount = (Get-ChildItem $UploadsPath -Recurse -File -ErrorAction SilentlyContinue).Count
+        $UploadsCount = @(Get-ChildItem $UploadsPath -Recurse -File -ErrorAction SilentlyContinue).Count
         if ($UploadsCount -gt 0) {
             Copy-Item $UploadsPath -Destination (Join-Path $BackupDir "uploads") -Recurse
             Write-Ok "Uploads backed up $($UploadsCount) files"
