@@ -75,6 +75,26 @@
       </div>
     </div>
 
+    <!-- Restart notice (hidden until update succeeds) -->
+    <div class="card border-warning d-none mt-4" id="restartNotice">
+      <div class="card-body d-flex align-items-start gap-3">
+        <i class="bi bi-arrow-repeat fs-3 text-warning mt-1"></i>
+        <div>
+          <div class="fw-semibold mb-1">Service restart required</div>
+          <div class="small text-muted mb-3">
+            The code was updated successfully. You need to restart the service
+            to apply the new version. Run the following command on the server:
+          </div>
+          <pre class="m-0 p-2 rounded small font-monospace"
+               style="background:#0f1117;border:1px solid rgba(255,255,255,.1);display:inline-block">sudo systemctl restart centralized</pre>
+          <div class="small text-muted mt-2">
+            Or, if you're running with gunicorn directly, send it a <code>SIGHUP</code>:
+            <code>kill -HUP $(cat /var/run/centralized.pid)</code>
+          </div>
+        </div>
+      </div>
+    </div>
+
   </div>
 </div>
 {% endblock %}
@@ -90,7 +110,7 @@ async function runUpdate() {
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Updating…';
   card.classList.remove('d-none');
-  console_.textContent = '$ bash update.sh\n\n';
+  console_.textContent = '$ bash update.sh --no-restart\n\n';
   statusBadge.textContent = 'running…';
   statusBadge.className   = 'badge bg-warning text-dark';
 
@@ -114,10 +134,16 @@ async function runUpdate() {
     if (data.stderr) appendOutput('\n--- stderr ---\n' + data.stderr, 'text-warning');
 
     if (data.returncode === 0) {
-      appendOutput('\n✔ Update complete. Reloading in 3 seconds…');
+      appendOutput('\n✔ Update complete.');
       statusBadge.textContent = 'success';
       statusBadge.className   = 'badge bg-success';
-      setTimeout(() => location.reload(), 3000);
+      if (data.restart_required) {
+        document.getElementById('restartNotice').classList.remove('d-none');
+        document.getElementById('restartNotice').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      } else {
+        appendOutput(' Reloading in 3 seconds…');
+        setTimeout(() => location.reload(), 3000);
+      }
     } else {
       statusBadge.textContent = `exit ${data.returncode}`;
       statusBadge.className   = 'badge bg-danger';

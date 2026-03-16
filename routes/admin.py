@@ -192,7 +192,7 @@ def run_update():
 
     try:
         result = subprocess.run(
-            ["bash", script],
+            ["bash", script, "--no-restart"],
             cwd=BASE_DIR,
             capture_output=True,
             text=True,
@@ -204,6 +204,7 @@ def run_update():
             "returncode": result.returncode,
             "stdout": stdout[-3000:],
             "stderr": stderr[-1000:],
+            "restart_required": result.returncode == 0,
         })
     except subprocess.TimeoutExpired:
         return jsonify({"error": "Update timed out after 180 seconds."}), 500
