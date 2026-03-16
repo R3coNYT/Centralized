@@ -42,15 +42,28 @@ _VERSION_SUFFIX_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Patterns in text BEFORE the match that indicate a network range label, not a host
+_NETWORK_RANGE_PREFIX_RE = re.compile(
+    r'(?:network\s+range|start\s*(?:address)?|end\s*(?:address)?|range|subnet|cidr|from|to)\s*:?\s*$',
+    re.IGNORECASE,
+)
+
 
 def _is_valid_host_ip(ip: str, prefix: str = "", suffix: str = "") -> bool:
     """Return True if *ip* looks like a scannable host address and not a software version."""
     if _IGNORED_IPS.match(ip):
         return False
+    # Reject network addresses (last octet 0) and broadcast addresses (last octet 255)
+    last_octet = int(ip.rsplit(".", 1)[-1])
+    if last_octet == 0 or last_octet == 255:
+        return False
     # Reject if surrounded by version-related wording in the nearby text
     if prefix and _VERSION_PREFIX_RE.search(prefix):
         return False
     if suffix and _VERSION_SUFFIX_RE.match(suffix):
+        return False
+    # Reject if labelled as a network range start/end
+    if prefix and _NETWORK_RANGE_PREFIX_RE.search(prefix):
         return False
     return True
 

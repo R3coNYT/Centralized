@@ -268,10 +268,16 @@ def _compute_host_risk(host: Host) -> tuple[float, str]:
 
 
 def _is_plausible_host_ip(ip: str) -> bool:
-    """Return False for IPs that are clearly not scannable hosts (loopback, multicast, unspecified)."""
+    """Return False for IPs that are clearly not scannable hosts (loopback, multicast, unspecified, network/broadcast)."""
     try:
         addr = ipaddress.ip_address(ip)
-        return not (addr.is_loopback or addr.is_multicast or addr.is_unspecified or addr.is_reserved)
+        if addr.is_loopback or addr.is_multicast or addr.is_unspecified or addr.is_reserved:
+            return False
+        # Reject network addresses (last octet 0) and broadcast addresses (last octet 255)
+        last_octet = int(str(addr).rsplit(".", 1)[-1])
+        if last_octet == 0 or last_octet == 255:
+            return False
+        return True
     except ValueError:
         return False
 
