@@ -163,6 +163,13 @@ body {
 .sev-medium    { background-color: #ffc107 !important; color: #212529 !important; }
 .sev-low       { background-color: #0dcaf0 !important; color: #212529 !important; }
 .sev-info      { background-color: #6c757d !important; color: #fff !important; }
+
+/* Left-border accents matching severity badge colours */
+.sev-border-critical { border-color: #dc3545 !important; }
+.sev-border-high     { border-color: #fd7e14 !important; }
+.sev-border-medium   { border-color: #ffc107 !important; }
+.sev-border-low      { border-color: #0dcaf0 !important; }
+.sev-border-info     { border-color: #6c757d !important; }
 .sev-potential { background-color: #b44fff !important; color: #fff !important; }
 
 /* ── Drop Zone ───────────────────────────────────────────── */

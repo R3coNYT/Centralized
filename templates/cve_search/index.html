@@ -183,12 +183,12 @@
   {% for r in results %}
   {%- set sev = r.severity|upper -%}
   {%- set border_cls = {
-      'CRITICAL': 'border-danger',
-      'HIGH':     'border-warning',
-      'MEDIUM':   'border-info',
-      'LOW':      'border-secondary',
-      'INFO':     'border-secondary'
-    }.get(sev, 'border-secondary') -%}
+      'CRITICAL': 'sev-border-critical',
+      'HIGH':     'sev-border-high',
+      'MEDIUM':   'sev-border-medium',
+      'LOW':      'sev-border-low',
+      'INFO':     'sev-border-info'
+    }.get(sev, 'sev-border-info') -%}
 
   <div class="card mb-3 border-start border-3 {{ border_cls }}">
 
