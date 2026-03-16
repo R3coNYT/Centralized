@@ -1,5 +1,7 @@
 import os
+import re
 import uuid
+import shutil
 from flask import Blueprint, render_template, redirect, url_for, flash, request, current_app, send_file, abort
 from flask_login import login_required, current_user
 from werkzeug.utils import secure_filename
@@ -14,6 +16,27 @@ ALLOWED_EXTENSIONS = {"xml", "json", "pdf"}
 
 def _allowed_file(filename: str) -> bool:
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+def _slugify(text: str) -> str:
+    """Turn arbitrary text into a safe directory name."""
+    text = text.strip().lower()
+    text = re.sub(r"[^\w\s-]", "", text)
+    text = re.sub(r"[\s_-]+", "_", text)
+    return text[:60] or "unknown"
+
+
+def _audit_upload_dir(audit: Audit) -> str:
+    """Return the absolute directory where files for this audit are stored."""
+    upload_root = current_app.config["UPLOAD_FOLDER"]
+    client_slug = _slugify(audit.client.name) if audit.client else "_no_client"
+    audit_slug = f"{_slugify(audit.name)}_{audit.id}"
+    return os.path.join(upload_root, client_slug, audit_slug)
+
+
+def _upload_path(uf: UploadedFile) -> str:
+    """Absolute path to an uploaded file on disk."""
+    return os.path.join(current_app.config["UPLOAD_FOLDER"], uf.stored_filename)
 
 
 @uploads_bp.route("/<int:audit_id>", methods=["GET", "POST"])
@@ -31,6 +54,9 @@ def upload(audit_id):
         saved_count = 0
         errors = []
 
+        audit_dir = _audit_upload_dir(audit)
+        os.makedirs(audit_dir, exist_ok=True)
+
         for file in files:
             if file.filename == "":
                 continue
@@ -39,26 +65,30 @@ def upload(audit_id):
                 continue
 
             original_name = secure_filename(file.filename)
-            stored_name = f"{uuid.uuid4().hex}_{original_name}"
-            save_path = os.path.join(current_app.config["UPLOAD_FOLDER"], stored_name)
+            stored_name_file = f"{uuid.uuid4().hex}_{original_name}"
+
+            # Build relative sub-path (stored in DB) and absolute path (for disk I/O)
+            client_slug = _slugify(audit.client.name) if audit.client else "_no_client"
+            audit_slug = f"{_slugify(audit.name)}_{audit.id}"
+            stored_relative = os.path.join(client_slug, audit_slug, stored_name_file)
+            save_path = os.path.join(audit_dir, stored_name_file)
+
             file.save(save_path)
             file_size = os.path.getsize(save_path)
 
-            # Detect type
             file_type = detect_file_type(save_path, original_name)
 
             uploaded = UploadedFile(
                 audit_id=audit_id,
                 original_filename=original_name,
-                stored_filename=stored_name,
+                stored_filename=stored_relative,
                 file_type=file_type,
                 file_size=file_size,
                 parsed=False,
             )
             db.session.add(uploaded)
-            db.session.flush()  # get ID before parse
+            db.session.flush()
 
-            # Parse
             result = parse_file(save_path, file_type, audit_id, db.session)
             if result.get("error"):
                 uploaded.parse_error = result["error"]
@@ -92,10 +122,9 @@ def view_file(audit_id, file_id):
     uf = UploadedFile.query.get_or_404(file_id)
     if uf.audit_id != audit_id:
         abort(403)
-    path = os.path.join(current_app.config["UPLOAD_FOLDER"], uf.stored_filename)
+    path = _upload_path(uf)
     if not os.path.exists(path):
         abort(404)
-    # Determine MIME type so the browser renders text/XML/JSON/PDF inline
     ext = uf.original_filename.rsplit(".", 1)[-1].lower() if "." in uf.original_filename else ""
     mime_map = {
         "pdf":  "application/pdf",
@@ -110,14 +139,35 @@ def view_file(audit_id, file_id):
 @login_required
 def delete_file(audit_id, file_id):
     uf = UploadedFile.query.get_or_404(file_id)
-    # Remove from disk
-    path = os.path.join(current_app.config["UPLOAD_FOLDER"], uf.stored_filename)
+    path = _upload_path(uf)
     if os.path.exists(path):
         os.remove(path)
+    # Remove the audit sub-directory if it is now empty
+    _cleanup_empty_dirs(os.path.dirname(path))
     db.session.delete(uf)
     db.session.commit()
     flash("File deleted.", "success")
     return redirect(url_for("audits.detail", audit_id=audit_id))
+
+
+def _cleanup_empty_dirs(directory: str):
+    """Remove directory if empty, then walk up and do the same for the parent."""
+    upload_root = None
+    try:
+        from flask import current_app
+        upload_root = current_app.config["UPLOAD_FOLDER"]
+    except RuntimeError:
+        return
+    # Never remove the upload root itself
+    while directory and directory != upload_root:
+        try:
+            if os.path.isdir(directory) and not os.listdir(directory):
+                os.rmdir(directory)
+                directory = os.path.dirname(directory)
+            else:
+                break
+        except OSError:
+            break
 
 
 # ---------------------------------------------------------------------------

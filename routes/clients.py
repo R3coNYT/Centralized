@@ -1,3 +1,4 @@
+import os
 from flask import Blueprint, render_template, redirect, url_for, flash, request
 from flask_login import login_required
 from models import Client, Audit
@@ -58,8 +59,19 @@ def edit_client(client_id):
 @clients_bp.route("/<int:client_id>/delete", methods=["POST"])
 @login_required
 def delete_client(client_id):
+    import re
+    import shutil
+    from flask import current_app
     client = Client.query.get_or_404(client_id)
     name = client.name
+    # Remove the client's upload directory from disk before DB cascade
+    try:
+        slug = re.sub(r'[\s_-]+', '_', re.sub(r'[^\w\s-]', '', name.strip().lower()))[:60] or 'unknown'
+        client_dir = os.path.join(current_app.config["UPLOAD_FOLDER"], slug)
+        if os.path.isdir(client_dir):
+            shutil.rmtree(client_dir)
+    except Exception:
+        pass
     db.session.delete(client)
     db.session.commit()
     flash(f"Client '{name}' deleted.", "success")
