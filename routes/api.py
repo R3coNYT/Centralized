@@ -36,6 +36,49 @@ def audit_stats(audit_id):
     })
 
 
+@api_bp.route("/hosts/<int:host_id>/analyze", methods=["POST"])
+@login_required
+def analyze_host(host_id):
+    """
+    Re-run port-based risk scoring and auto CVE lookup for a host.
+    Useful for hosts that were imported without risk data.
+    """
+    host = Host.query.get_or_404(host_id)
+
+    # Auto CVE lookup for ports that have no linked vulns yet
+    from routes.uploads import _nvd_enrich_port, _AUTO_CVE_SERVICES, _compute_host_risk
+    new_cves = 0
+    for port_obj in host.ports.filter_by(state="open"):
+        product = port_obj.product
+        service = (port_obj.service or "").lower()
+        if not product and not service:
+            continue
+        if service in _AUTO_CVE_SERVICES or product:
+            # Only search if this port has no CVEs linked yet
+            existing = Vulnerability.query.filter_by(host_id=host.id, port_id=port_obj.id).count()
+            if existing == 0:
+                before = Vulnerability.query.filter_by(host_id=host.id).count()
+                _nvd_enrich_port(host.id, port_obj.id, product or service, port_obj.version)
+                after = Vulnerability.query.filter_by(host_id=host.id).count()
+                new_cves += after - before
+
+    db.session.flush()
+
+    # Recompute risk from ports + all vulns
+    score, level = _compute_host_risk(host)
+    host.risk_score = score
+    host.risk_level = level
+    db.session.commit()
+
+    return jsonify({
+        "host_id": host_id,
+        "ip": host.ip,
+        "risk_score": host.risk_score,
+        "risk_level": host.risk_level,
+        "new_cves_found": new_cves,
+    })
+
+
 @api_bp.route("/cve/lookup")
 @login_required
 def cve_lookup():
@@ -106,33 +149,10 @@ def update_vuln_status(vuln_id):
 
 
 def _recompute_host_risk(host_id):
-    """Recalculate risk_score and risk_level for the host excluding corrected/FP vulns."""
-    from models import CVE_STATUS_EXCLUDED
-    WEIGHTS = {"CRITICAL": 10, "HIGH": 6, "MEDIUM": 3, "LOW": 1, "INFO": 0}
-
-    active_vulns = (
-        Vulnerability.query
-        .filter(
-            Vulnerability.host_id == host_id,
-            ~Vulnerability.cve_status.in_(CVE_STATUS_EXCLUDED),
-        )
-        .all()
-    )
-
-    score = sum(WEIGHTS.get(v.severity or "", 0) for v in active_vulns)
-
-    if score >= 20:
-        level = "CRITICAL"
-    elif score >= 10:
-        level = "HIGH"
-    elif score >= 5:
-        level = "MEDIUM"
-    elif score > 0:
-        level = "LOW"
-    else:
-        level = "INFO"
-
+    """Recalculate risk_score and risk_level using the shared port+vuln scoring."""
+    from routes.uploads import _compute_host_risk
     host = Host.query.get(host_id)
     if host:
-        host.risk_score = float(score)
+        score, level = _compute_host_risk(host)
+        host.risk_score = score
         host.risk_level = level

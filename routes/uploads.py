@@ -174,6 +174,75 @@ def _cleanup_empty_dirs(directory: str):
 # Internal: persist parsed data into DB
 # ---------------------------------------------------------------------------
 
+# Ports that should always trigger CVE lookup regardless of enrich_nvd flag
+# (they carry known products that commonly have CVEs)
+_AUTO_CVE_SERVICES = {
+    "ssh", "ftp", "telnet", "smtp", "http", "https", "smb", "rdp",
+    "mysql", "mssql", "postgresql", "oracle", "redis", "mongodb",
+    "vnc", "imap", "pop3", "ldap", "snmp", "nfs", "ms-wbt-server",
+}
+
+# Sensitive ports that raise the base risk score (mirroring AutoRecon logic)
+_SENSITIVE_PORTS = {21, 22, 23, 25, 53, 110, 143, 389, 443, 445, 512, 513,
+                    514, 873, 1433, 1521, 2049, 2375, 3306, 3389, 5432,
+                    5984, 6379, 8080, 8443, 9200, 27017}
+
+_SEV_WEIGHT = {"CRITICAL": 10, "HIGH": 6, "MEDIUM": 3, "LOW": 1, "INFO": 0, "UNKNOWN": 0}
+
+
+def _compute_host_risk(host: Host) -> tuple[float, str]:
+    """
+    Compute risk score from open ports and active vulnerabilities.
+    Returns (score, level).  Mirrors AutoRecon's compute_risk_score logic.
+    """
+    from models import CVE_STATUS_EXCLUDED
+    score = 0.0
+
+    # 1. Port analysis
+    open_port_nums = {p.port for p in host.ports if p.state == "open"}
+    sensitive_hit = open_port_nums.intersection(_SENSITIVE_PORTS)
+    if sensitive_hit:
+        score += 25
+
+    # Version unknown on a service with known product → potential risk
+    version_unknown = any(
+        p.product and not p.version for p in host.ports if p.state == "open"
+    )
+
+    # 2. CVE / vuln severity (only active statuses)
+    active_vulns = [
+        v for v in host.vulnerabilities
+        if v.cve_status not in CVE_STATUS_EXCLUDED
+    ]
+    critical = sum(1 for v in active_vulns if v.severity == "CRITICAL")
+    high     = sum(1 for v in active_vulns if v.severity == "HIGH")
+
+    if critical:
+        score += 30
+    elif high:
+        score += 15
+
+    # Additional weight from vuln count
+    score += sum(_SEV_WEIGHT.get(v.severity, 0) for v in active_vulns)
+
+    # WAF slightly reduces risk
+    if host.waf:
+        score = max(0.0, score - 5)
+
+    score = min(100.0, score)
+
+    if score >= 60:
+        level = "CRITICAL" if critical else "HIGH"
+    elif score >= 25:
+        level = "MEDIUM"
+    elif score > 0 or version_unknown:
+        level = "LOW"
+    else:
+        level = "INFO"
+
+    return score, level
+
+
 def _persist_parsed_data(audit_id: int, parsed_hosts: list, enrich_nvd: bool):
     """Merge parsed host data into the database for the given audit."""
     for host_data in parsed_hosts:
@@ -210,6 +279,7 @@ def _persist_parsed_data(audit_id: int, parsed_hosts: list, enrich_nvd: bool):
 
         # Ports
         existing_ports = {(p.port, p.protocol): p for p in host.ports}
+        new_ports_for_cve: list[Port] = []
         for pdata in host_data.get("ports", []):
             key = (pdata.get("port"), pdata.get("protocol", "tcp"))
             if key[0] is None:
@@ -229,10 +299,7 @@ def _persist_parsed_data(audit_id: int, parsed_hosts: list, enrich_nvd: bool):
                 db.session.add(port_obj)
                 db.session.flush()
                 existing_ports[key] = port_obj
-
-                # NVD enrichment for this port
-                if enrich_nvd and pdata.get("product"):
-                    _nvd_enrich_port(host.id, port_obj.id, pdata.get("product"), pdata.get("version"))
+                new_ports_for_cve.append(port_obj)
 
         db.session.flush()
 
@@ -253,9 +320,8 @@ def _persist_parsed_data(audit_id: int, parsed_hosts: list, enrich_nvd: bool):
                     redirect_location=page.get("redirect_location"),
                 ))
 
-        # Vulnerabilities
+        # Vulnerabilities from the parser
         for vdata in host_data.get("vulnerabilities", []):
-            # Deduplicate: same CVE+host or same title+host
             cve_id = vdata.get("cve_id")
             title = vdata.get("title", "")
             dup = None
@@ -281,11 +347,36 @@ def _persist_parsed_data(audit_id: int, parsed_hosts: list, enrich_nvd: bool):
             )
             db.session.add(vuln)
 
-            # If we have a CVE ID and want NVD enrichment, enrich severity/desc
             if enrich_nvd and cve_id and vuln.severity in ("UNKNOWN", None):
                 _nvd_enrich_vuln(vuln, cve_id)
 
         db.session.flush()
+
+        # ── Auto CVE lookup from port data ────────────────────────────────────
+        # For every new port that has a product/service name, search NVD.
+        # This runs automatically (not gated by enrich_nvd) for known-risky
+        # services; for other services it only runs when enrich_nvd is set.
+        for port_obj in new_ports_for_cve:
+            product = port_obj.product
+            service = (port_obj.service or "").lower()
+            if not product and not service:
+                continue
+            auto = service in _AUTO_CVE_SERVICES
+            if auto or enrich_nvd:
+                search_term = product or service
+                _nvd_enrich_port(host.id, port_obj.id, search_term, port_obj.version)
+
+        db.session.flush()
+
+        # ── Risk score: compute from ports+vulns if not already provided ──────
+        needs_risk = not host_data.get("risk_score") and not host_data.get("risk_level")
+        if needs_risk:
+            score, level = _compute_host_risk(host)
+            host.risk_score = score
+            host.risk_level = level
+
+        db.session.flush()
+
 
 
 def _nvd_enrich_port(host_id: int, port_id: int, product: str, version: str | None):
