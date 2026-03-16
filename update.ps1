@@ -113,6 +113,11 @@ function Update-Git {
         Write-Info "Local tracked-file changes stashed: $StashResult"
     }
 
+    # Untrack data files BEFORE reset so git never tries to write/delete them
+    # (critical on Windows where the DB file may be locked by a running process)
+    git rm --cached centralized.db --quiet 2>$null | Out-Null
+    git rm --cached -r uploads/ --quiet 2>$null | Out-Null
+
     # Fetch + hard reset to match remote
     # Note: centralized.db and uploads/ are restored afterwards by Restore-Data.
     git fetch origin --quiet 2>$null
@@ -129,10 +134,6 @@ function Update-Git {
         Write-Err "git reset failed (exit $LASTEXITCODE)."
         exit 1
     }
-
-    # Untrack data files so future resets never touch them
-    git rm --cached centralized.db --quiet 2>$null | Out-Null
-    git rm --cached -r uploads/ --quiet 2>$null | Out-Null
 
     $ErrorActionPreference = $prev
 
