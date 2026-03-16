@@ -78,6 +78,20 @@ function Find-Python {
     exit 1
 }
 
+# ── Admin elevation check ────────────────────────────────────────────────────
+
+function Assert-Admin {
+    $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
+        [Security.Principal.WindowsBuiltinRole]::Administrator
+    )
+    if (-not $isAdmin) {
+        Write-Err "This script must be run as Administrator (required to register the Windows service)."
+        Write-Err "Right-click PowerShell > 'Run as administrator', then re-run."
+        exit 1
+    }
+    Write-Ok "Running as Administrator"
+}
+
 # ── Git check ─────────────────────────────────────────────────────────────────
 
 function Assert-Git {
@@ -312,6 +326,7 @@ function Main {
     Write-Host ""
 
     Assert-Git
+    Assert-Admin
     $pyInfo = Find-Python
 
     Install-Repo
