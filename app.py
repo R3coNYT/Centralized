@@ -34,6 +34,7 @@ def create_app():
     from routes.clients import clients_bp
     from routes.cve_search import cve_bp
     from routes.admin import admin_bp
+    from routes.autorecon_results import autorecon_results_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(dashboard_bp)
@@ -44,6 +45,7 @@ def create_app():
     app.register_blueprint(clients_bp)
     app.register_blueprint(cve_bp)
     app.register_blueprint(admin_bp)
+    app.register_blueprint(autorecon_results_bp)
 
     # Inject theme CSS into every template
     from routes.admin import get_all_settings, build_theme_css

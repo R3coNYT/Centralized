@@ -24,6 +24,7 @@ Schema (simplified):
     }
 }
 """
+import ipaddress
 import json
 import re
 
@@ -54,7 +55,19 @@ def parse_autorecon_json(file_path: str) -> dict:
     input_target = data.get("input_target", "")
     reverse_dns = data.get("reverse_dns")
 
+    # Exclude network/broadcast addresses derived from a CIDR input_target
+    excluded_ips: set = set()
+    try:
+        net = ipaddress.ip_network(input_target, strict=False)
+        if net.prefixlen < 32:
+            excluded_ips.add(str(net.network_address))
+            excluded_ips.add(str(net.broadcast_address))
+    except ValueError:
+        pass
+
     for host_key, host_data in data.get("subdomains", {}).items():
+        if host_key in excluded_ips:
+            continue
         resolved_ips = host_data.get("resolved_ips", [])
         ip = resolved_ips[0] if resolved_ips else (input_target if data.get("is_ip") else None)
         if not ip:
