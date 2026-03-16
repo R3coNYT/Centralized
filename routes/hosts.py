@@ -39,7 +39,7 @@ def detail(host_id):
 def update_tag(host_id):
     host = Host.query.get_or_404(host_id)
     data = request.get_json(silent=True) or {}
-    tag = (data.get("tag") or "").strip()[:100]
+    tag = (data.get("tag") or "").strip()[:35]
     host.tag = tag if tag else None
     db.session.commit()
     return jsonify({"ok": True, "tag": host.tag})
