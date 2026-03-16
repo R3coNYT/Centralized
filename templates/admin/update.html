@@ -86,14 +86,11 @@
             to apply the new version. Run the following command on the server:
           </div>
           {% if is_windows %}
-          <pre class="m-0 p-2 rounded small font-monospace"
-               style="background:#0f1117;border:1px solid rgba(255,255,255,.1);display:inline-block">Restart-Service Centralized</pre>
-          <div class="small text-muted mt-2">
-            Run the command above in an <strong>Administrator</strong> PowerShell terminal to apply the update.<br>
-            To stop the service without it restarting on the next Windows boot:
-            <code>Set-Service Centralized -StartupType Manual; Stop-Service Centralized</code>
-          </div>
-          {% else %}
+        <div class="fw-semibold mb-1"><i class="bi bi-arrow-repeat me-2 text-success"></i>Service restarting automatically</div>
+        <div class="small text-muted">
+          The Centralized service is restarting in the background. The page will reload in ~15 seconds.
+        </div>
+        {% else %}
           <pre class="m-0 p-2 rounded small font-monospace"
                style="background:#0f1117;border:1px solid rgba(255,255,255,.1);display:inline-block">sudo systemctl restart centralized</pre>
           <div class="small text-muted mt-2">
@@ -120,7 +117,7 @@ async function runUpdate() {
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Updating…';
   card.classList.remove('d-none');
-  console_.textContent = '$ bash update.sh --no-restart\n\n';
+  console_.textContent = '{% if is_windows %}$ update.ps1{% else %}$ bash update.sh --no-restart{% endif %}\n\n';
   statusBadge.textContent = 'running…';
   statusBadge.className   = 'badge bg-warning text-dark';
 
@@ -148,8 +145,16 @@ async function runUpdate() {
       statusBadge.textContent = 'success';
       statusBadge.className   = 'badge bg-success';
       if (data.restart_required) {
+        {% if is_windows %}
+        // Service auto-restarts via scheduled task (update.ps1 registered a 10s delayed restart)
+        appendOutput('\n⏱ Service restarting in ~10 s — page will reload automatically…', 'text-info');
         document.getElementById('restartNotice').classList.remove('d-none');
         document.getElementById('restartNotice').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        setTimeout(() => location.reload(), 15000);
+        {% else %}
+        document.getElementById('restartNotice').classList.remove('d-none');
+        document.getElementById('restartNotice').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        {% endif %}
       } else {
         appendOutput(' Reloading in 3 seconds…');
         setTimeout(() => location.reload(), 3000);

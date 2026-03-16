@@ -353,4 +353,15 @@ Print-Done         -InstallDir $InstallDir -BackupDir $BackupDir -Commit $Commit
 # Restart the service (CLI update only; web update skips to preserve the HTTP connection)
 if (-not $NoRestart -and $ServicePresent) {
     Start-CentralizedService
+} elseif ($NoRestart -and $ServicePresent) {
+    # Called from web UI: schedule a delayed restart via Task Scheduler so the
+    # HTTP response can be delivered before the service process is killed.
+    Write-Log "Scheduling automatic service restart in 10 seconds"
+    $Action    = New-ScheduledTaskAction -Execute "powershell.exe" `
+                     -Argument "-WindowStyle Hidden -NonInteractive -Command `"Restart-Service Centralized -Force`""
+    $Trigger   = New-ScheduledTaskTrigger -Once -At (Get-Date).AddSeconds(10)
+    $Principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+    Register-ScheduledTask -TaskName "CentralizedServiceRestart" `
+        -Action $Action -Trigger $Trigger -Principal $Principal -Force | Out-Null
+    Write-Ok "Service will restart automatically in ~10 seconds"
 }
