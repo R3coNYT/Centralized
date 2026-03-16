@@ -230,3 +230,14 @@ class UploadedFile(db.Model):
     parsed = db.Column(db.Boolean, default=False)
     parse_error = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=utcnow)
+
+
+# ---------------------------------------------------------------------------
+# Site-wide settings (admin-configurable key/value pairs)
+# ---------------------------------------------------------------------------
+
+class SiteSettings(db.Model):
+    __tablename__ = "site_settings"
+    id = db.Column(db.Integer, primary_key=True)
+    key = db.Column(db.String(100), unique=True, nullable=False)
+    value = db.Column(db.String(500))
