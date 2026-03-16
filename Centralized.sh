@@ -164,6 +164,8 @@ clone_or_update_repo() {
     fi
 }
 
+chmod +x "$INSTALL_DIR/update.sh"
+
 # ── Python virtual environment ─────────────────────────────────────────────────
 
 create_venv() {
