@@ -272,8 +272,6 @@ main() {
     apply_db_migrations
     prune_backups
     restart_service
-    # Always ensure update.sh is executable after the update, regardless of
-    # what git reset --hard did to the file mode.
     chmod +x "$INSTALL_DIR/update.sh"
     print_done
 }
