@@ -6,7 +6,12 @@
     Pulls the latest code from GitHub while preserving your database,
     uploaded files, and any local .env configuration.
     Creates a timestamped backup before updating.
+.PARAMETER NoRestart
+    Skip stopping/starting the Windows service (used when called from the web UI).
 #>
+param(
+    [switch]$NoRestart
+)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
@@ -249,10 +254,50 @@ function Prune-Backups {
     Write-Info "Old backups pruned (kept last 5 of $Count)"
 }
 
+# -- Service management --------------------------------------------------------
+
+function Stop-CentralizedService {
+    $svc = Get-Service "Centralized" -ErrorAction SilentlyContinue
+    if ($null -eq $svc) { return $false }
+
+    if ($svc.Status -eq "Running") {
+        Write-Log "Stopping Centralized service"
+        Stop-Service "Centralized" -Force -ErrorAction SilentlyContinue
+        # Wait up to 30 s for the service to stop
+        $timeout = 30
+        $elapsed = 0
+        while ($elapsed -lt $timeout) {
+            Start-Sleep -Seconds 1
+            $elapsed++
+            $svc = Get-Service "Centralized" -ErrorAction SilentlyContinue
+            if ($null -eq $svc -or $svc.Status -eq "Stopped") { break }
+        }
+        Write-Ok "Service stopped"
+    }
+    return $true
+}
+
+function Start-CentralizedService {
+    $svc = Get-Service "Centralized" -ErrorAction SilentlyContinue
+    if ($null -eq $svc) { return }
+
+    Write-Log "Starting Centralized service"
+    Start-Service "Centralized" -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 4
+
+    $svc = Get-Service "Centralized" -ErrorAction SilentlyContinue
+    if ($svc -and $svc.Status -eq "Running") {
+        Write-Ok "Service running -> http://127.0.0.1:5000"
+    } else {
+        Write-Warn "Service may not be running yet"
+        Write-Warn "  Check: Get-Service Centralized"
+    }
+}
+
 # -- Summary -------------------------------------------------------------------
 
 function Print-Done {
-    param([string]$InstallDir, [string]$BackupDir, [string]$Commit)
+    param([string]$InstallDir, [string]$BackupDir, [string]$Commit, [bool]$ServicePresent)
 
     Write-Host ""
     Write-Host "========================================" -ForegroundColor Green
@@ -265,8 +310,17 @@ function Print-Done {
     Write-Host ""
     Write-Host "  Your clients, audits and uploaded files are intact."
     Write-Host ""
-    Write-Host "  Restart the app to apply changes:"
-    Write-Host "    C:\Tools\Centralized\centralized.bat" -ForegroundColor Cyan
+    if ($ServicePresent) {
+        if ($NoRestart) {
+            Write-Host "  Apply the update by restarting the service:" -ForegroundColor Yellow
+            Write-Host "    Restart-Service Centralized" -ForegroundColor Cyan
+        } else {
+            Write-Host "  Service restarted -> http://127.0.0.1:5000" -ForegroundColor Cyan
+        }
+    } else {
+        Write-Host "  Restart the app to apply changes:"
+        Write-Host "    C:\Tools\Centralized\centralized.bat" -ForegroundColor Cyan
+    }
     Write-Host ""
 }
 
@@ -281,10 +335,22 @@ Write-Host ""
 $InstallDir = Find-InstallDir
 Write-Info "Install directory: $InstallDir"
 
+# Stop service before updating (gives the DB exclusive access for migrations)
+# Skip when called from the web UI (--NoRestart) to avoid killing the connection
+$ServicePresent = $false
+if (-not $NoRestart) {
+    $ServicePresent = Stop-CentralizedService
+}
+
 $BackupDir  = Backup-Data    -InstallDir $InstallDir
 $Commit     = Update-Git     -InstallDir $InstallDir
 Restore-Data               -InstallDir $InstallDir -BackupDir $BackupDir
 $VenvPython = Update-Dependencies -InstallDir $InstallDir
 Apply-DbMigrations -VenvPython $VenvPython -InstallDir $InstallDir
 Prune-Backups      -InstallDir $InstallDir
-Print-Done         -InstallDir $InstallDir -BackupDir $BackupDir -Commit $Commit
+Print-Done         -InstallDir $InstallDir -BackupDir $BackupDir -Commit $Commit -ServicePresent $ServicePresent
+
+# Restart the service (CLI update only; web update skips to preserve the HTTP connection)
+if (-not $NoRestart -and $ServicePresent) {
+    Start-CentralizedService
+}
