@@ -174,14 +174,16 @@ function Update-Dependencies {
     return $VenvPython
 }
 
-# -- Apply DB migrations (create new tables) ------------------------------------
+# -- Apply DB migrations (auto-detect new tables AND new columns) ---------------
 
 function Apply-DbMigrations {
     param([string]$VenvPython, [string]$InstallDir)
 
     Write-Log "Applying database migrations"
 
-    # Pass the install dir via sys.path so Python finds 'app' regardless of cwd
+    # create_app() calls db.create_all() (new tables) then _migrate_db() which
+    # auto-detects every missing column across all models and runs ALTER TABLE.
+    # No manual maintenance needed — any column added to models is handled here.
     $PythonCode = "import sys; sys.path.insert(0, r'$InstallDir'); from app import create_app; app = create_app(); print('  Database schema up-to-date.')"
 
     & $VenvPython -c $PythonCode
