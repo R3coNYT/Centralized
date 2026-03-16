@@ -368,6 +368,7 @@ document.querySelectorAll('.host-tag-input').forEach(input => {
   });
 });
 
+async function analyzeAudit(auditId) {
   const btn = document.getElementById('analyzeAuditBtn');
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Analyzing…';
