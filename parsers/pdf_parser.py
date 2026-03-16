@@ -30,9 +30,29 @@ _IGNORED_IPS = re.compile(
     r'^(127\.|0\.|255\.|224\.|239\.|169\.254\.|10\.0\.0\.0$|172\.16\.0\.0$|192\.168\.0\.0$)'
 )
 
+# Patterns in the text BEFORE the match that indicate a version string, not an IP
+_VERSION_PREFIX_RE = re.compile(
+    r'(?:version|release|build|ver\b|patch|update|firmware|software|v\.?)\s*:?\s*$',
+    re.IGNORECASE,
+)
 
-def _is_valid_host_ip(ip: str) -> bool:
-    return not _IGNORED_IPS.match(ip)
+# Patterns in the text AFTER the match that indicate a version range, not a host IP
+_VERSION_SUFFIX_RE = re.compile(
+    r'^\s*(?:and\s+(?:later|above|earlier|below|prior)|through|prior\s+to|before|after|\.[x*])',
+    re.IGNORECASE,
+)
+
+
+def _is_valid_host_ip(ip: str, prefix: str = "", suffix: str = "") -> bool:
+    """Return True if *ip* looks like a scannable host address and not a software version."""
+    if _IGNORED_IPS.match(ip):
+        return False
+    # Reject if surrounded by version-related wording in the nearby text
+    if prefix and _VERSION_PREFIX_RE.search(prefix):
+        return False
+    if suffix and _VERSION_SUFFIX_RE.match(suffix):
+        return False
+    return True
 
 
 def _extract_vulns_from_text(text: str) -> list:
@@ -139,7 +159,11 @@ def parse_pdf(file_path: str) -> dict:
     ordered_ips = []
     for m in IP_RE.finditer(full_text):
         ip = m.group(0)
-        if ip not in seen_ips and _is_valid_host_ip(ip):
+        if ip in seen_ips:
+            continue
+        prefix = full_text[max(0, m.start() - 60):m.start()]
+        suffix = full_text[m.end():min(len(full_text), m.end() + 40)]
+        if _is_valid_host_ip(ip, prefix, suffix):
             seen_ips.add(ip)
             ordered_ips.append(ip)
 
