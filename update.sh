@@ -120,15 +120,6 @@ git_update() {
         info "Local file changes stashed: $stash_result"
     fi
 
-    # Protect data files before git reset: centralized.db / uploads/ may still
-    # be tracked in the remote repo if they were committed before .gitignore was
-    # added. git reset --hard would overwrite them.
-    local tmp_protect
-    tmp_protect="$(mktemp -d)"
-
-    [ -f "$INSTALL_DIR/centralized.db" ] && cp "$INSTALL_DIR/centralized.db" "$tmp_protect/"
-    [ -d "$INSTALL_DIR/uploads" ]        && cp -r "$INSTALL_DIR/uploads" "$tmp_protect/uploads"
-
     # Fetch + reset to match remote
     git fetch origin
     local current_branch
@@ -141,35 +132,26 @@ git_update() {
 
     chmod +x "$INSTALL_DIR/update.sh"
 
-    # Restore protected data files
-    if [ -f "$tmp_protect/centralized.db" ]; then
-        cp -f "$tmp_protect/centralized.db" "$INSTALL_DIR/"
+    # Restore data files from the backup taken at the start of this update
+    log "Restoring data from backup → $BACKUP_DIR"
+
+    if [ -f "$BACKUP_DIR/centralized.db" ]; then
+        cp -f "$BACKUP_DIR/centralized.db" "$INSTALL_DIR/centralized.db"
         ok "Database restored ($(du -sh "$INSTALL_DIR/centralized.db" | cut -f1))"
     else
-        warn "No database to restore — was not present before update"
+        warn "No database in backup — skipping DB restore"
     fi
 
-    if [ -d "$tmp_protect/uploads" ]; then
-        cp -rf "$tmp_protect/uploads" "$INSTALL_DIR/"
+    if [ -d "$BACKUP_DIR/uploads" ]; then
+        cp -rf "$BACKUP_DIR/uploads/." "$INSTALL_DIR/uploads/"
         ok "Uploads restored ($(du -sh "$INSTALL_DIR/uploads" | cut -f1))"
     else
-        warn "No uploads directory to restore — was not present before update"
+        warn "No uploads in backup — skipping uploads restore"
     fi
 
-    rm -rf "$tmp_protect"
-
-    # Verify data integrity after restore
-    if [ -f "$BACKUP_DIR/centralized.db" ] && [ -f "$INSTALL_DIR/centralized.db" ]; then
-        local backup_size install_size
-        backup_size="$(stat -c%s "$BACKUP_DIR/centralized.db" 2>/dev/null || stat -f%z "$BACKUP_DIR/centralized.db")"
-        install_size="$(stat -c%s "$INSTALL_DIR/centralized.db" 2>/dev/null || stat -f%z "$INSTALL_DIR/centralized.db")"
-        if [ "$backup_size" -eq "$install_size" ]; then
-            ok "Database integrity verified (${install_size} bytes)"
-        else
-            err "Database size mismatch after restore! Backup: ${backup_size}B, Installed: ${install_size}B"
-            err "Manually restore from: $BACKUP_DIR/centralized.db"
-            exit 1
-        fi
+    if [ -f "$BACKUP_DIR/.env" ]; then
+        cp -f "$BACKUP_DIR/.env" "$INSTALL_DIR/.env"
+        ok ".env restored"
     fi
 
     local new_commit
