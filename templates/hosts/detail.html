@@ -25,8 +25,9 @@
           <tr><td class="text-muted">WAF</td><td>{% if host.waf %}<span class="badge bg-warning text-dark">{{ host.waf }}</span>{% else %}—{% endif %}</td></tr>
           <tr><td class="text-muted">Risk Score</td><td>
             {% if host.risk_level %}
-              {% set severity = host.risk_level %}{% include '_partials/sev_badge.html' %}
-              {% if host.risk_score %}<span class="text-muted ms-1">{{ host.risk_score|round(1) }}</span>{% endif %}
+              {% set severity = host.risk_level %}
+              <span id="host-risk-badge" class="badge sev-{{ host.risk_level|lower }}">{{ host.risk_level }}</span>
+              {% if host.risk_score %}<span id="host-risk-score" class="text-muted ms-1">{{ host.risk_score|round(1) }}</span>{% else %}<span id="host-risk-score"></span>{% endif %}
             {% else %}—{% endif %}
           </td></tr>
         </table>
@@ -120,11 +121,11 @@
     <div class="table-responsive">
       <table class="table table-hover align-middle mb-0">
         <thead class="table-header">
-          <tr><th>CVE / Title</th><th>Severity</th><th>CVSS</th><th>Source</th><th>Description</th><th></th></tr>
+          <tr><th>CVE / Title</th><th>Severity</th><th>CVSS</th><th>Source</th><th>Description</th><th>Status</th><th></th></tr>
         </thead>
         <tbody>
         {% for v in vulns %}
-        <tr>
+        <tr id="vuln-row-{{ v.id }}" class="{% if v.cve_status in ('corrected','false_positive') %}opacity-50{% endif %}">
           <td class="fw-semibold small">
             {% if v.cve_id %}
               <a href="#" class="text-decoration-none" onclick="lookupCve('{{ v.cve_id }}');return false;">{{ v.cve_id }}</a>
@@ -138,6 +139,24 @@
           </td>
           <td><span class="badge bg-secondary small">{{ v.source }}</span></td>
           <td class="small text-muted" style="max-width:300px">{{ (v.description or '')[:120] }}{% if v.description and v.description|length > 120 %}…{% endif %}</td>
+          <td style="min-width:160px">
+            <select class="form-select form-select-sm cve-status-select
+              {% if v.cve_status == 'active' %}border-danger
+              {% elif v.cve_status == 'corrected' %}border-success
+              {% elif v.cve_status == 'false_positive' %}border-secondary
+              {% elif v.cve_status == 'mitigated' %}border-warning
+              {% elif v.cve_status == 'accepted' %}border-info
+              {% endif %}"
+              data-vuln-id="{{ v.id }}"
+              data-host-id="{{ host.id }}"
+              onchange="updateVulnStatus(this)">
+              {% for s in cve_status_values %}
+              <option value="{{ s }}" {% if v.cve_status == s %}selected{% endif %}>
+                {{ {'active':'🔴 Active','corrected':'✅ Corrected','false_positive':'⚪ False Positive','mitigated':'🟡 Mitigated','accepted':'🔵 Accepted Risk'}.get(s, s) }}
+              </option>
+              {% endfor %}
+            </select>
+          </td>
           <td>
             {% if v.cve_id %}
             <button class="btn btn-sm btn-outline-secondary" onclick="lookupCve('{{ v.cve_id }}')">
@@ -147,7 +166,7 @@
           </td>
         </tr>
         {% else %}
-        <tr><td colspan="6" class="text-center text-muted py-4">No vulnerabilities for this host.</td></tr>
+        <tr><td colspan="7" class="text-center text-muted py-4">No vulnerabilities for this host.</td></tr>
         {% endfor %}
         </tbody>
       </table>
@@ -164,19 +183,109 @@
 const hostSevData = {
   labels: ['Critical','High','Medium','Low','Info'],
   values: [
-    {{ vulns|selectattr('severity','equalto','CRITICAL')|list|length }},
-    {{ vulns|selectattr('severity','equalto','HIGH')|list|length }},
-    {{ vulns|selectattr('severity','equalto','MEDIUM')|list|length }},
-    {{ vulns|selectattr('severity','equalto','LOW')|list|length }},
-    {{ vulns|selectattr('severity','equalto','INFO')|list|length }}
+    {{ vulns|selectattr('severity','equalto','CRITICAL')|selectattr('cve_status','in',['active','mitigated','accepted'])|list|length }},
+    {{ vulns|selectattr('severity','equalto','HIGH')|selectattr('cve_status','in',['active','mitigated','accepted'])|list|length }},
+    {{ vulns|selectattr('severity','equalto','MEDIUM')|selectattr('cve_status','in',['active','mitigated','accepted'])|list|length }},
+    {{ vulns|selectattr('severity','equalto','LOW')|selectattr('cve_status','in',['active','mitigated','accepted'])|list|length }},
+    {{ vulns|selectattr('severity','equalto','INFO')|selectattr('cve_status','in',['active','mitigated','accepted'])|list|length }}
   ],
   colors: ['#dc3545','#fd7e14','#ffc107','#0dcaf0','#6c757d']
 };
-new Chart(document.getElementById('hostSevChart'), {
+const sevChart = new Chart(document.getElementById('hostSevChart'), {
   type: 'doughnut',
   data: { labels: hostSevData.labels, datasets: [{ data: hostSevData.values, backgroundColor: hostSevData.colors, borderWidth: 2 }] },
   options: { plugins: { legend: { position: 'right', labels: { color: '#adb5bd', font: { size: 12 } } } }, cutout: '65%' }
 });
 </script>
 {% endif %}
+
+<script>
+const STATUS_LABELS = {
+  active: '🔴 Active',
+  corrected: '✅ Corrected',
+  false_positive: '⚪ False Positive',
+  mitigated: '🟡 Mitigated',
+  accepted: '🔵 Accepted Risk',
+};
+const STATUS_BORDER = {
+  active: 'border-danger',
+  corrected: 'border-success',
+  false_positive: 'border-secondary',
+  mitigated: 'border-warning',
+  accepted: 'border-info',
+};
+const EXCLUDED = new Set(['corrected', 'false_positive']);
+const SEV_WEIGHTS = { CRITICAL: 10, HIGH: 6, MEDIUM: 3, LOW: 1, INFO: 0 };
+const RISK_THRESHOLDS = [
+  [20, 'CRITICAL', 'danger'],
+  [10, 'HIGH', 'warning'],
+  [5, 'MEDIUM', 'warning'],
+  [1, 'LOW', 'info'],
+  [0, 'INFO', 'secondary'],
+];
+
+async function updateVulnStatus(select) {
+  const vulnId = select.dataset.vulnId;
+  const newStatus = select.value;
+  const row = document.getElementById('vuln-row-' + vulnId);
+
+  // Optimistic UI: dim row if excluded, update border class
+  Object.values(STATUS_BORDER).forEach(c => select.classList.remove(c));
+  select.classList.add(STATUS_BORDER[newStatus] || '');
+  if (EXCLUDED.has(newStatus)) {
+    row.classList.add('opacity-50');
+  } else {
+    row.classList.remove('opacity-50');
+  }
+
+  try {
+    const resp = await fetch(`/api/vulnerabilities/${vulnId}/status`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrfToken() },
+      body: JSON.stringify({ status: newStatus }),
+    });
+    if (!resp.ok) {
+      const err = await resp.json();
+      showToast('danger', err.error || 'Failed to update status');
+      return;
+    }
+    const data = await resp.json();
+    updateRiskBadge(data.risk_score, data.risk_level);
+    showToast('success', `Status updated to "${STATUS_LABELS[newStatus] || newStatus}"`);
+  } catch (e) {
+    showToast('danger', 'Network error updating status');
+  }
+}
+
+function updateRiskBadge(score, level) {
+  const el = document.getElementById('host-risk-badge');
+  if (!el) return;
+  const colors = { CRITICAL: 'danger', HIGH: 'warning', MEDIUM: 'warning', LOW: 'info', INFO: 'secondary' };
+  el.className = `badge sev-${(level || 'info').toLowerCase()}`;
+  el.textContent = level || '—';
+  const scoreEl = document.getElementById('host-risk-score');
+  if (scoreEl) scoreEl.textContent = score ? score.toFixed(1) : '';
+}
+
+function getCsrfToken() {
+  const meta = document.querySelector('meta[name="csrf-token"]');
+  return meta ? meta.getAttribute('content') : '';
+}
+
+function showToast(type, msg) {
+  let container = document.getElementById('toast-container');
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'toast-container';
+    container.style.cssText = 'position:fixed;bottom:1.5rem;right:1.5rem;z-index:9999;display:flex;flex-direction:column;gap:.5rem';
+    document.body.appendChild(container);
+  }
+  const t = document.createElement('div');
+  t.className = `alert alert-${type} alert-dismissible shadow mb-0 py-2 px-3`;
+  t.style.minWidth = '260px';
+  t.innerHTML = `${msg}<button type="button" class="btn-close btn-close-white ms-2" onclick="this.closest('.alert').remove()"></button>`;
+  container.appendChild(t);
+  setTimeout(() => t.remove(), 3500);
+}
+</script>
 {% endblock %}
