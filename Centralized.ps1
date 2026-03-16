@@ -203,6 +203,34 @@ function Install-CentralizedService {
         return
     }
 
+    # -- Copy Python DLLs next to pythonservice.exe ----------------------------
+    # pythonservice.exe lives in $InstallDir\venv\  and is linked to python3xx.dll.
+    # When the SCM starts it (as SYSTEM), the DLL search path does not include
+    # the user's PATH, so python3xx.dll and pywintypes3xx.dll must be in the
+    # same directory as the executable.
+    $VenvRoot    = "$InstallDir\venv"
+    $PyvenvCfg   = "$VenvRoot\pyvenv.cfg"
+    if (Test-Path $PyvenvCfg) {
+        $homeLine = Get-Content $PyvenvCfg | Where-Object { $_ -match "^home\s*=" } | Select-Object -First 1
+        if ($homeLine) {
+            $BasePyDir = (($homeLine -split "=", 2)[1]).Trim()
+            if (Test-Path $BasePyDir) {
+                Get-ChildItem $BasePyDir -Filter "python3*.dll" -ErrorAction SilentlyContinue | ForEach-Object {
+                    Copy-Item $_.FullName "$VenvRoot\" -Force -ErrorAction SilentlyContinue
+                }
+                Write-Ok "Python runtime DLL copied to venv root"
+            }
+        }
+    }
+    # pywintypes3xx.dll (pywin32 helper DLL)
+    $PyWin32Sys = "$VenvRoot\Lib\site-packages\pywin32_system32"
+    if (Test-Path $PyWin32Sys) {
+        Get-ChildItem $PyWin32Sys -Filter "*.dll" -ErrorAction SilentlyContinue | ForEach-Object {
+            Copy-Item $_.FullName "$VenvRoot\" -Force -ErrorAction SilentlyContinue
+        }
+        Write-Ok "pywin32 DLLs copied to venv root"
+    }
+
     # Remove any existing service first
     $existing = Get-Service $ServiceName -ErrorAction SilentlyContinue
     if ($existing) {
