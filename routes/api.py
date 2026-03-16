@@ -45,6 +45,9 @@ def analyze_host(host_id):
     """
     host = Host.query.get_or_404(host_id)
 
+    # Remember the original level before any changes
+    original_level = host.risk_level
+
     # Auto CVE lookup for ports that have no linked vulns yet
     from routes.uploads import _nvd_enrich_port, _AUTO_CVE_SERVICES, _compute_host_risk
     new_cves = 0
@@ -66,6 +69,18 @@ def analyze_host(host_id):
 
     # Recompute risk from ports + all vulns
     score, level = _compute_host_risk(host)
+
+    # If the host was marked POTENTIAL by an AutoRecon report and the new score
+    # doesn't warrant elevation to MEDIUM/HIGH/CRITICAL, preserve POTENTIAL.
+    if original_level == "POTENTIAL" and score < 60:
+        from models import UploadedFile
+        has_autorecon = UploadedFile.query.filter(
+            UploadedFile.audit_id == host.audit_id,
+            UploadedFile.file_type.in_(["autorecon_json", "pdf"]),
+        ).first() is not None
+        if has_autorecon:
+            level = "POTENTIAL"
+
     host.risk_score = score
     host.risk_level = level
     db.session.commit()

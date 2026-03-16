@@ -158,11 +158,12 @@ body {
 
 /* ── Severity Badges ─────────────────────────────────────── */
 
-.sev-critical { background-color: #dc3545 !important; color: #fff !important; }
-.sev-high     { background-color: #fd7e14 !important; color: #fff !important; }
-.sev-medium   { background-color: #ffc107 !important; color: #212529 !important; }
-.sev-low      { background-color: #0dcaf0 !important; color: #212529 !important; }
-.sev-info     { background-color: #6c757d !important; color: #fff !important; }
+.sev-critical  { background-color: #dc3545 !important; color: #fff !important; }
+.sev-high      { background-color: #fd7e14 !important; color: #fff !important; }
+.sev-medium    { background-color: #ffc107 !important; color: #212529 !important; }
+.sev-low       { background-color: #0dcaf0 !important; color: #212529 !important; }
+.sev-info      { background-color: #6c757d !important; color: #fff !important; }
+.sev-potential { background-color: #b44fff !important; color: #fff !important; }
 
 /* ── Drop Zone ───────────────────────────────────────────── */
 

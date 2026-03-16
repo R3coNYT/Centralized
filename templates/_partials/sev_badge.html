@@ -9,6 +9,8 @@
   <span class="badge sev-low">LOW</span>
 {% elif sev == 'INFO' %}
   <span class="badge sev-info">INFO</span>
+{% elif sev == 'POTENTIAL' %}
+  <span class="badge sev-potential">POTENTIAL</span>
 {% else %}
   <span class="badge bg-secondary">{{ sev or 'UNKNOWN' }}</span>
 {% endif %}
