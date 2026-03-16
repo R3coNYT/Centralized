@@ -180,23 +180,39 @@ def update_page():
 @admin_bp.route("/update/run", methods=["POST"])
 @login_required
 def run_update():
+    import platform
     if current_user.role != "admin":
         return jsonify({"error": "Access denied"}), 403
-
-    script = os.path.join(BASE_DIR, "update.sh")
-    if not os.path.exists(script):
-        return jsonify({"error": "update.sh not found in the application directory."}), 404
 
     # Strip ANSI escape sequences from terminal output
     _ansi = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
 
+    if platform.system() == "Windows":
+        script = os.path.join(BASE_DIR, "update.ps1")
+        if not os.path.exists(script):
+            return jsonify({"error": "update.ps1 not found in the application directory."}), 404
+        cmd = [
+            "powershell.exe",
+            "-NonInteractive",
+            "-NoProfile",
+            "-ExecutionPolicy", "Bypass",
+            "-File", script,
+        ]
+    else:
+        script = os.path.join(BASE_DIR, "update.sh")
+        if not os.path.exists(script):
+            return jsonify({"error": "update.sh not found in the application directory."}), 404
+        cmd = ["bash", script, "--no-restart"]
+
     try:
         result = subprocess.run(
-            ["bash", script, "--no-restart"],
+            cmd,
             cwd=BASE_DIR,
             capture_output=True,
             text=True,
-            timeout=180,
+            timeout=300,
+            encoding="utf-8",
+            errors="replace",
         )
         stdout = _ansi.sub("", result.stdout or "")
         stderr = _ansi.sub("", result.stderr or "")
@@ -207,9 +223,9 @@ def run_update():
             "restart_required": result.returncode == 0,
         })
     except subprocess.TimeoutExpired:
-        return jsonify({"error": "Update timed out after 180 seconds."}), 500
-    except FileNotFoundError:
-        return jsonify({"error": "bash not found. Ensure bash is installed and available in PATH."}), 500
+        return jsonify({"error": "Update timed out after 300 seconds."}), 500
+    except FileNotFoundError as exc:
+        return jsonify({"error": f"Interpreter not found: {exc}"}), 500
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
 
