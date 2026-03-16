@@ -1,3 +1,4 @@
+import os
 from flask import Blueprint, render_template, redirect, url_for, flash, request
 from flask_login import login_required, current_user
 from models import Audit, Client, Host, Vulnerability, Finding, Port
@@ -137,8 +138,21 @@ def edit_audit(audit_id):
 @audits_bp.route("/<int:audit_id>/delete", methods=["POST"])
 @login_required
 def delete_audit(audit_id):
+    import shutil
+    from routes.uploads import _audit_upload_dir
     audit = Audit.query.get_or_404(audit_id)
     name = audit.name
+    # Remove the audit's upload directory from disk before DB cascade
+    try:
+        audit_dir = _audit_upload_dir(audit)
+        if os.path.isdir(audit_dir):
+            shutil.rmtree(audit_dir)
+        # Remove parent client dir if now empty
+        client_dir = os.path.dirname(audit_dir)
+        if os.path.isdir(client_dir) and not os.listdir(client_dir):
+            os.rmdir(client_dir)
+    except Exception:
+        pass
     db.session.delete(audit)
     db.session.commit()
     flash(f"Audit '{name}' deleted.", "success")

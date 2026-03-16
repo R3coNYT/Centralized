@@ -50,9 +50,54 @@ def create_app():
     with app.app_context():
         db.create_all()
         _migrate_db()
+        _migrate_uploads()
         _seed_admin()
 
     return app
+
+
+def _migrate_uploads():
+    """
+    One-time migration: move flat uploaded files (stored_filename = 'uuid_name.ext')
+    into the new client/audit sub-directory structure.
+    """
+    import re
+    import shutil
+    from models import UploadedFile, Audit
+
+    upload_root = os.path.join(os.path.abspath(os.path.dirname(__file__)), "uploads")
+
+    def slugify(text):
+        text = text.strip().lower()
+        text = re.sub(r"[^\w\s-]", "", text)
+        text = re.sub(r"[\s_-]+", "_", text)
+        return text[:60] or "unknown"
+
+    files = UploadedFile.query.all()
+    for uf in files:
+        # Already migrated if stored_filename contains a directory separator
+        if os.sep in uf.stored_filename or "/" in uf.stored_filename:
+            continue
+
+        audit = Audit.query.get(uf.audit_id)
+        if not audit:
+            continue
+
+        client_slug = slugify(audit.client.name) if audit.client else "_no_client"
+        audit_slug = f"{slugify(audit.name)}_{audit.id}"
+        new_dir = os.path.join(upload_root, client_slug, audit_slug)
+        os.makedirs(new_dir, exist_ok=True)
+
+        old_path = os.path.join(upload_root, uf.stored_filename)
+        new_relative = os.path.join(client_slug, audit_slug, uf.stored_filename)
+        new_path = os.path.join(upload_root, new_relative)
+
+        if os.path.exists(old_path) and not os.path.exists(new_path):
+            shutil.move(old_path, new_path)
+
+        uf.stored_filename = new_relative
+
+    db.session.commit()
 
 
 def _migrate_db():
