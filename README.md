@@ -75,15 +75,16 @@ centralized
 ### Windows
 
 ```powershell
-# Run from an Administrator PowerShell terminal
+# Run from an Administrator PowerShell terminal (required to register the service)
 Set-ExecutionPolicy Bypass -Scope Process -Force
 irm https://raw.githubusercontent.com/R3coNYT/Centralized/main/Centralized.ps1 | iex
 ```
 
 - Installs to **`C:\Tools\Centralized`**
-- Registers Centralized as a **Windows service** (`Centralized`) that:
+- Downloads **[NSSM](https://nssm.cc)** and registers Centralized as a **Windows service** (`Centralized`) that:
   - Starts automatically on Windows boot (delayed-auto)
   - Runs in the background — no console window needed
+  - Logs to `C:\Tools\Centralized\logs\service.log`
   - Can be stopped / disabled at any time
 
 **Manage the service:**
@@ -182,7 +183,7 @@ The script automatically stops the `Centralized` service before updating and res
 | 5 | `pip install -r requirements.txt --upgrade` — updates dependencies |
 | 6 | Auto-detect and apply any new tables/columns in the database |
 | 7 | Prune old backups (keeps last 5) |
-| 8 | **Windows:** restart the `Centralized` service |
+| 8 | **Windows:** restart the `Centralized` service automatically (CLI: immediate restart; web UI: scheduled 10 s delayed restart via Task Scheduler) |
 
 > **Your database and uploads are in `.gitignore`** — `git reset --hard` never touches them.  
 > The backup is a safety net in case anything goes wrong mid-update.
@@ -235,9 +236,11 @@ Edit `config.py` or set environment variables:
 ```
 Centralized/
 ├── Centralized.sh          # Installer — Linux & macOS
-├── Centralized.ps1         # Installer — Windows
+├── Centralized.ps1         # Installer — Windows (requires Admin)
 ├── update.sh               # Updater — Linux & macOS
 ├── update.ps1              # Updater — Windows
+├── centralized_service.py  # Windows service wrapper (used by NSSM registration)
+├── nssm.exe                # NSSM binary (downloaded at install time, Windows only)
 ├── app.py                  # Flask factory + startup
 ├── config.py               # Configuration
 ├── models/__init__.py      # SQLAlchemy models
@@ -256,6 +259,7 @@ Centralized/
 │   ├── css/style.css       # Custom dark theme
 │   └── js/app.js           # Chart.js + CVE modal
 ├── uploads/                # Uploaded files storage (auto-created)
+├── logs/                   # Service logs — logs/service.log (Windows, auto-created)
 └── centralized.db          # SQLite database (auto-created)
 ```
 
