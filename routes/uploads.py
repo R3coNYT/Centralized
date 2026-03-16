@@ -190,11 +190,28 @@ _SENSITIVE_PORTS = {21, 22, 23, 25, 53, 110, 143, 389, 443, 445, 512, 513,
 
 _SEV_WEIGHT = {"CRITICAL": 10, "HIGH": 6, "MEDIUM": 3, "LOW": 1, "INFO": 0, "UNKNOWN": 0}
 
+# Values that nmap emits when identification failed — treat as absent
+_BLANK_VALUES = {"?", "-", ""}
+
+
+def _clean_str(val) -> str | None:
+    """Normalize nmap placeholder values ('?', '-') to None."""
+    if val is None:
+        return None
+    s = str(val).strip()
+    return None if s in _BLANK_VALUES else s
+
+
+def _is_blank(val) -> bool:
+    """Return True if val is absent or an nmap placeholder."""
+    return not val or str(val).strip() in _BLANK_VALUES
+
 
 def _compute_host_risk(host: Host) -> tuple[float, str]:
     """
     Compute risk score from open ports and active vulnerabilities.
-    Returns (score, level).  Mirrors AutoRecon's compute_risk_score logic.
+    Returns (score, level).  Mirrors AutoRecon's compute_risk_score logic,
+    including the POTENTIAL level for unversioned-but-known products.
     """
     from models import CVE_STATUS_EXCLUDED
     score = 0.0
@@ -205,9 +222,11 @@ def _compute_host_risk(host: Host) -> tuple[float, str]:
     if sensitive_hit:
         score += 25
 
-    # Version unknown on a service with known product → potential risk
+    # POTENTIAL flag: product is identified but version is unknown (or '?')
+    # This mirrors AutoRecon's potential_flag logic.
     version_unknown = any(
-        p.product and not p.version for p in host.ports if p.state == "open"
+        not _is_blank(p.product) and _is_blank(p.version)
+        for p in host.ports if p.state == "open"
     )
 
     # 2. CVE / vuln severity (only active statuses)
@@ -232,11 +251,15 @@ def _compute_host_risk(host: Host) -> tuple[float, str]:
 
     score = min(100.0, score)
 
+    # Classification — mirrors AutoRecon exactly:
+    # POTENTIAL takes priority when score < 60 and a product version is unknown
     if score >= 60:
         level = "CRITICAL" if critical else "HIGH"
+    elif version_unknown:
+        level = "POTENTIAL"
     elif score >= 25:
         level = "MEDIUM"
-    elif score > 0 or version_unknown:
+    elif score > 0:
         level = "LOW"
     else:
         level = "INFO"
@@ -299,12 +322,12 @@ def _persist_parsed_data(audit_id: int, parsed_hosts: list, enrich_nvd: bool):
                     host_id=host.id,
                     port=key[0],
                     protocol=key[1],
-                    service=pdata.get("service"),
-                    product=pdata.get("product"),
-                    version=pdata.get("version"),
-                    extra_info=pdata.get("extra_info"),
+                    service=_clean_str(pdata.get("service")),
+                    product=_clean_str(pdata.get("product")),
+                    version=_clean_str(pdata.get("version")),
+                    extra_info=_clean_str(pdata.get("extra_info")),
                     state=pdata.get("state", "open"),
-                    cpe=pdata.get("cpe"),
+                    cpe=_clean_str(pdata.get("cpe")),
                 )
                 db.session.add(port_obj)
                 db.session.flush()
@@ -366,15 +389,21 @@ def _persist_parsed_data(audit_id: int, parsed_hosts: list, enrich_nvd: bool):
         # For every new port that has a product/service name, search NVD.
         # This runs automatically (not gated by enrich_nvd) for known-risky
         # services; for other services it only runs when enrich_nvd is set.
+        # '?' / '-' have already been normalised to None above; we always
+        # prefer the product name but fall back to the service keyword.
         for port_obj in new_ports_for_cve:
-            product = port_obj.product
+            product = port_obj.product           # None when nmap returned '?'
             service = (port_obj.service or "").lower()
+            # Nothing useful to search with
             if not product and not service:
                 continue
+            # When only service is known (product is None / unknown), search by
+            # service name only if it's in the well-known auto-lookup set.
+            search_term = product or service
             auto = service in _AUTO_CVE_SERVICES
-            if auto or enrich_nvd:
-                search_term = product or service
-                _nvd_enrich_port(host.id, port_obj.id, search_term, port_obj.version)
+            if auto or (enrich_nvd and product):
+                version = port_obj.version        # None when nmap returned '?'
+                _nvd_enrich_port(host.id, port_obj.id, search_term, version)
 
         db.session.flush()
 

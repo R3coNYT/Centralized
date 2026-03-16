@@ -49,19 +49,22 @@ def analyze_host(host_id):
     original_level = host.risk_level
 
     # Auto CVE lookup for ports that have no linked vulns yet
-    from routes.uploads import _nvd_enrich_port, _AUTO_CVE_SERVICES, _compute_host_risk
+    from routes.uploads import _nvd_enrich_port, _AUTO_CVE_SERVICES, _compute_host_risk, _clean_str, _is_blank
     new_cves = 0
     for port_obj in host.ports.filter_by(state="open"):
-        product = port_obj.product
+        # Normalize '?' / '-' placeholders left by nmap when identification failed
+        product = _clean_str(port_obj.product)
+        version = _clean_str(port_obj.version)
         service = (port_obj.service or "").lower()
         if not product and not service:
             continue
+        search_term = product or service
         if service in _AUTO_CVE_SERVICES or product:
             # Only search if this port has no CVEs linked yet
             existing = Vulnerability.query.filter_by(host_id=host.id, port_id=port_obj.id).count()
             if existing == 0:
                 before = Vulnerability.query.filter_by(host_id=host.id).count()
-                _nvd_enrich_port(host.id, port_obj.id, product or service, port_obj.version)
+                _nvd_enrich_port(host.id, port_obj.id, search_term, version)
                 after = Vulnerability.query.filter_by(host_id=host.id).count()
                 new_cves += after - before
 
