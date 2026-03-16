@@ -113,25 +113,8 @@ function Update-Git {
         Write-Info "Local tracked-file changes stashed: $StashResult"
     }
 
-    # --- Protect data files before git reset -----------------------------------
-    # centralized.db / uploads/ may still be tracked in the remote repo if they
-    # were committed before .gitignore was added. git reset --hard would overwrite
-    # them. We protect them by copying to a temp folder and restoring afterwards.
-    $TempProtect = Join-Path $env:TEMP "centralized_protect_$(Get-Date -Format 'yyyyMMddHHmmss')"
-    New-Item -ItemType Directory -Path $TempProtect -Force | Out-Null
-
-    $DbPath      = Join-Path $InstallDir "centralized.db"
-    $UploadsPath = Join-Path $InstallDir "uploads"
-
-    if (Test-Path $DbPath) {
-        Copy-Item $DbPath -Destination $TempProtect
-    }
-    if (Test-Path $UploadsPath) {
-        Copy-Item $UploadsPath -Destination (Join-Path $TempProtect "uploads") -Recurse
-    }
-    # ---------------------------------------------------------------------------
-
     # Fetch + hard reset to match remote
+    # Note: centralized.db and uploads/ are restored afterwards by Restore-Data.
     git fetch origin --quiet 2>$null
     if ($LASTEXITCODE -ne 0) {
         $ErrorActionPreference = $prev
@@ -147,25 +130,11 @@ function Update-Git {
         exit 1
     }
 
-    # Also untrack data files so future resets never touch them
+    # Untrack data files so future resets never touch them
     git rm --cached centralized.db --quiet 2>$null | Out-Null
     git rm --cached -r uploads/ --quiet 2>$null | Out-Null
 
     $ErrorActionPreference = $prev
-
-    # --- Restore protected data files ------------------------------------------
-    $ProtectedDb = Join-Path $TempProtect "centralized.db"
-    if (Test-Path $ProtectedDb) {
-        Copy-Item $ProtectedDb -Destination $InstallDir -Force
-        Write-Info "Database restored after git reset"
-    }
-    $ProtectedUploads = Join-Path $TempProtect "uploads"
-    if (Test-Path $ProtectedUploads) {
-        Copy-Item $ProtectedUploads -Destination $InstallDir -Recurse -Force
-        Write-Info "Uploads restored after git reset"
-    }
-    Remove-Item $TempProtect -Recurse -Force -ErrorAction SilentlyContinue
-    # ---------------------------------------------------------------------------
 
     $Commit = (git rev-parse --short HEAD 2>$null).Trim()
     Write-Ok "Code updated -> commit $Commit (branch: $Branch)"
@@ -223,6 +192,41 @@ function Apply-DbMigrations {
     Write-Ok "Database migrations complete"
 }
 
+# -- Restore data from backup --------------------------------------------------
+
+function Restore-Data {
+    param([string]$InstallDir, [string]$BackupDir)
+
+    Write-Log "Restoring database and uploads from backup"
+
+    # Database
+    $BackupDb = Join-Path $BackupDir "centralized.db"
+    $TargetDb = Join-Path $InstallDir "centralized.db"
+    if (Test-Path $BackupDb) {
+        Copy-Item $BackupDb -Destination $TargetDb -Force
+        Write-Ok "Database restored"
+    } else {
+        Write-Warn "No database found in backup – skipping DB restore"
+    }
+
+    # Uploaded files
+    $BackupUploads = Join-Path $BackupDir "uploads"
+    $TargetUploads = Join-Path $InstallDir "uploads"
+    if (Test-Path $BackupUploads) {
+        # Merge backup back: keep any files that may have been added after backup
+        Copy-Item (Join-Path $BackupUploads "*") -Destination $TargetUploads -Recurse -Force -ErrorAction SilentlyContinue
+        Write-Ok "Uploads restored"
+    }
+
+    # .env
+    $BackupEnv = Join-Path $BackupDir ".env"
+    $TargetEnv = Join-Path $InstallDir ".env"
+    if ((Test-Path $BackupEnv) -and -not (Test-Path $TargetEnv)) {
+        Copy-Item $BackupEnv -Destination $TargetEnv -Force
+        Write-Ok ".env restored"
+    }
+}
+
 # -- Clean up old backups (keep last 5) ----------------------------------------
 
 function Prune-Backups {
@@ -276,6 +280,7 @@ Write-Info "Install directory: $InstallDir"
 
 $BackupDir  = Backup-Data    -InstallDir $InstallDir
 $Commit     = Update-Git     -InstallDir $InstallDir
+Restore-Data               -InstallDir $InstallDir -BackupDir $BackupDir
 $VenvPython = Update-Dependencies -InstallDir $InstallDir
 Apply-DbMigrations -VenvPython $VenvPython -InstallDir $InstallDir
 Prune-Backups      -InstallDir $InstallDir
