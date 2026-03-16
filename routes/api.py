@@ -1,6 +1,6 @@
 from flask import Blueprint, jsonify, request
 from flask_login import login_required
-from models import Audit, Host, Vulnerability, Port
+from models import Audit, Host, Vulnerability, Port, CVE_STATUS_VALUES
 from extensions import db
 from sqlalchemy import func
 
@@ -81,3 +81,58 @@ def dashboard_stats():
         "vulnerabilities": Vulnerability.query.count(),
         "severities": {row[0] or "UNKNOWN": row[1] for row in sev_data},
     })
+
+
+@api_bp.route("/vulnerabilities/<int:vuln_id>/status", methods=["PATCH"])
+@login_required
+def update_vuln_status(vuln_id):
+    """Update the cve_status of a single vulnerability and recompute host risk score."""
+    vuln = Vulnerability.query.get_or_404(vuln_id)
+    data = request.get_json(silent=True) or {}
+    new_status = data.get("status", "").strip()
+
+    if new_status not in CVE_STATUS_VALUES:
+        return jsonify({"error": f"Invalid status '{new_status}'. Must be one of: {CVE_STATUS_VALUES}"}), 400
+
+    vuln.cve_status = new_status
+    db.session.flush()
+
+    # Recompute host risk score based on active vulnerabilities only
+    _recompute_host_risk(vuln.host_id)
+
+    db.session.commit()
+    return jsonify({"id": vuln_id, "status": new_status, "risk_score": vuln.host.risk_score,
+                    "risk_level": vuln.host.risk_level})
+
+
+def _recompute_host_risk(host_id):
+    """Recalculate risk_score and risk_level for the host excluding corrected/FP vulns."""
+    from models import CVE_STATUS_EXCLUDED
+    WEIGHTS = {"CRITICAL": 10, "HIGH": 6, "MEDIUM": 3, "LOW": 1, "INFO": 0}
+
+    active_vulns = (
+        Vulnerability.query
+        .filter(
+            Vulnerability.host_id == host_id,
+            ~Vulnerability.cve_status.in_(CVE_STATUS_EXCLUDED),
+        )
+        .all()
+    )
+
+    score = sum(WEIGHTS.get(v.severity or "", 0) for v in active_vulns)
+
+    if score >= 20:
+        level = "CRITICAL"
+    elif score >= 10:
+        level = "HIGH"
+    elif score >= 5:
+        level = "MEDIUM"
+    elif score > 0:
+        level = "LOW"
+    else:
+        level = "INFO"
+
+    host = Host.query.get(host_id)
+    if host:
+        host.risk_score = float(score)
+        host.risk_level = level

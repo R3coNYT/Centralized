@@ -1,6 +1,6 @@
 from flask import Blueprint, render_template
 from flask_login import login_required
-from models import Host, Port, Vulnerability, HttpPage
+from models import Host, Port, Vulnerability, HttpPage, CVE_STATUS_VALUES
 from extensions import db
 
 hosts_bp = Blueprint("hosts", __name__, url_prefix="/hosts")
@@ -30,4 +30,5 @@ def detail(host_id):
         ports=ports,
         vulns=vulns,
         pages=pages,
+        cve_status_values=CVE_STATUS_VALUES,
     )

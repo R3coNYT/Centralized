@@ -73,7 +73,8 @@ class Audit(db.Model):
         return (
             db.session.query(Vulnerability)
             .join(Host, Host.id == Vulnerability.host_id)
-            .filter(Host.audit_id == self.id)
+            .filter(Host.audit_id == self.id,
+                    ~Vulnerability.cve_status.in_(CVE_STATUS_EXCLUDED))
             .count()
         )
 
@@ -82,7 +83,8 @@ class Audit(db.Model):
         return (
             db.session.query(Vulnerability)
             .join(Host, Host.id == Vulnerability.host_id)
-            .filter(Host.audit_id == self.id, Vulnerability.severity == "CRITICAL")
+            .filter(Host.audit_id == self.id, Vulnerability.severity == "CRITICAL",
+                    ~Vulnerability.cve_status.in_(CVE_STATUS_EXCLUDED))
             .count()
         )
 
@@ -158,6 +160,18 @@ class HttpPage(db.Model):
 SEVERITY_ORDER = {"CRITICAL": 5, "HIGH": 4, "MEDIUM": 3, "LOW": 2, "INFO": 1, "NONE": 0}
 
 
+# Valid values for Vulnerability.cve_status
+CVE_STATUS_ACTIVE        = "active"
+CVE_STATUS_CORRECTED     = "corrected"
+CVE_STATUS_FALSE_POSITIVE = "false_positive"
+CVE_STATUS_MITIGATED     = "mitigated"
+CVE_STATUS_ACCEPTED      = "accepted"
+CVE_STATUS_VALUES = [CVE_STATUS_ACTIVE, CVE_STATUS_CORRECTED, CVE_STATUS_FALSE_POSITIVE,
+                     CVE_STATUS_MITIGATED, CVE_STATUS_ACCEPTED]
+# Statuses that should NOT contribute to risk scoring
+CVE_STATUS_EXCLUDED = {CVE_STATUS_CORRECTED, CVE_STATUS_FALSE_POSITIVE}
+
+
 class Vulnerability(db.Model):
     __tablename__ = "vulnerabilities"
     id = db.Column(db.Integer, primary_key=True)
@@ -174,6 +188,7 @@ class Vulnerability(db.Model):
     template_id = db.Column(db.String(200))   # nuclei template id
     evidence = db.Column(db.Text)
     recommendation = db.Column(db.Text)
+    cve_status = db.Column(db.String(30), default=CVE_STATUS_ACTIVE, nullable=False)  # active/corrected/false_positive/mitigated/accepted
     created_at = db.Column(db.DateTime, default=utcnow)
 
     def __repr__(self):

@@ -49,9 +49,23 @@ def create_app():
     # Create tables and default admin if needed
     with app.app_context():
         db.create_all()
+        _migrate_db()
         _seed_admin()
 
     return app
+
+
+def _migrate_db():
+    """Apply lightweight column migrations for existing databases."""
+    from sqlalchemy import text
+    with db.engine.connect() as conn:
+        try:
+            conn.execute(text(
+                "ALTER TABLE vulnerabilities ADD COLUMN cve_status VARCHAR(30) NOT NULL DEFAULT 'active'"
+            ))
+            conn.commit()
+        except Exception:
+            pass  # Column already exists
 
 
 def _seed_admin():
