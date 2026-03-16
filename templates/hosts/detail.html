@@ -6,6 +6,9 @@
 <a href="{{ url_for('audits.detail', audit_id=host.audit_id) }}" class="btn btn-sm btn-outline-secondary">
   <i class="bi bi-arrow-left me-1"></i>Back to Audit
 </a>
+<button class="btn btn-sm btn-outline-info ms-2" id="analyzeBtn" onclick="analyzeHost({{ host.id }})">
+  <i class="bi bi-cpu me-1"></i>Analyze Risk &amp; CVEs
+</button>
 {% endblock %}
 
 {% block content %}
@@ -223,6 +226,34 @@ const RISK_THRESHOLDS = [
   [1, 'LOW', 'info'],
   [0, 'INFO', 'secondary'],
 ];
+
+async function analyzeHost(hostId) {
+  const btn = document.getElementById('analyzeBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Analyzing…';
+  try {
+    const resp = await fetch(`/api/hosts/${hostId}/analyze`, {
+      method: 'POST',
+      headers: { 'X-CSRFToken': getCsrfToken() },
+    });
+    const data = await resp.json();
+    if (!resp.ok) {
+      showToast('danger', data.error || 'Analysis failed');
+      return;
+    }
+    updateRiskBadge(data.risk_score, data.risk_level);
+    const msg = data.new_cves_found > 0
+      ? `Analysis complete — ${data.new_cves_found} new CVE(s) found. Reload to see them.`
+      : `Analysis complete — risk score updated. No new CVEs found.`;
+    showToast('success', msg);
+    if (data.new_cves_found > 0) {
+      setTimeout(() => location.reload(), 2500);
+    }
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-cpu me-1"></i>Analyze Risk & CVEs';
+  }
+}
 
 async function updateVulnStatus(select) {
   const vulnId = select.dataset.vulnId;
