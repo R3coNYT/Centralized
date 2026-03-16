@@ -199,6 +199,7 @@ def run_update():
             "-NoProfile",
             "-ExecutionPolicy", "Bypass",
             "-File", script,
+            "-NoRestart",  # skip service stop/start; web UI handles the restart prompt
         ]
     else:
         script = os.path.join(BASE_DIR, "update.sh")

@@ -75,19 +75,30 @@ centralized
 ### Windows
 
 ```powershell
-# Run from PowerShell (as a regular user, no admin required)
+# Run from an Administrator PowerShell terminal
 Set-ExecutionPolicy Bypass -Scope Process -Force
 irm https://raw.githubusercontent.com/R3coNYT/Centralized/main/Centralized.ps1 | iex
 ```
 
 - Installs to **`C:\Tools\Centralized`**
-- Creates two launchers:
-  - `C:\Tools\Centralized\centralized.bat` — double-click friendly
-  - `C:\Tools\Centralized\centralized.ps1` — PowerShell launcher
+- Registers Centralized as a **Windows service** (`Centralized`) that:
+  - Starts automatically on Windows boot (delayed-auto)
+  - Runs in the background — no console window needed
+  - Can be stopped / disabled at any time
 
-**Start the app:**
-```
-C:\Tools\Centralized\centralized.bat
+**Manage the service:**
+```powershell
+# Check status
+Get-Service Centralized
+
+# Stop the service
+Stop-Service Centralized
+
+# Stop and disable auto-start on boot
+Set-Service Centralized -StartupType Manual; Stop-Service Centralized
+
+# Re-enable auto-start
+Set-Service Centralized -StartupType Automatic; Start-Service Centralized
 ```
 
 > Git and Python 3.10+ must be installed before running the script.  
@@ -151,6 +162,8 @@ cd C:\Tools\Centralized
 .\update.ps1
 ```
 
+The script automatically stops the `Centralized` service before updating and restarts it once done.
+
 > If you get an execution policy error, run first:
 > ```powershell
 > Set-ExecutionPolicy Bypass -Scope Process -Force
@@ -164,10 +177,12 @@ cd C:\Tools\Centralized
 |---|---|
 | 1 | Locate the install directory automatically |
 | 2 | Create a timestamped backup → `backups/YYYYMMDD_HHMMSS/` |
-| 3 | `git fetch` + `git reset --hard origin/main` — pulls latest code |
-| 4 | `pip install -r requirements.txt --upgrade` — updates dependencies |
-| 5 | `db.create_all()` — applies any new database tables |
-| 6 | Prune old backups (keeps last 5) |
+| 3 | **Windows:** stop the `Centralized` service |
+| 4 | `git fetch` + `git reset --hard origin/main` — pulls latest code |
+| 5 | `pip install -r requirements.txt --upgrade` — updates dependencies |
+| 6 | Auto-detect and apply any new tables/columns in the database |
+| 7 | Prune old backups (keeps last 5) |
+| 8 | **Windows:** restart the `Centralized` service |
 
 > **Your database and uploads are in `.gitignore`** — `git reset --hard` never touches them.  
 > The backup is a safety net in case anything goes wrong mid-update.

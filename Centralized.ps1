@@ -188,6 +188,59 @@ function Update-UserPath {
     Write-Ok "User PATH updated"
 }
 
+# ── Windows Service registration ─────────────────────────────────────────────
+
+function Install-CentralizedService {
+    $ServiceName   = "Centralized"
+    $VenvPython    = "$InstallDir\venv\Scripts\python.exe"
+    $ServiceScript = "$InstallDir\centralized_service.py"
+
+    Write-Info "Registering Centralized as a Windows service"
+
+    if (-not (Test-Path $ServiceScript)) {
+        Write-Warn "centralized_service.py not found — skipping service registration"
+        Write-Warn "Start the app manually: $InstallDir\centralized.bat"
+        return
+    }
+
+    # Remove any existing service first
+    $existing = Get-Service $ServiceName -ErrorAction SilentlyContinue
+    if ($existing) {
+        Write-Warn "Existing service found — reinstalling"
+        if ($existing.Status -eq "Running") {
+            & sc.exe stop $ServiceName | Out-Null
+            Start-Sleep -Seconds 3
+        }
+        & $VenvPython $ServiceScript remove 2>$null | Out-Null
+        Start-Sleep -Seconds 1
+    }
+
+    # Register service (uses the venv Python so all dependencies are available)
+    & $VenvPython $ServiceScript install
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warn "Service installation failed — you can still launch manually: $InstallDir\centralized.bat"
+        return
+    }
+
+    # Set startup type to Automatic (delayed start)
+    & sc.exe config $ServiceName start= delayed-auto | Out-Null
+    # Set service description
+    & sc.exe description $ServiceName "R3coNYT Centralized pentest audit management platform" | Out-Null
+
+    # Start the service now
+    & sc.exe start $ServiceName | Out-Null
+    Start-Sleep -Seconds 5
+
+    $svc = Get-Service $ServiceName -ErrorAction SilentlyContinue
+    if ($svc -and $svc.Status -eq "Running") {
+        Write-Ok "Service running  ->  http://127.0.0.1:$AppPort"
+    } else {
+        Write-Warn "Service installed but may need a moment to start"
+        Write-Warn "  Check : Get-Service $ServiceName"
+        Write-Warn "  Logs  : Get-EventLog Application -Source $ServiceName -Newest 10"
+    }
+}
+
 # ── Final summary ─────────────────────────────────────────────────────────────
 
 function Write-Done {
@@ -200,9 +253,16 @@ function Write-Done {
     Write-Host "  App URL     : http://127.0.0.1:$AppPort" -ForegroundColor White
     Write-Host "  Login       : admin / admin"            -ForegroundColor White
     Write-Host ""
-    Write-Host "  Start the app (pick one):"             -ForegroundColor Cyan
-    Write-Host "    $InstallDir\centralized.bat"         -ForegroundColor Yellow
-    Write-Host "    $InstallDir\centralized.ps1  (PowerShell)" -ForegroundColor Yellow
+    $svc = Get-Service "Centralized" -ErrorAction SilentlyContinue
+    if ($svc) {
+        Write-Host "  Service     : Centralized (auto-start, runs in background)" -ForegroundColor Cyan
+        Write-Host "  Stop        : Stop-Service Centralized" -ForegroundColor Yellow
+        Write-Host "  Disable     : Set-Service Centralized -StartupType Manual; Stop-Service Centralized" -ForegroundColor Yellow
+    } else {
+        Write-Host "  Start the app (pick one):"             -ForegroundColor Cyan
+        Write-Host "    $InstallDir\centralized.bat"         -ForegroundColor Yellow
+        Write-Host "    $InstallDir\centralized.ps1  (PowerShell)" -ForegroundColor Yellow
+    }
     Write-Host ""
     Write-Host "  IMPORTANT: Change the default admin password after first login!" -ForegroundColor Red
     Write-Host ""
@@ -225,6 +285,7 @@ function Main {
     New-UploadsDir
     New-Launcher
     Update-UserPath
+    Install-CentralizedService
 
     Write-Done
 }

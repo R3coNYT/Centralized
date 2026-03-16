@@ -87,9 +87,11 @@
           </div>
           {% if is_windows %}
           <pre class="m-0 p-2 rounded small font-monospace"
-               style="background:#0f1117;border:1px solid rgba(255,255,255,.1);display:inline-block">C:\Tools\Centralized\centralized.bat</pre>
+               style="background:#0f1117;border:1px solid rgba(255,255,255,.1);display:inline-block">Restart-Service Centralized</pre>
           <div class="small text-muted mt-2">
-            Stop the current window first, then run the command above in a new PowerShell terminal.
+            Run the command above in an <strong>Administrator</strong> PowerShell terminal to apply the update.<br>
+            To stop the service without it restarting on the next Windows boot:
+            <code>Set-Service Centralized -StartupType Manual; Stop-Service Centralized</code>
           </div>
           {% else %}
           <pre class="m-0 p-2 rounded small font-monospace"
