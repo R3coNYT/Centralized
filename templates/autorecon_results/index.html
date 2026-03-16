@@ -1,0 +1,421 @@
+{% extends "base.html" %}
+{% block title %}AutoRecon Results{% endblock %}
+{% block page_title %}AutoRecon Results{% endblock %}
+
+{% block topbar_actions %}
+<div class="d-flex align-items-center gap-2">
+  <span id="sel-counter" class="badge bg-secondary fs-6 px-3 py-2 d-none">
+    <i class="bi bi-check2-square me-1"></i>
+    <span id="sel-count">0</span> selected
+  </span>
+  <button id="btn-add-to-audit" class="btn btn-primary d-none" data-bs-toggle="modal" data-bs-target="#importModal">
+    <i class="bi bi-cloud-upload me-1"></i>Add To Audit
+  </button>
+</div>
+{% endblock %}
+
+{% block content %}
+{% if not base_exists %}
+<div class="alert alert-warning d-flex align-items-center gap-2">
+  <i class="bi bi-exclamation-triangle-fill fs-5"></i>
+  <div>
+    AutoRecon results directory not found: <code>{{ base_dir }}</code>.
+    Run an AutoRecon scan first, or check the path in <code>routes/autorecon_results.py</code>.
+  </div>
+</div>
+{% else %}
+<!-- Breadcrumb -->
+<nav aria-label="breadcrumb" class="mb-3">
+  <ol class="breadcrumb" id="breadcrumb">
+    <li class="breadcrumb-item">
+      <a href="#" class="bc-link" data-path="">
+        <i class="bi bi-house-door me-1"></i>results
+      </a>
+    </li>
+  </ol>
+</nav>
+
+<!-- File browser table -->
+<div class="card">
+  <div class="card-body p-0">
+    <table class="table table-hover table-dark mb-0" id="file-table">
+      <thead>
+        <tr>
+          <th style="width:2.5rem">
+            <input type="checkbox" id="chk-all" class="form-check-input" title="Select all files">
+          </th>
+          <th>Name</th>
+          <th>Type</th>
+          <th class="text-end">Size</th>
+        </tr>
+      </thead>
+      <tbody id="file-tbody">
+        <tr>
+          <td colspan="4" class="text-center text-muted py-4">
+            <div class="spinner-border spinner-border-sm me-2"></div>Loading…
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+<!-- ===== Import Modal ===== -->
+<div class="modal fade" id="importModal" tabindex="-1" aria-labelledby="importModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="importModalLabel">
+          <i class="bi bi-cloud-upload me-2 text-primary"></i>Add To Audit
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <!-- Selected files recap -->
+        <h6 class="mb-2 text-muted">Selected files</h6>
+        <ul class="list-group list-group-flush mb-3" id="modal-file-list"></ul>
+
+        <!-- Audit selector -->
+        <div class="mb-3">
+          <label for="audit-select" class="form-label fw-semibold">Target Audit</label>
+          <select class="form-select" id="audit-select">
+            <option value="">— choose an audit —</option>
+            {% for audit in audits %}
+            <option value="{{ audit.id }}">
+              {{ audit.name }}{% if audit.client %} — {{ audit.client.name }}{% endif %}
+            </option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <!-- NVD toggle -->
+        <div class="form-check form-switch mb-1">
+          <input class="form-check-input" type="checkbox" id="enrich-nvd" role="switch">
+          <label class="form-check-label" for="enrich-nvd">
+            <strong>Enrich with NVD CVE data</strong>
+            — auto-lookup CVEs for discovered services
+            <span class="badge bg-warning text-dark ms-1">Slower</span>
+          </label>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary" id="btn-import-confirm">
+          <i class="bi bi-cloud-upload me-1"></i>Import
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Progress toast ===== -->
+<div class="position-fixed bottom-0 end-0 p-3" style="z-index:1100">
+  <div id="import-toast" class="toast align-items-center text-bg-primary border-0" role="alert" aria-live="assertive" aria-atomic="true">
+    <div class="d-flex">
+      <div class="toast-body" id="import-toast-body">Importing…</div>
+      <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+{{ super() if super is defined }}
+<script>
+(function () {
+  "use strict";
+
+  /* ── state ── */
+  const selectedPaths = new Map(); // path → {name, ext}
+  let currentPath = "";
+
+  /* ── DOM refs ── */
+  const tbody       = document.getElementById("file-tbody");
+  const breadcrumb  = document.getElementById("breadcrumb");
+  const selCounter  = document.getElementById("sel-counter");
+  const selCount    = document.getElementById("sel-count");
+  const btnAdd      = document.getElementById("btn-add-to-audit");
+  const chkAll      = document.getElementById("chk-all");
+  const modalList   = document.getElementById("modal-file-list");
+  const auditSelect = document.getElementById("audit-select");
+  const enrichNvd   = document.getElementById("enrich-nvd");
+  const btnConfirm  = document.getElementById("btn-import-confirm");
+  const toastEl     = document.getElementById("import-toast");
+  const toastBody   = document.getElementById("import-toast-body");
+  const toast       = toastEl ? new bootstrap.Toast(toastEl, {delay: 5000}) : null;
+
+  /* ── helpers ── */
+  function fmtSize(bytes) {
+    if (bytes == null) return "";
+    if (bytes < 1024) return bytes + " B";
+    if (bytes < 1048576) return (bytes / 1024).toFixed(1) + " KB";
+    return (bytes / 1048576).toFixed(1) + " MB";
+  }
+
+  function extBadge(ext) {
+    const cls = {json:"bg-success", xml:"bg-warning text-dark", pdf:"bg-danger"}[ext] || "bg-secondary";
+    return ext ? `<span class="badge ${cls}">${ext.toUpperCase()}</span>` : "";
+  }
+
+  function updateSelUI() {
+    const n = selectedPaths.size;
+    selCount.textContent = n;
+    selCounter.classList.toggle("d-none", n === 0);
+    btnAdd.classList.toggle("d-none", n === 0);
+
+    // update chk-all indeterminate state
+    if (!chkAll) return;
+    const rows = tbody.querySelectorAll("input.file-chk");
+    const checked = tbody.querySelectorAll("input.file-chk:checked");
+    chkAll.indeterminate = checked.length > 0 && checked.length < rows.length;
+    chkAll.checked = rows.length > 0 && checked.length === rows.length;
+  }
+
+  /* ── browse ── */
+  function browse(relPath) {
+    currentPath = relPath || "";
+    tbody.innerHTML = `
+      <tr><td colspan="4" class="text-center text-muted py-4">
+        <div class="spinner-border spinner-border-sm me-2"></div>Loading…
+      </td></tr>`;
+
+    const url = new URL("{{ url_for('autorecon_results.api_browse') }}", location.href);
+    if (relPath) url.searchParams.set("path", relPath);
+
+    fetch(url)
+      .then(r => r.json())
+      .then(data => renderDir(data))
+      .catch(err => {
+        tbody.innerHTML = `<tr><td colspan="4" class="text-danger p-3">Error: ${err}</td></tr>`;
+      });
+  }
+
+  function renderDir(data) {
+    buildBreadcrumb(data.current_path);
+    tbody.innerHTML = "";
+
+    if (data.error) {
+      tbody.innerHTML = `<tr><td colspan="4" class="text-danger p-3">${data.error}</td></tr>`;
+      return;
+    }
+
+    // Back row
+    if (data.parent_path !== null && data.parent_path !== undefined) {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td></td>
+        <td colspan="3">
+          <a href="#" class="text-decoration-none dir-link" data-path="${esc(data.parent_path ?? "")}">
+            <i class="bi bi-arrow-up-circle me-1 text-secondary"></i>..
+          </a>
+        </td>`;
+      tbody.appendChild(tr);
+    }
+
+    if (data.items.length === 0) {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `<td colspan="4" class="text-muted text-center py-3">Empty folder</td>`;
+      tbody.appendChild(tr);
+      return;
+    }
+
+    data.items.forEach(item => {
+      const tr = document.createElement("tr");
+      if (item.type === "dir") {
+        tr.innerHTML = `
+          <td></td>
+          <td>
+            <a href="#" class="text-decoration-none dir-link fw-semibold" data-path="${esc(item.path)}">
+              <i class="bi bi-folder-fill me-2 text-warning"></i>${esc(item.name)}
+            </a>
+          </td>
+          <td><span class="text-muted small">Folder</span></td>
+          <td></td>`;
+      } else {
+        const isAllowed = item.allowed;
+        const checked   = selectedPaths.has(item.path) ? "checked" : "";
+        const disabled  = isAllowed ? "" : "disabled";
+        tr.innerHTML = `
+          <td>
+            <input type="checkbox" class="form-check-input file-chk" ${checked} ${disabled}
+                   data-path="${esc(item.path)}" data-name="${esc(item.name)}" data-ext="${esc(item.ext)}">
+          </td>
+          <td>
+            <i class="bi bi-file-earmark${isAllowed ? "-text" : ""} me-2 ${isAllowed ? "text-info" : "text-muted"}"></i>
+            ${esc(item.name)}
+            ${!isAllowed ? '<span class="ms-2 badge bg-secondary small">unsupported</span>' : ""}
+          </td>
+          <td>${extBadge(item.ext)}</td>
+          <td class="text-end text-muted small">${fmtSize(item.size)}</td>`;
+      }
+      tbody.appendChild(tr);
+    });
+
+    bindEvents();
+    updateSelUI();
+  }
+
+  function buildBreadcrumb(relPath) {
+    if (!breadcrumb) return;
+    const parts  = relPath ? relPath.split("/").filter(Boolean) : [];
+    let html = `<li class="breadcrumb-item"><a href="#" class="bc-link text-decoration-none" data-path=""><i class="bi bi-house-door me-1"></i>results</a></li>`;
+    let cumul = "";
+    parts.forEach((p, i) => {
+      cumul = cumul ? cumul + "/" + p : p;
+      const isLast = i === parts.length - 1;
+      if (isLast) {
+        html += `<li class="breadcrumb-item active">${esc(p)}</li>`;
+      } else {
+        html += `<li class="breadcrumb-item"><a href="#" class="bc-link text-decoration-none" data-path="${esc(cumul)}">${esc(p)}</a></li>`;
+      }
+    });
+    breadcrumb.innerHTML = html;
+    breadcrumb.querySelectorAll(".bc-link").forEach(a => {
+      a.addEventListener("click", e => { e.preventDefault(); browse(a.dataset.path); });
+    });
+  }
+
+  function esc(str) {
+    return String(str ?? "")
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  }
+
+  function bindEvents() {
+    tbody.querySelectorAll(".dir-link").forEach(a => {
+      a.addEventListener("click", e => { e.preventDefault(); browse(a.dataset.path); });
+    });
+    tbody.querySelectorAll("input.file-chk").forEach(chk => {
+      chk.addEventListener("change", () => {
+        if (chk.checked) {
+          selectedPaths.set(chk.dataset.path, {name: chk.dataset.name, ext: chk.dataset.ext});
+        } else {
+          selectedPaths.delete(chk.dataset.path);
+        }
+        updateSelUI();
+      });
+    });
+  }
+
+  if (chkAll) {
+    chkAll.addEventListener("change", () => {
+      tbody.querySelectorAll("input.file-chk:not(:disabled)").forEach(chk => {
+        chk.checked = chkAll.checked;
+        if (chk.checked) {
+          selectedPaths.set(chk.dataset.path, {name: chk.dataset.name, ext: chk.dataset.ext});
+        } else {
+          selectedPaths.delete(chk.dataset.path);
+        }
+      });
+      updateSelUI();
+    });
+  }
+
+  /* ── modal population ── */
+  const importModal = document.getElementById("importModal");
+  if (importModal) {
+    importModal.addEventListener("show.bs.modal", () => {
+      modalList.innerHTML = "";
+      selectedPaths.forEach((meta, path) => {
+        const li = document.createElement("li");
+        li.className = "list-group-item d-flex justify-content-between align-items-center py-1 px-2";
+        li.dataset.path = path;
+        li.innerHTML = `
+          <span class="text-truncate me-2">
+            <i class="bi bi-file-earmark-text me-1 text-info"></i>${esc(meta.name)}
+            <span class="text-muted small ms-1">${esc(path)}</span>
+          </span>
+          <button type="button" class="btn btn-sm btn-outline-danger py-0 btn-remove-file" data-path="${esc(path)}">
+            <i class="bi bi-x"></i>
+          </button>`;
+        modalList.appendChild(li);
+      });
+      bindRemoveButtons();
+    });
+  }
+
+  function bindRemoveButtons() {
+    modalList.querySelectorAll(".btn-remove-file").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const path = btn.dataset.path;
+        selectedPaths.delete(path);
+        btn.closest("li").remove();
+        updateSelUI();
+        // uncheck in table if visible
+        const chk = tbody.querySelector(`input.file-chk[data-path="${CSS.escape(path)}"]`);
+        if (chk) chk.checked = false;
+        if (selectedPaths.size === 0) {
+          bootstrap.Modal.getInstance(importModal)?.hide();
+        }
+      });
+    });
+  }
+
+  /* ── import ── */
+  if (btnConfirm) {
+    btnConfirm.addEventListener("click", () => {
+      const auditId = parseInt(auditSelect.value);
+      if (!auditId) {
+        auditSelect.classList.add("is-invalid");
+        return;
+      }
+      auditSelect.classList.remove("is-invalid");
+
+      const paths = Array.from(selectedPaths.keys());
+
+      btnConfirm.disabled = true;
+      btnConfirm.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Importing…';
+
+      const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content ?? "";
+
+      fetch("{{ url_for('autorecon_results.api_import') }}", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRFToken": csrfToken,
+        },
+        body: JSON.stringify({paths, audit_id: auditId, enrich_nvd: enrichNvd.checked}),
+      })
+        .then(r => r.json())
+        .then(data => {
+          bootstrap.Modal.getInstance(importModal)?.hide();
+          btnConfirm.disabled = false;
+          btnConfirm.innerHTML = '<i class="bi bi-cloud-upload me-1"></i>Import';
+
+          const errors = (data.results || []).filter(r => !r.ok);
+          if (data.ok_count > 0) {
+            toastEl.classList.remove("text-bg-primary", "text-bg-danger");
+            toastEl.classList.add(errors.length ? "text-bg-warning" : "text-bg-success");
+            toastBody.textContent = `${data.ok_count}/${data.total} file(s) imported successfully.${errors.length ? " " + errors.length + " error(s)." : ""}`;
+          } else {
+            toastEl.classList.remove("text-bg-primary", "text-bg-success");
+            toastEl.classList.add("text-bg-danger");
+            toastBody.textContent = `Import failed: ${errors.map(r => r.error).join("; ")}`;
+          }
+          toast?.show();
+
+          if (data.ok_count > 0) {
+            selectedPaths.clear();
+            updateSelUI();
+            browse(currentPath);
+          }
+        })
+        .catch(err => {
+          btnConfirm.disabled = false;
+          btnConfirm.innerHTML = '<i class="bi bi-cloud-upload me-1"></i>Import';
+          toastEl.classList.remove("text-bg-primary", "text-bg-success");
+          toastEl.classList.add("text-bg-danger");
+          toastBody.textContent = `Network error: ${err}`;
+          toast?.show();
+        });
+    });
+  }
+
+  /* ── init ── */
+  {% if base_exists %}
+  browse("");
+  {% endif %}
+})();
+</script>
+{% endblock %}
