@@ -120,15 +120,16 @@ git_update() {
         info "Local file changes stashed: $stash_result"
     fi
 
+    # Untrack data files BEFORE reset so git never tries to write/delete them
+    # (critical on Windows where the DB file may be locked by a running process)
+    git rm --cached centralized.db -q 2>/dev/null || true
+    git rm --cached -r uploads/ -q 2>/dev/null || true
+
     # Fetch + reset to match remote
     git fetch origin
     local current_branch
     current_branch="$(git rev-parse --abbrev-ref HEAD)"
     git reset --hard "origin/$current_branch"
-
-    # Untrack data files so future resets never touch them
-    git rm --cached centralized.db -q 2>/dev/null || true
-    git rm --cached -r uploads/ -q 2>/dev/null || true
 
     # Restore data files from the backup taken at the start of this update
     log "Restoring data from backup → $BACKUP_DIR"
