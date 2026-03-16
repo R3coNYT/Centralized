@@ -72,6 +72,9 @@ def parse_autorecon_json(file_path: str) -> dict:
         ip = resolved_ips[0] if resolved_ips else (input_target if data.get("is_ip") else None)
         if not ip:
             ip = host_key
+        # Also skip if the resolved IP itself is a network/broadcast address
+        if ip in excluded_ips:
+            continue
 
         risk = host_data.get("risk", {}) or {}
         cms_list = host_data.get("cms", []) or []
