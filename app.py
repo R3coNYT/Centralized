@@ -119,13 +119,15 @@ def _migrate_db():
     """Apply lightweight column migrations for existing databases."""
     from sqlalchemy import text
     with db.engine.connect() as conn:
-        try:
-            conn.execute(text(
-                "ALTER TABLE vulnerabilities ADD COLUMN cve_status VARCHAR(30) NOT NULL DEFAULT 'active'"
-            ))
-            conn.commit()
-        except Exception:
-            pass  # Column already exists
+        for stmt in [
+            "ALTER TABLE vulnerabilities ADD COLUMN cve_status VARCHAR(30) NOT NULL DEFAULT 'active'",
+            "ALTER TABLE hosts ADD COLUMN tag VARCHAR(100)",
+        ]:
+            try:
+                conn.execute(text(stmt))
+                conn.commit()
+            except Exception:
+                pass  # Column already exists
 
 
 def _seed_admin():

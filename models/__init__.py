@@ -109,6 +109,7 @@ class Host(db.Model):
     risk_level = db.Column(db.String(20))       # INFO/LOW/MEDIUM/HIGH/CRITICAL
     cms = db.Column(db.String(200))
     waf = db.Column(db.String(200))
+    tag = db.Column(db.String(100))
     created_at = db.Column(db.DateTime, default=utcnow)
 
     ports = db.relationship("Port", backref="host", lazy="dynamic", cascade="all, delete-orphan")
