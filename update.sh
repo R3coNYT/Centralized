@@ -130,8 +130,6 @@ git_update() {
     git rm --cached centralized.db -q 2>/dev/null || true
     git rm --cached -r uploads/ -q 2>/dev/null || true
 
-    chmod +x "$INSTALL_DIR/update.sh"
-
     # Restore data files from the backup taken at the start of this update
     log "Restoring data from backup → $BACKUP_DIR"
 
@@ -274,6 +272,7 @@ main() {
     apply_db_migrations
     prune_backups
     restart_service
+    chmod +x "$INSTALL_DIR/update.sh"
     print_done
 }
 
