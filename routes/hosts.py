@@ -1,4 +1,4 @@
-from flask import Blueprint, render_template
+from flask import Blueprint, render_template, request, jsonify
 from flask_login import login_required
 from models import Host, Port, Vulnerability, HttpPage, CVE_STATUS_VALUES
 from extensions import db
@@ -32,3 +32,14 @@ def detail(host_id):
         pages=pages,
         cve_status_values=CVE_STATUS_VALUES,
     )
+
+
+@hosts_bp.route("/<int:host_id>/tag", methods=["POST"])
+@login_required
+def update_tag(host_id):
+    host = Host.query.get_or_404(host_id)
+    data = request.get_json(silent=True) or {}
+    tag = (data.get("tag") or "").strip()[:100]
+    host.tag = tag if tag else None
+    db.session.commit()
+    return jsonify({"ok": True, "tag": host.tag})

@@ -138,8 +138,16 @@
         {% for host in hosts %}
         {% set h_vulns = host.vulnerabilities.count() %}
         <tr>
-          <td class="fw-semibold font-monospace">
+          <td class="fw-semibold font-monospace" style="position:relative;padding-right:5.5rem">
             <a href="{{ url_for('hosts.detail', host_id=host.id) }}" class="text-decoration-none">{{ host.ip }}</a>
+            <input type="text"
+                   class="host-tag-input"
+                   data-host-id="{{ host.id }}"
+                   value="{{ host.tag or '' }}"
+                   placeholder="tag"
+                   maxlength="100"
+                   style="position:absolute;top:50%;right:.4rem;transform:translateY(-50%);width:5rem;font-size:.7rem;padding:.1rem .3rem;border:1px dashed #6c757d;border-radius:.25rem;background:transparent;color:inherit;outline:none;"
+                   title="Assign a label to this host (e.g. printer, dc, web)">
           </td>
           <td class="text-muted small">{{ host.hostname or '—' }}</td>
           <td class="text-muted small">{{ host.os_info or '—' }}</td>
@@ -328,7 +336,38 @@ const svcLabels = [{% for svc, cnt in port_svc %}'{{ svc }}',{% endfor %}];
 const svcValues = [{% for svc, cnt in port_svc %}{{ cnt }},{% endfor %}];
 initAuditCharts(sevMap, svcLabels, svcValues);
 
-async function analyzeAudit(auditId) {
+// ── Host tag ──────────────────────────────────────────────────────────────
+document.querySelectorAll('.host-tag-input').forEach(input => {
+  let lastValue = input.value;
+
+  input.addEventListener('blur', async () => {
+    const val = input.value.trim();
+    if (val === lastValue) return;
+    const hostId = input.dataset.hostId;
+    try {
+      const resp = await fetch(`/hosts/${hostId}/tag`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrfToken() },
+        body: JSON.stringify({ tag: val }),
+      });
+      if (resp.ok) {
+        lastValue = val;
+        input.style.borderColor = '#198754';
+        setTimeout(() => { input.style.borderColor = ''; }, 1200);
+      } else {
+        showToast('danger', 'Failed to save tag');
+      }
+    } catch {
+      showToast('danger', 'Failed to save tag');
+    }
+  });
+
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter') input.blur();
+    if (e.key === 'Escape') { input.value = lastValue; input.blur(); }
+  });
+});
+
   const btn = document.getElementById('analyzeAuditBtn');
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Analyzing…';
