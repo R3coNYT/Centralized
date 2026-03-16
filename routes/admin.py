@@ -165,6 +165,7 @@ def update_page():
     is_outdated = bool(latest_hash and current_hash and current_hash != latest_hash)
     up_to_date  = bool(latest_hash and current_hash and current_hash == latest_hash)
 
+    import platform as _platform
     return render_template(
         "admin/update.html",
         current_hash=current_hash,
@@ -174,6 +175,7 @@ def update_page():
         latest_message=latest_message,
         is_outdated=is_outdated,
         up_to_date=up_to_date,
+        is_windows=(_platform.system() == "Windows"),
     )
 
 
