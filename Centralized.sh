@@ -82,17 +82,32 @@ get_sudo() {
 
 install_base_deps_linux() {
     log "Installing Linux system dependencies"
-    retry 3 $SUDO apt-get update -qq
 
     local deps=(git curl python3 python3-pip python3-venv ca-certificates libxml2-dev libxslt1-dev)
+
+    # Check if every dependency is already present — skip apt-get update entirely
+    local all_installed=true
     for pkg in "${deps[@]}"; do
-        if dpkg -s "$pkg" >/dev/null 2>&1; then
-            ok "$pkg already installed"
-        else
-            retry 3 $SUDO apt-get install -y "$pkg"
-            ok "$pkg installed"
+        if ! dpkg -s "$pkg" >/dev/null 2>&1; then
+            all_installed=false
+            break
         fi
     done
+
+    if $all_installed; then
+        ok "All system dependencies already installed — skipping apt update"
+    else
+        retry 3 $SUDO apt-get update -qq
+
+        for pkg in "${deps[@]}"; do
+            if dpkg -s "$pkg" >/dev/null 2>&1; then
+                ok "$pkg already installed"
+            else
+                retry 3 $SUDO apt-get install -y "$pkg"
+                ok "$pkg installed"
+            fi
+        done
+    fi
 }
 
 install_base_deps_macos() {
