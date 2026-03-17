@@ -206,6 +206,68 @@ def cve_lookup():
     return jsonify(data)
 
 
+@api_bp.route("/cve/<path:cve_id>/affected")
+@login_required
+def cve_affected_software(cve_id):
+    """Return a grouped, human-readable list of software affected by a CVE."""
+    import re as _re
+    from collections import OrderedDict
+    from services.cve_service import fetch_cve_configurations
+
+    cve_id = cve_id.upper().strip()
+    if not _re.match(r"^CVE-\d{4}-\d{4,7}$", cve_id):
+        return jsonify({"error": "Invalid CVE ID"}), 400
+
+    configurations = fetch_cve_configurations(cve_id)
+    groups = OrderedDict()
+
+    for node_group in configurations:
+        for node in node_group.get("nodes", []):
+            for cm in node.get("cpeMatch", []):
+                if not cm.get("vulnerable", False):
+                    continue
+                cpe = cm.get("criteria", "")
+                cpe_parts = cpe.split(":")
+                if len(cpe_parts) < 5:
+                    continue
+
+                part_type = cpe_parts[2]          # a / o / h
+                vendor    = cpe_parts[3]
+                product   = cpe_parts[4]
+                cpe_ver   = cpe_parts[5] if len(cpe_parts) > 5 else "*"
+
+                si = cm.get("versionStartIncluding")
+                se = cm.get("versionStartExcluding")
+                ei = cm.get("versionEndIncluding")
+                ee = cm.get("versionEndExcluding")
+
+                if any([si, se, ei, ee]):
+                    bounds = []
+                    if si: bounds.append(f">= {si}")
+                    if se: bounds.append(f"> {se}")
+                    if ei: bounds.append(f"<= {ei}")
+                    if ee: bounds.append(f"< {ee}")
+                    version_range = " ".join(bounds)
+                elif cpe_ver not in ("*", "-", ""):
+                    version_range = cpe_ver
+                else:
+                    version_range = "*"
+
+                key = (vendor, product)
+                if key not in groups:
+                    groups[key] = {
+                        "type": {"a": "App", "o": "OS", "h": "HW"}.get(part_type, "?"),
+                        "vendor":  vendor.replace("_", " "),
+                        "product": product.replace("_", " "),
+                        "versions": [],
+                    }
+                if version_range not in groups[key]["versions"]:
+                    groups[key]["versions"].append(version_range)
+
+    result = list(groups.values())
+    return jsonify({"affected": result, "count": len(result)})
+
+
 @api_bp.route("/cve/search")
 @login_required
 def cve_search():
