@@ -264,6 +264,23 @@ def cpe_match_for_product(configurations: list, product_hint: str) -> list:
     return matches
 
 
+def has_os_cpe_entries(configurations: list) -> bool:
+    """Return True if at least one vulnerable CPE in *configurations* has part
+    type ``o`` (Operating System).  Used to decide whether a missing OS product
+    match should be treated as a False Positive rather than skipped.
+    """
+    for node_group in configurations:
+        for node in node_group.get("nodes", []):
+            for cm in node.get("cpeMatch", []):
+                if not cm.get("vulnerable", False):
+                    continue
+                cpe = cm.get("criteria", "").lower()
+                parts = cpe.split(":")
+                if len(parts) > 2 and parts[2] == "o":
+                    return True
+    return False
+
+
 def is_version_affected(user_version: str, cpe_matches: list) -> bool | None:
     """Check whether *user_version* falls inside ANY of the supplied cpeMatch
     version ranges.

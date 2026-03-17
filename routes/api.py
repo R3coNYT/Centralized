@@ -423,34 +423,68 @@ def set_host_context(host_id):
         db.session.commit()
         return jsonify({"saved": True, "false_positives": [], "confirmed": [], "skipped": []})
 
-    # Build a lookup of product/name → user version (lower-case keys)
-    version_map: dict[str, str] = {}
+    # Service lookup: name → version (only entries that have a version filled in)
+    service_map: dict[str, str] = {}
     for svc in services:
         name = (svc.get("name") or "").strip().lower()
         ver  = (svc.get("version") or "").strip()
         if name and ver:
-            version_map[name] = ver
-    # Add OS into the map with common alias patterns
+            service_map[name] = ver
+
+    # Resolve OS string → specific CPE product hint (e.g. "Windows 11" → "windows_11")
+    # Using the exact product name prevents "windows" from matching "windows_2000" etc.
+    import re as _re
+    _OS_PRODUCT_MAP = [
+        (r"windows\s*11",                "windows_11"),
+        (r"windows\s*10",                "windows_10"),
+        (r"windows\s*8\.1",              "windows_8.1"),
+        (r"windows\s*8\b",               "windows_8"),
+        (r"windows\s*7",                 "windows_7"),
+        (r"windows\s*vista",             "windows_vista"),
+        (r"windows\s*xp",                "windows_xp"),
+        (r"windows\s*2000",              "windows_2000"),
+        (r"windows\s*nt",                "windows_nt"),
+        (r"windows\s*server\s*2022",     "windows_server_2022"),
+        (r"windows\s*server\s*2019",     "windows_server_2019"),
+        (r"windows\s*server\s*2016",     "windows_server_2016"),
+        (r"windows\s*server\s*2012\s*r2","windows_server_2012_r2"),
+        (r"windows\s*server\s*2012",     "windows_server_2012"),
+        (r"windows\s*server\s*2008\s*r2","windows_server_2008_r2"),
+        (r"windows\s*server\s*2008",     "windows_server_2008"),
+        (r"windows\s*server\s*2003",     "windows_server_2003"),
+        (r"ubuntu",                      "ubuntu_linux"),
+        (r"debian",                      "debian_linux"),
+        (r"centos",                      "centos"),
+        (r"red\s*hat|rhel",              "enterprise_linux"),
+        (r"fedora",                      "fedora"),
+        (r"kali",                        "kali_linux"),
+        (r"rocky",                       "rocky_linux"),
+        (r"alma",                        "almalinux"),
+        (r"mac\s*os|macos|os\s*x",       "mac_os_x"),
+        (r"freebsd",                     "freebsd"),
+        (r"android",                     "android"),
+        (r"alpine",                      "alpine_linux"),
+    ]
+    os_product_hint = None
+    os_ver_for_compare = None
     if os_version:
-        # Normalize: "Ubuntu 22.04" → key "ubuntu"
         os_lower = os_version.lower()
-        for alias in ("ubuntu", "debian", "windows", "centos", "rhel", "fedora",
-                      "alpine", "kali", "arch", "freebsd", "macos", "android"):
-            if alias in os_lower:
-                # Extract version portion (first contiguous numeric part after the name)
-                import re as _re
-                m = _re.search(r"[\d]+(?:[.\d]+)?", os_version)
-                if m:
-                    version_map[alias] = m.group(0)
-                    version_map[os_lower.split()[0]] = m.group(0)
+        for pattern, product in _OS_PRODUCT_MAP:
+            if _re.search(pattern, os_lower):
+                os_product_hint = product
+                m = _re.search(r"\d+(?:[.\d]+)?", os_version)
+                os_ver_for_compare = m.group(0) if m else None
                 break
 
-    if not version_map:
+    if not service_map and not os_product_hint:
         db.session.commit()
         return jsonify({"saved": True, "false_positives": [], "confirmed": [], "skipped": [],
-                        "message": "No versioned services provided — nothing to correlate."})
+                        "message": "No versioned services or recognisable OS provided — nothing to correlate."})
 
-    from services.cve_service import fetch_cve_configurations, cpe_match_for_product, is_version_affected
+    from services.cve_service import (
+        fetch_cve_configurations, cpe_match_for_product,
+        is_version_affected, has_os_cpe_entries,
+    )
     from routes.uploads import _compute_host_risk
 
     false_positives = []
@@ -474,12 +508,58 @@ def set_host_context(host_id):
             skipped.append({"vuln_id": vuln.id, "cve_id": vuln.cve_id, "reason": "No CPE data"})
             continue
 
-        # Find the best matching user-provided version
+        decided = False
+
+        # ── Phase 1: OS-level check ───────────────────────────────────────────
+        # If the CVE explicitly lists OS-type CPEs and the user's specific OS
+        # product (e.g. "windows_11") is NOT among them → False Positive.
+        # This correctly handles CVEs that only affect windows_xp/windows_2000
+        # when the user is running Windows 11.
+        if os_product_hint and has_os_cpe_entries(configs):
+            os_cpe_entries = cpe_match_for_product(configs, os_product_hint)
+            if not os_cpe_entries:
+                # CVE names specific OS versions — ours isn't one of them
+                vuln.cve_status = "false_positive"
+                false_positives.append({
+                    "vuln_id": vuln.id,
+                    "cve_id": vuln.cve_id,
+                    "product": os_product_hint,
+                    "version": os_ver_for_compare or "N/A",
+                    "reason": f"CVE does not affect {os_product_hint} (not listed in CPE configurations)",
+                })
+                decided = True
+            elif os_ver_for_compare:
+                # Our OS product IS listed — additionally check version bounds
+                affected = is_version_affected(os_ver_for_compare, os_cpe_entries)
+                if affected is False:
+                    vuln.cve_status = "false_positive"
+                    false_positives.append({
+                        "vuln_id": vuln.id,
+                        "cve_id": vuln.cve_id,
+                        "product": os_product_hint,
+                        "version": os_ver_for_compare,
+                        "reason": f"{os_product_hint} {os_ver_for_compare} is not in the affected version range",
+                    })
+                    decided = True
+                elif affected is True:
+                    confirmed.append({
+                        "vuln_id": vuln.id,
+                        "cve_id": vuln.cve_id,
+                        "product": os_product_hint,
+                        "version": os_ver_for_compare,
+                        "reason": f"{os_product_hint} {os_ver_for_compare} is within the affected version range",
+                    })
+                    decided = True
+
+        if decided:
+            continue
+
+        # ── Phase 2: Service / software version check ─────────────────────────
         matched_product = None
         matched_version = None
         matched_cpe_entries = []
 
-        for name, ver in version_map.items():
+        for name, ver in service_map.items():
             cpe_entries = cpe_match_for_product(configs, name)
             if cpe_entries:
                 matched_product = name
@@ -495,7 +575,6 @@ def set_host_context(host_id):
         affected = is_version_affected(matched_version, matched_cpe_entries)
 
         if affected is False:
-            # Version outside all vulnerable ranges → false positive
             vuln.cve_status = "false_positive"
             false_positives.append({
                 "vuln_id": vuln.id,
