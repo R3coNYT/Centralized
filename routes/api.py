@@ -124,10 +124,8 @@ def analyze_audit(audit_id):
     total_cves = 0
     total_cvss = 0
 
+    # ── Phase 1: port-based CVE lookup (new ports without any linked CVEs) ───
     for host in hosts:
-        original_level = host.risk_level
-
-        # Auto CVE lookup
         for port_obj in host.ports.filter_by(state="open"):
             product = _clean_str(port_obj.product)
             service = (port_obj.service or "").lower()
@@ -142,26 +140,43 @@ def analyze_audit(audit_id):
                     after = Vulnerability.query.filter_by(host_id=host.id).count()
                     total_cves += after - before
 
-        db.session.flush()
+    db.session.flush()
 
-        # Refresh CVSS for existing vulns missing scores
-        for vuln in host.vulnerabilities:
-            if vuln.cve_id and (vuln.cvss_score is None or vuln.severity in ("UNKNOWN", None)):
-                _nvd_enrich_vuln(vuln, vuln.cve_id)
-                total_cvss += 1
+    # ── Phase 2: bulk refresh of ALL UNKNOWN/missing-CVSS vulns in the audit ─
+    # Query directly (avoids dynamic-relationship iteration issues across hosts)
+    unknown_vulns = (
+        Vulnerability.query
+        .join(Host, Host.id == Vulnerability.host_id)
+        .filter(
+            Host.audit_id == audit_id,
+            Vulnerability.cve_id.isnot(None),
+            db.or_(
+                Vulnerability.cvss_score.is_(None),
+                Vulnerability.severity.in_(["UNKNOWN"]),
+                Vulnerability.severity.is_(None),
+            ),
+        )
+        .all()
+    )
 
-        db.session.flush()
+    for vuln in unknown_vulns:
+        _nvd_enrich_vuln(vuln, vuln.cve_id)
+        total_cvss += 1
 
-        # Recompute risk score
+    db.session.flush()
+
+    # ── Phase 3: recompute risk scores for all hosts ──────────────────────────
+    has_autorecon = UploadedFile.query.filter(
+        UploadedFile.audit_id == audit_id,
+        UploadedFile.file_type.in_(["autorecon_json", "pdf"]),
+    ).first() is not None
+
+    for host in hosts:
+        original_level = host.risk_level
         score, level = _compute_host_risk(host)
 
-        if original_level == "POTENTIAL" and score < 60:
-            has_autorecon = UploadedFile.query.filter(
-                UploadedFile.audit_id == audit_id,
-                UploadedFile.file_type.in_(["autorecon_json", "pdf"]),
-            ).first() is not None
-            if has_autorecon:
-                level = "POTENTIAL"
+        if original_level == "POTENTIAL" and score < 60 and has_autorecon:
+            level = "POTENTIAL"
 
         host.risk_score = score
         host.risk_level = level
