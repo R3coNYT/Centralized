@@ -219,11 +219,32 @@ def run_update():
         )
         stdout = _ansi.sub("", result.stdout or "")
         stderr = _ansi.sub("", result.stderr or "")
+
+        auto_restarting = False
+        if result.returncode == 0 and platform.system() != "Windows":
+            # Attempt to restart the systemd service automatically.
+            # This works only when the sudoers rule installed by Centralized.sh is present.
+            import shutil as _shutil
+            if _shutil.which("systemctl"):
+                import threading
+                def _restart_service():
+                    import time as _time
+                    _time.sleep(2)  # give the response time to reach the browser
+                    subprocess.run(
+                        ["sudo", "systemctl", "restart", "centralized"],
+                        capture_output=True,
+                        timeout=30,
+                    )
+                t = threading.Thread(target=_restart_service, daemon=True)
+                t.start()
+                auto_restarting = True
+
         return jsonify({
             "returncode": result.returncode,
             "stdout": stdout[-3000:],
             "stderr": stderr[-1000:],
             "restart_required": result.returncode == 0,
+            "auto_restarting": auto_restarting,
         })
     except subprocess.TimeoutExpired:
         return jsonify({"error": "Update timed out after 300 seconds."}), 500

@@ -292,3 +292,182 @@ def _recompute_host_risk(host_id):
         score, level = _compute_host_risk(host)
         host.risk_score = score
         host.risk_level = level
+
+
+# ---------------------------------------------------------------------------
+# Host context — analyst-provided OS / service version hints
+# ---------------------------------------------------------------------------
+
+@api_bp.route("/hosts/<int:host_id>/context", methods=["GET"])
+@login_required
+def get_host_context(host_id):
+    """Return the saved context for a host (OS version + service versions)."""
+    host = Host.query.get_or_404(host_id)
+    from models import HostContext
+    import json
+    ctx = host.context
+    services = []
+    if ctx and ctx.service_versions:
+        try:
+            services = json.loads(ctx.service_versions)
+        except Exception:
+            pass
+    # Also suggest services from detected ports (pre-populate modal)
+    port_hints = [
+        {"name": p.product or p.service or "", "version": p.version or ""}
+        for p in host.ports.filter_by(state="open")
+        if p.product or p.service
+    ]
+    return jsonify({
+        "os_version": ctx.os_version if ctx else "",
+        "services": services,
+        "port_hints": port_hints,
+        "notes": ctx.notes if ctx else "",
+    })
+
+
+@api_bp.route("/hosts/<int:host_id>/context", methods=["POST"])
+@login_required
+def set_host_context(host_id):
+    """Save context and correlate it against CVEs for this host.
+
+    Body JSON:
+        os_version  : str  — e.g. "Ubuntu 22.04"
+        services    : list — [{"name": "openssl", "version": "3.0.2"}, ...]
+        notes       : str  — optional free-text context
+        correlate   : bool — default true; if false just saves without CVE check
+    """
+    host = Host.query.get_or_404(host_id)
+    from models import HostContext
+    import json as _json
+
+    data = request.get_json(silent=True) or {}
+    os_version = (data.get("os_version") or "").strip()
+    services   = data.get("services") or []
+    notes      = (data.get("notes") or "").strip()
+    correlate  = data.get("correlate", True)
+
+    # Persist context
+    ctx = host.context
+    if not ctx:
+        ctx = HostContext(host_id=host_id)
+        db.session.add(ctx)
+    ctx.os_version = os_version or None
+    ctx.service_versions = _json.dumps(services) if services else None
+    ctx.notes = notes or None
+    db.session.flush()
+
+    if not correlate:
+        db.session.commit()
+        return jsonify({"saved": True, "false_positives": [], "confirmed": [], "skipped": []})
+
+    # Build a lookup of product/name → user version (lower-case keys)
+    version_map: dict[str, str] = {}
+    for svc in services:
+        name = (svc.get("name") or "").strip().lower()
+        ver  = (svc.get("version") or "").strip()
+        if name and ver:
+            version_map[name] = ver
+    # Add OS into the map with common alias patterns
+    if os_version:
+        # Normalize: "Ubuntu 22.04" → key "ubuntu"
+        os_lower = os_version.lower()
+        for alias in ("ubuntu", "debian", "windows", "centos", "rhel", "fedora",
+                      "alpine", "kali", "arch", "freebsd", "macos", "android"):
+            if alias in os_lower:
+                # Extract version portion (first contiguous numeric part after the name)
+                import re as _re
+                m = _re.search(r"[\d]+(?:[.\d]+)?", os_version)
+                if m:
+                    version_map[alias] = m.group(0)
+                    version_map[os_lower.split()[0]] = m.group(0)
+                break
+
+    if not version_map:
+        db.session.commit()
+        return jsonify({"saved": True, "false_positives": [], "confirmed": [], "skipped": [],
+                        "message": "No versioned services provided — nothing to correlate."})
+
+    from services.cve_service import fetch_cve_configurations, cpe_match_for_product, is_version_affected
+    from routes.uploads import _compute_host_risk
+
+    false_positives = []
+    confirmed       = []
+    skipped         = []
+
+    # Only check CVEs that are currently active (not already corrected/fp)
+    active_cve_vulns = [
+        v for v in host.vulnerabilities
+        if v.cve_id and v.cve_status not in ("corrected", "false_positive")
+    ]
+
+    for vuln in active_cve_vulns:
+        try:
+            configs = fetch_cve_configurations(vuln.cve_id)
+        except Exception:
+            skipped.append({"vuln_id": vuln.id, "cve_id": vuln.cve_id, "reason": "NVD fetch error"})
+            continue
+
+        if not configs:
+            skipped.append({"vuln_id": vuln.id, "cve_id": vuln.cve_id, "reason": "No CPE data"})
+            continue
+
+        # Find the best matching user-provided version
+        matched_product = None
+        matched_version = None
+        matched_cpe_entries = []
+
+        for name, ver in version_map.items():
+            cpe_entries = cpe_match_for_product(configs, name)
+            if cpe_entries:
+                matched_product = name
+                matched_version = ver
+                matched_cpe_entries = cpe_entries
+                break
+
+        if not matched_cpe_entries:
+            skipped.append({"vuln_id": vuln.id, "cve_id": vuln.cve_id,
+                            "reason": "No matching product in CVE CPE data"})
+            continue
+
+        affected = is_version_affected(matched_version, matched_cpe_entries)
+
+        if affected is False:
+            # Version outside all vulnerable ranges → false positive
+            vuln.cve_status = "false_positive"
+            false_positives.append({
+                "vuln_id": vuln.id,
+                "cve_id": vuln.cve_id,
+                "product": matched_product,
+                "version": matched_version,
+                "reason": f"{matched_product} {matched_version} is not in the affected version range",
+            })
+        elif affected is True:
+            confirmed.append({
+                "vuln_id": vuln.id,
+                "cve_id": vuln.cve_id,
+                "product": matched_product,
+                "version": matched_version,
+                "reason": f"{matched_product} {matched_version} is within the affected version range",
+            })
+        else:
+            skipped.append({"vuln_id": vuln.id, "cve_id": vuln.cve_id,
+                            "reason": "Version range indeterminate"})
+
+    db.session.flush()
+
+    # Recompute risk now that some CVEs may be false positives
+    score, level = _compute_host_risk(host)
+    host.risk_score = score
+    host.risk_level = level
+
+    db.session.commit()
+
+    return jsonify({
+        "saved": True,
+        "false_positives": false_positives,
+        "confirmed": confirmed,
+        "skipped": skipped,
+        "risk_score": host.risk_score,
+        "risk_level": host.risk_level,
+    })
