@@ -151,6 +151,48 @@ def delete_file(audit_id, file_id):
     return redirect(url_for("audits.detail", audit_id=audit_id))
 
 
+@uploads_bp.route("/<int:audit_id>/reprocess", methods=["POST"])
+@login_required
+def reprocess_files(audit_id):
+    """Re-run all uploaded files for an audit through the parser and persist
+    layer.  This enriches existing ports/hosts with data from files that were
+    imported in a different order, filling in any missing product/version/CVE
+    information without duplicating existing records."""
+    audit = Audit.query.get_or_404(audit_id)
+    uf_list = audit.uploaded_files.order_by("created_at").all()
+
+    if not uf_list:
+        flash("No files to reprocess.", "warning")
+        return redirect(url_for("audits.detail", audit_id=audit_id))
+
+    enriched = 0
+    errors = []
+    for uf in uf_list:
+        path = _upload_path(uf)
+        if not os.path.exists(path):
+            errors.append(f"{uf.original_filename}: file not found on disk.")
+            continue
+        result = parse_file(path, uf.file_type, audit_id, db.session)
+        if result.get("error"):
+            errors.append(f"{uf.original_filename}: {result['error']}")
+            continue
+        try:
+            _persist_parsed_data(audit_id, result["hosts"], enrich_nvd=False)
+            enriched += 1
+        except Exception as exc:
+            db.session.rollback()
+            errors.append(f"{uf.original_filename}: DB error – {exc}")
+
+    db.session.commit()
+
+    if enriched:
+        flash(f"Reprocessed {enriched} file(s) — ports and CVEs updated.", "success")
+    for err in errors:
+        flash(err, "danger")
+
+    return redirect(url_for("audits.detail", audit_id=audit_id))
+
+
 def _cleanup_empty_dirs(directory: str):
     """Remove directory if empty, then walk up and do the same for the parent."""
     upload_root = None
@@ -339,6 +381,36 @@ def _persist_parsed_data(audit_id: int, parsed_hosts: list, enrich_nvd: bool):
                 db.session.flush()
                 existing_ports[key] = port_obj
                 new_ports_for_cve.append(port_obj)
+            else:
+                # Port already exists — enrich it with any missing details from
+                # this file (e.g. nmap product/version added after httpx, or vice
+                # versa).  Only overwrite a field when the existing value is blank
+                # and the new value carries real data.
+                port_obj = existing_ports[key]
+                enriched = False
+                product_enriched = False
+                for attr, raw in (
+                    ("service",    pdata.get("service")),
+                    ("product",    pdata.get("product")),
+                    ("version",    pdata.get("version")),
+                    ("extra_info", pdata.get("extra_info")),
+                    ("cpe",        pdata.get("cpe")),
+                ):
+                    new_val = _clean_str(raw)
+                    if new_val and _is_blank(getattr(port_obj, attr)):
+                        setattr(port_obj, attr, new_val)
+                        enriched = True
+                        if attr in ("product", "version"):
+                            product_enriched = True
+                if pdata.get("state") and port_obj.state in (None, ""):
+                    port_obj.state = pdata["state"]
+                    enriched = True
+                # Re-trigger CVE lookup if we just learned the product/version
+                # (this is the main reason import order produced different results)
+                if product_enriched:
+                    new_ports_for_cve.append(port_obj)
+                if enriched:
+                    db.session.flush()
 
         db.session.flush()
 

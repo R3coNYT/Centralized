@@ -138,7 +138,14 @@
           </td>
           <td>{% set severity = v.severity %}{% include '_partials/sev_badge.html' %}</td>
           <td class="small">
-            {% if v.cvss_score %}<span class="fw-bold {% if v.cvss_score >= 9 %}text-danger{% elif v.cvss_score >= 7 %}text-warning{% else %}text-info{% endif %}">{{ v.cvss_score }}</span>{% else %}—{% endif %}
+            {% if v.cvss_score %}
+              {% if v.severity == 'CRITICAL' %}<span class="fw-bold text-danger">{{ v.cvss_score }}</span>
+              {% elif v.severity == 'HIGH' %}<span class="fw-bold" style="color:#fd7e14">{{ v.cvss_score }}</span>
+              {% elif v.severity == 'MEDIUM' %}<span class="fw-bold text-warning">{{ v.cvss_score }}</span>
+              {% elif v.severity == 'LOW' %}<span class="fw-bold text-info">{{ v.cvss_score }}</span>
+              {% else %}<span class="fw-bold text-secondary">{{ v.cvss_score }}</span>
+              {% endif %}
+            {% else %}—{% endif %}
           </td>
           <td><span class="badge bg-secondary small">{{ v.source }}</span></td>
           <td class="small text-muted" style="max-width:300px">{{ (v.description or '')[:120] }}{% if v.description and v.description|length > 120 %}…{% endif %}</td>
@@ -160,9 +167,10 @@
               {% endfor %}
             </select>
           </td>
-          <td>
+          <td class="text-center" style="min-width:36px">
             {% if v.cve_id %}
-            <button class="btn btn-sm btn-outline-secondary" onclick="lookupCve('{{ v.cve_id }}')">
+            <span id="enrich-loader-{{ v.id }}" class="{% if v.severity not in ('CRITICAL','HIGH','MEDIUM','LOW','INFO') %}d-inline-block{% else %}d-none{% endif %} spinner-border spinner-border-sm text-secondary" role="status" title="Resolving CVE…"></span>
+            <button class="btn btn-sm btn-outline-secondary {% if v.severity not in ('CRITICAL','HIGH','MEDIUM','LOW','INFO') %}d-none{% endif %}" id="info-btn-{{ v.id }}" onclick="lookupCve('{{ v.cve_id }}')">
               <i class="bi bi-info-circle"></i>
             </button>
             {% endif %}
@@ -300,6 +308,78 @@ function updateRiskBadge(score, level) {
   const scoreEl = document.getElementById('host-risk-score');
   if (scoreEl) scoreEl.textContent = score ? score.toFixed(1) : '';
 }
+
+// ── Auto-enrich UNKNOWN CVEs on page load ──────────────────────────────────
+const UNKNOWN_VULNS = [
+  {% for v in vulns %}{% if v.cve_id and v.severity not in ('CRITICAL','HIGH','MEDIUM','LOW','INFO') %}{ id: {{ v.id }}, cve_id: "{{ v.cve_id }}" },{% endif %}{% endfor %}
+];
+
+const SEV_CSS = {
+  CRITICAL: 'text-danger',
+  HIGH: '',   // inline style used below
+  MEDIUM: 'text-warning',
+  LOW: 'text-info',
+  INFO: 'text-secondary',
+};
+
+async function enrichVuln(vulnId, cveId) {
+  try {
+    const resp = await fetch(`/api/vulnerabilities/${vulnId}/enrich`, {
+      method: 'POST',
+      headers: { 'X-CSRFToken': getCsrfToken() },
+    });
+    if (!resp.ok) return;
+    const data = await resp.json();
+
+    const row = document.getElementById('vuln-row-' + vulnId);
+    if (!row) return;
+
+    // Replace loader with info button
+    const loader = document.getElementById('enrich-loader-' + vulnId);
+    const btn    = document.getElementById('info-btn-' + vulnId);
+    if (loader) loader.classList.add('d-none');
+    if (btn)    btn.classList.remove('d-none');
+
+    // Update severity badge cell (2nd td)
+    const cells = row.querySelectorAll('td');
+    if (cells[1]) {
+      const sev = (data.severity || 'UNKNOWN').toUpperCase();
+      const sevMap = {
+        CRITICAL: 'sev-critical', HIGH: 'sev-high', MEDIUM: 'sev-medium',
+        LOW: 'sev-low', INFO: 'sev-info',
+      };
+      cells[1].innerHTML = `<span class="badge ${sevMap[sev] || 'bg-secondary'}">${sev}</span>`;
+    }
+
+    // Update CVSS score cell (3rd td)
+    if (cells[2] && data.cvss_score != null) {
+      const sev = (data.severity || '').toUpperCase();
+      let colorAttr = '';
+      if (sev === 'CRITICAL') colorAttr = 'class="fw-bold text-danger"';
+      else if (sev === 'HIGH')     colorAttr = 'class="fw-bold" style="color:#fd7e14"';
+      else if (sev === 'MEDIUM')   colorAttr = 'class="fw-bold text-warning"';
+      else if (sev === 'LOW')      colorAttr = 'class="fw-bold text-info"';
+      else                         colorAttr = 'class="fw-bold text-secondary"';
+      cells[2].innerHTML = `<span ${colorAttr}>${data.cvss_score}</span>`;
+    }
+
+    // Update description cell (5th td) if it was empty
+    if (cells[4] && data.description && cells[4].textContent.trim() === '') {
+      const desc = data.description.slice(0, 120);
+      cells[4].textContent = desc + (data.description.length > 120 ? '\u2026' : '');
+    }
+  } catch (e) {
+    // silently ignore network errors during background enrichment
+  }
+}
+
+if (UNKNOWN_VULNS.length > 0) {
+  // Stagger requests to avoid hammering NVD API (300 ms between each)
+  UNKNOWN_VULNS.forEach((v, i) => {
+    setTimeout(() => enrichVuln(v.id, v.cve_id), i * 300);
+  });
+}
+// ────────────────────────────────────────────────────────────────────────────
 
 function getCsrfToken() {
   const meta = document.querySelector('meta[name="csrf-token"]');

@@ -245,6 +245,30 @@ def update_vuln_status(vuln_id):
                     "risk_level": vuln.host.risk_level})
 
 
+@api_bp.route("/vulnerabilities/<int:vuln_id>/enrich", methods=["POST"])
+@login_required
+def enrich_vuln(vuln_id):
+    """
+    Fetch authoritative CVSS/severity from NVD for a single vulnerability.
+    Used by the host detail page to auto-resolve UNKNOWN CVEs without a full
+    host re-analysis.
+    """
+    vuln = Vulnerability.query.get_or_404(vuln_id)
+    if not vuln.cve_id:
+        return jsonify({"error": "Vulnerability has no CVE ID to look up"}), 400
+
+    from routes.uploads import _nvd_enrich_vuln
+    _nvd_enrich_vuln(vuln, vuln.cve_id)
+    db.session.commit()
+
+    return jsonify({
+        "id": vuln_id,
+        "severity": vuln.severity,
+        "cvss_score": vuln.cvss_score,
+        "description": vuln.description,
+    })
+
+
 def _recompute_host_risk(host_id):
     """Recalculate risk_score and risk_level using the shared port+vuln scoring."""
     from routes.uploads import _compute_host_risk
