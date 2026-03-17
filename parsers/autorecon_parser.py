@@ -53,7 +53,7 @@ def parse_autorecon_json(file_path: str) -> dict:
 
     hosts = []
     input_target = data.get("input_target", "")
-    reverse_dns = data.get("reverse_dns")
+    top_level_reverse_dns = data.get("reverse_dns")
 
     # Exclude network/broadcast addresses derived from a CIDR input_target
     excluded_ips: set = set()
@@ -76,12 +76,48 @@ def parse_autorecon_json(file_path: str) -> dict:
         if ip in excluded_ips:
             continue
 
+        # Hostname: prefer per-host ip_enrichment[0].reverse_dns, fall back to top-level
+        ip_enrichment = host_data.get("ip_enrichment", []) or []
+        host_reverse_dns = None
+        for enrichment in ip_enrichment:
+            if isinstance(enrichment, dict) and enrichment.get("reverse_dns"):
+                host_reverse_dns = enrichment["reverse_dns"]
+                break
+        if not host_reverse_dns:
+            host_reverse_dns = top_level_reverse_dns
+
         risk = host_data.get("risk", {}) or {}
         cms_list = host_data.get("cms", []) or []
         waf_list = host_data.get("waf", []) or []
 
-        # Build ports from masscan data
+        # Build ports from nmap_structured (primary) and masscan (fallback)
         ports = []
+        seen_ports = set()
+
+        nmap_structured = host_data.get("nmap_structured") or {}
+        for port_info in nmap_structured.get("open_ports", []) or []:
+            if not isinstance(port_info, dict):
+                continue
+            portnum = port_info.get("port")
+            try:
+                portnum = int(portnum)
+            except (ValueError, TypeError):
+                continue
+            key = (portnum, port_info.get("proto", "tcp"))
+            if key in seen_ports:
+                continue
+            seen_ports.add(key)
+            ports.append({
+                "port": portnum,
+                "protocol": port_info.get("proto", "tcp"),
+                "service": port_info.get("service"),
+                "product": port_info.get("product"),
+                "version": port_info.get("version") or port_info.get("version_raw"),
+                "extra_info": port_info.get("extrainfo"),
+                "state": "open",
+                "cpe": port_info.get("cpe"),
+            })
+
         masscan = host_data.get("masscan", {}) or {}
         for port_str, port_info in masscan.items():
             try:
@@ -89,6 +125,10 @@ def parse_autorecon_json(file_path: str) -> dict:
             except (ValueError, TypeError):
                 continue
             if isinstance(port_info, dict):
+                key = (portnum, port_info.get("proto", "tcp"))
+                if key in seen_ports:
+                    continue
+                seen_ports.add(key)
                 ports.append({
                     "port": portnum,
                     "protocol": port_info.get("proto", "tcp"),
@@ -174,7 +214,7 @@ def parse_autorecon_json(file_path: str) -> dict:
 
         hosts.append({
             "ip": ip,
-            "hostname": host_key if host_key != ip else reverse_dns,
+            "hostname": host_key if host_key != ip else host_reverse_dns,
             "mac_address": None,
             "mac_vendor": None,
             "os_info": None,
