@@ -106,7 +106,7 @@ def enrich_vulnerabilities(port_product: str, port_version: str | None) -> list[
     keyword = port_product
     if port_version:
         keyword = f"{port_product} {port_version}"
-    return search_cves_by_keyword(keyword, max_results=5)
+    return search_cves_by_keyword(keyword, max_results=50)
 
 
 # ---------------------------------------------------------------------------
