@@ -281,6 +281,16 @@ EOF
     $SUDO systemctl daemon-reload
     ok "Systemd service created"
     warn "To enable auto-start: sudo systemctl enable --now centralized"
+
+    # Allow the app user to restart the service from the web UI without a password
+    if [ -d /etc/sudoers.d ]; then
+        local systemctl_path
+        systemctl_path="$(command -v systemctl 2>/dev/null || echo '/usr/bin/systemctl')"
+        echo "$USER ALL=(ALL) NOPASSWD: $systemctl_path restart centralized" \
+            | $SUDO tee /etc/sudoers.d/centralized-restart >/dev/null
+        $SUDO chmod 440 /etc/sudoers.d/centralized-restart
+        ok "Sudoers rule added — web UI can auto-restart the service"
+    fi
 }
 
 # ── Final summary ─────────────────────────────────────────────────────────────

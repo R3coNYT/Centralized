@@ -78,25 +78,13 @@
     <!-- Restart notice (hidden until update succeeds) -->
     <div class="card border-warning d-none mt-4" id="restartNotice">
       <div class="card-body d-flex align-items-start gap-3">
-        <i class="bi bi-arrow-repeat fs-3 text-warning mt-1"></i>
-        <div>
-          <div class="fw-semibold mb-1">Service restart required</div>
-          <div class="small text-muted mb-3">
-            The code was updated successfully. You need to restart the service
-            to apply the new version. Run the following command on the server:
-          </div>
+        <i class="bi bi-arrow-repeat fs-3 text-warning mt-1" id="restartIcon"></i>
+        <div id="restartBody">
           {% if is_windows %}
-        <div class="fw-semibold mb-1"><i class="bi bi-arrow-repeat me-2 text-success"></i>Service restarting automatically</div>
-        <div class="small text-muted">
-          The Centralized service is restarting in the background. The page will reload in ~15 seconds.
-        </div>
-        {% else %}
-          <pre class="m-0 p-2 rounded small font-monospace"
-               style="background:#0f1117;border:1px solid rgba(255,255,255,.1);display:inline-block">sudo systemctl restart centralized</pre>
-          <div class="small text-muted mt-2">
-            Or, if you're running with gunicorn directly, send it a <code>SIGHUP</code>:
-            <code>kill -HUP $(cat /var/run/centralized.pid)</code>
-          </div>
+          <div class="fw-semibold mb-1"><i class="bi bi-arrow-repeat me-2 text-success"></i>Service restarting automatically</div>
+          <div class="small text-muted">The Centralized service is restarting in the background. The page will reload in ~15 seconds.</div>
+          {% else %}
+          <!-- content injected by JS based on auto_restarting flag -->
           {% endif %}
         </div>
       </div>
@@ -152,8 +140,25 @@ async function runUpdate() {
         document.getElementById('restartNotice').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         setTimeout(() => location.reload(), 15000);
         {% else %}
-        document.getElementById('restartNotice').classList.remove('d-none');
-        document.getElementById('restartNotice').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        const notice = document.getElementById('restartNotice');
+        const body   = document.getElementById('restartBody');
+        notice.classList.remove('d-none');
+        notice.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        if (data.auto_restarting) {
+          body.innerHTML = `
+            <div class="fw-semibold mb-1"><i class="bi bi-check-circle-fill me-2 text-success"></i>Service restarting automatically</div>
+            <div class="small text-muted mb-2">The systemd service is restarting in the background. Waiting for it to come back online…</div>
+            <div class="progress" style="height:4px"><div class="progress-bar progress-bar-striped progress-bar-animated bg-success" style="width:100%"></div></div>
+          `;
+          appendOutput('\n⏳ Service restarting… polling for server comeback.', 'text-info');
+          pollReload();
+        } else {
+          body.innerHTML = `
+            <div class="fw-semibold mb-1">Service restart required</div>
+            <div class="small text-muted mb-3">Run this command on the server to apply the update:</div>
+            <pre class="m-0 p-2 rounded small font-monospace" style="background:#0f1117;border:1px solid rgba(255,255,255,.1);display:inline-block">sudo systemctl restart centralized</pre>
+          `;
+        }
         {% endif %}
       } else {
         appendOutput(' Reloading in 3 seconds…');
@@ -171,13 +176,26 @@ async function runUpdate() {
     appendOutput('\n[Connection lost — server may be restarting…]', 'text-info');
     statusBadge.textContent = 'restarting?';
     statusBadge.className   = 'badge bg-info text-dark';
-    let countdown = 6;
-    const iv = setInterval(() => {
-      countdown--;
-      appendOutput('.');
-      if (countdown <= 0) { clearInterval(iv); location.reload(); }
-    }, 1000);
+    pollReload();
   }
+}
+
+// Poll until the server responds, then reload the page
+function pollReload() {
+  const intervalMs = 3000;
+  const maxAttempts = 20; // 60 seconds total
+  let attempts = 0;
+  const iv = setInterval(async () => {
+    attempts++;
+    try {
+      const r = await fetch(window.location.href, { method: 'HEAD', cache: 'no-store' });
+      if (r.ok || r.status === 302 || r.status === 200) {
+        clearInterval(iv);
+        location.reload();
+      }
+    } catch (_) { /* server still down, keep polling */ }
+    if (attempts >= maxAttempts) { clearInterval(iv); location.reload(); }
+  }, intervalMs);
 }
 
 function appendOutput(text, cls) {
