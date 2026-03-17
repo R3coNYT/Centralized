@@ -509,38 +509,41 @@ def set_host_context(host_id):
             continue
 
         decided = False
+        # When the OS check signals a likely false positive we defer the final
+        # decision until after Phase 2: if an app-level CPE in the same CVE
+        # matches one of the user's services, the CVE is still relevant even
+        # though the OS version isn't listed.
+        os_fp_candidate      = False
+        os_fp_product        = None
+        os_fp_version        = None
+        os_fp_reason         = None
 
         # ── Phase 1: OS-level check ───────────────────────────────────────────
         # If the CVE explicitly lists OS-type CPEs and the user's specific OS
-        # product (e.g. "windows_11") is NOT among them → False Positive.
-        # This correctly handles CVEs that only affect windows_xp/windows_2000
-        # when the user is running Windows 11.
+        # product (e.g. "windows_11") is NOT among them → FP *candidate*.
+        # We still run Phase 2 so that app-level matches can override this.
         if os_product_hint and has_os_cpe_entries(configs):
             os_cpe_entries = cpe_match_for_product(configs, os_product_hint)
             if not os_cpe_entries:
                 # CVE names specific OS versions — ours isn't one of them
-                vuln.cve_status = "false_positive"
-                false_positives.append({
-                    "vuln_id": vuln.id,
-                    "cve_id": vuln.cve_id,
-                    "product": os_product_hint,
-                    "version": os_ver_for_compare or "N/A",
-                    "reason": f"CVE does not affect {os_product_hint} (not listed in CPE configurations)",
-                })
-                decided = True
+                os_fp_candidate = True
+                os_fp_product   = os_product_hint
+                os_fp_version   = os_ver_for_compare or "N/A"
+                os_fp_reason    = (
+                    f"CVE does not affect {os_product_hint} "
+                    f"(not listed in CPE configurations)"
+                )
             elif os_ver_for_compare:
                 # Our OS product IS listed — additionally check version bounds
                 affected = is_version_affected(os_ver_for_compare, os_cpe_entries)
                 if affected is False:
-                    vuln.cve_status = "false_positive"
-                    false_positives.append({
-                        "vuln_id": vuln.id,
-                        "cve_id": vuln.cve_id,
-                        "product": os_product_hint,
-                        "version": os_ver_for_compare,
-                        "reason": f"{os_product_hint} {os_ver_for_compare} is not in the affected version range",
-                    })
-                    decided = True
+                    os_fp_candidate = True
+                    os_fp_product   = os_product_hint
+                    os_fp_version   = os_ver_for_compare
+                    os_fp_reason    = (
+                        f"{os_product_hint} {os_ver_for_compare} "
+                        f"is not in the affected version range"
+                    )
                 elif affected is True:
                     confirmed.append({
                         "vuln_id": vuln.id,
@@ -568,8 +571,22 @@ def set_host_context(host_id):
                 break
 
         if not matched_cpe_entries:
-            skipped.append({"vuln_id": vuln.id, "cve_id": vuln.cve_id,
-                            "reason": "No matching product in CVE CPE data"})
+            # No app-level service match found.
+            # If the OS check already flagged this as a FP candidate, now we
+            # can finalise it — no app in the user's context overrides the OS
+            # determination.
+            if os_fp_candidate:
+                vuln.cve_status = "false_positive"
+                false_positives.append({
+                    "vuln_id": vuln.id,
+                    "cve_id": vuln.cve_id,
+                    "product": os_fp_product,
+                    "version": os_fp_version,
+                    "reason": os_fp_reason,
+                })
+            else:
+                skipped.append({"vuln_id": vuln.id, "cve_id": vuln.cve_id,
+                                "reason": "No matching product in CVE CPE data"})
             continue
 
         affected = is_version_affected(matched_version, matched_cpe_entries)
