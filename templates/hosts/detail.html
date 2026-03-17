@@ -1,14 +1,11 @@
 {% extends "base.html" %}
 {% block title %}{{ host.ip }}{% endblock %}
-{% block page_title %}Host: {{ host.ip }}{% endblock %}
+{% block page_title %}Host: {{ host.ip }} <button class="btn btn-sm btn-outline-warning p-1 lh-1 ms-2 align-middle" id="contextBtn" onclick="openContextModal()" title="Host Context" style="width:1.6rem;height:1.6rem;font-size:.85rem"><i class="bi bi-stars"></i></button>{% endblock %}
 
 {% block topbar_actions %}
 <a href="{{ url_for('audits.detail', audit_id=host.audit_id) }}" class="btn btn-sm btn-outline-secondary">
   <i class="bi bi-arrow-left me-1"></i>Back to Audit
 </a>
-<button class="btn btn-sm btn-outline-warning ms-2" id="contextBtn" onclick="openContextModal()">
-  <i class="bi bi-stars me-1"></i>Context
-</button>
 <button class="btn btn-sm btn-outline-info ms-2" id="analyzeBtn" onclick="analyzeHost({{ host.id }})">
   <i class="bi bi-cpu me-1"></i>Analyze Risk &amp; CVEs
 </button>

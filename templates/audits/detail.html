@@ -146,6 +146,7 @@
         {% set h_vulns = host.vulnerabilities.count() %}
         <tr>
           <td class="fw-semibold font-monospace" style="position:relative;padding-right:5.5rem">
+            <button class="btn btn-sm btn-outline-warning p-0 me-1 align-middle" style="width:1.5rem;height:1.5rem;font-size:.8rem;line-height:1" onclick="openContextModal({{ host.id }})" title="Host Context"><i class="bi bi-stars"></i></button>
             <a href="{{ url_for('hosts.detail', host_id=host.id) }}" class="text-decoration-none">{{ host.ip }}</a>
             <input type="text"
                    class="host-tag-input"
@@ -336,6 +337,74 @@
 </div>
 
 {% include '_partials/cve_modal.html' %}
+
+<!-- ── Host Context Modal ──────────────────────────────────────────────────── -->
+<div class="modal fade" id="contextModal" tabindex="-1" aria-labelledby="auditCtxModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content bg-dark border-secondary">
+      <div class="modal-header border-secondary">
+        <h5 class="modal-title" id="auditCtxModalLabel">
+          <i class="bi bi-stars me-2 text-warning"></i>Host Context
+        </h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <p class="text-muted small mb-3">
+          Provide OS and service version details to automatically correlate CVEs and mark non&#8209;applicable findings as False Positives.
+        </p>
+        <div class="row g-3">
+          <div class="col-md-6">
+            <label for="ctx-os" class="form-label fw-semibold small">OS Version</label>
+            <input type="text" id="ctx-os" class="form-control form-control-sm"
+              placeholder="e.g. Ubuntu 22.04" list="ctx-os-list" autocomplete="off">
+            <datalist id="ctx-os-list">
+              <option value="Ubuntu 20.04"><option value="Ubuntu 22.04"><option value="Ubuntu 24.04">
+              <option value="Debian 10"><option value="Debian 11"><option value="Debian 12">
+              <option value="Kali Linux 2024.1"><option value="CentOS 7"><option value="CentOS 8">
+              <option value="Rocky Linux 8"><option value="Rocky Linux 9">
+              <option value="AlmaLinux 8"><option value="AlmaLinux 9">
+              <option value="RHEL 8"><option value="RHEL 9">
+              <option value="Fedora 38"><option value="Fedora 39"><option value="Fedora 40">
+              <option value="Windows 10"><option value="Windows 11">
+              <option value="Windows Server 2016"><option value="Windows Server 2019"><option value="Windows Server 2022">
+              <option value="macOS 13 Ventura"><option value="macOS 14 Sonoma">
+              <option value="FreeBSD 13"><option value="FreeBSD 14">
+            </datalist>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label fw-semibold small">Notes <span class="text-muted fw-normal">(optional)</span></label>
+            <input type="text" id="ctx-notes" class="form-control form-control-sm" placeholder="Any extra context&#8230;">
+          </div>
+        </div>
+        <hr class="border-secondary my-3">
+        <label class="form-label fw-semibold small">
+          Service / Software Versions
+          <span class="text-muted fw-normal ms-1">&#8212; used to filter applicable CVEs</span>
+        </label>
+        <div id="ctx-services-list" class="mb-2"></div>
+        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="addServiceRow()">
+          <i class="bi bi-plus-circle me-1"></i>Add service
+        </button>
+        <div id="ctx-results" class="d-none mt-4">
+          <hr class="border-secondary">
+          <h6 class="fw-semibold"><i class="bi bi-clipboard-check me-1 text-success"></i>Correlation Results</h6>
+          <div id="ctx-results-body"></div>
+        </div>
+      </div>
+      <div class="modal-footer border-secondary">
+        <div id="ctx-spinner" class="d-none me-auto">
+          <span class="spinner-border spinner-border-sm text-warning me-2"></span>
+          <span class="text-muted small">Fetching CPE data from NVD&#8230;</span>
+        </div>
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+        <button type="button" class="btn btn-warning text-dark" id="ctx-submit-btn" onclick="submitContext()">
+          <i class="bi bi-stars me-1"></i>Save &amp; Correlate CVEs
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+<!-- ─────────────────────────────────────────────────────────────────────────── -->
 {% endblock %}
 
 {% block scripts %}
@@ -468,5 +537,120 @@ function showToast(type, msg) {
   container.appendChild(t);
   setTimeout(() => t.remove(), 3500);
 }
+
+// ── Host Context (from audit page) ───────────────────────────────────────
+let auditCtxHostId = null;
+let ctxModal = null;
+
+function openContextModal(hostId) {
+  auditCtxHostId = hostId;
+  if (!ctxModal) ctxModal = new bootstrap.Modal(document.getElementById('contextModal'));
+  document.getElementById('ctx-results').classList.add('d-none');
+  document.getElementById('ctx-results-body').innerHTML = '';
+  ctxModal.show();
+  loadContextData();
+}
+
+async function loadContextData() {
+  try {
+    const resp = await fetch(`/api/hosts/${auditCtxHostId}/context`);
+    const data = await resp.json();
+    document.getElementById('ctx-os').value = data.os_version || '';
+    document.getElementById('ctx-notes').value = data.notes || '';
+    const list = document.getElementById('ctx-services-list');
+    list.innerHTML = '';
+    const added = new Set();
+    (data.services || []).forEach(s => {
+      addServiceRow(s.name, s.version);
+      added.add((s.name || '').toLowerCase());
+    });
+    (data.port_hints || []).forEach(h => {
+      if (!added.has((h.name || '').toLowerCase())) {
+        addServiceRow(h.name, h.version || '');
+        added.add((h.name || '').toLowerCase());
+      }
+    });
+    if (list.children.length === 0) addServiceRow();
+  } catch (e) {
+    if (document.getElementById('ctx-services-list').children.length === 0) addServiceRow();
+  }
+}
+
+function addServiceRow(name, version) {
+  const list = document.getElementById('ctx-services-list');
+  const row = document.createElement('div');
+  row.className = 'input-group input-group-sm mb-2';
+  row.innerHTML =
+    `<input type="text" class="form-control ctx-svc-name" placeholder="Service / software name" value="${escCtxHtml(name || '')}" autocomplete="off">` +
+    `<input type="text" class="form-control ctx-svc-ver" placeholder="Version (e.g. 3.0.2)" value="${escCtxHtml(version || '')}" autocomplete="off" style="max-width:160px">` +
+    `<button class="btn btn-outline-danger" type="button" onclick="this.closest('.input-group').remove()"><i class="bi bi-x"></i></button>`;
+  list.appendChild(row);
+}
+
+function escCtxHtml(str) {
+  return (str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+async function submitContext() {
+  const osVersion = document.getElementById('ctx-os').value.trim();
+  const notes = document.getElementById('ctx-notes').value.trim();
+  const services = [];
+  document.querySelectorAll('#ctx-services-list .input-group').forEach(row => {
+    const name = row.querySelector('.ctx-svc-name')?.value.trim();
+    const ver  = row.querySelector('.ctx-svc-ver')?.value.trim();
+    if (name) services.push({ name, version: ver || '' });
+  });
+  const btn = document.getElementById('ctx-submit-btn');
+  const spinner = document.getElementById('ctx-spinner');
+  btn.disabled = true;
+  spinner.classList.remove('d-none');
+  try {
+    const resp = await fetch(`/api/hosts/${auditCtxHostId}/context`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrfToken() },
+      body: JSON.stringify({ os_version: osVersion, services, notes, correlate: true }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) { showToast('danger', data.error || 'Failed to save context'); return; }
+    renderCtxResults(data);
+    const fpCount = (data.false_positives || []).length;
+    showToast('success', `Context saved${fpCount ? ` — ${fpCount} CVE(s) auto-marked as false positive` : ''}`);
+  } catch (e) {
+    showToast('danger', 'Network error — please try again');
+  } finally {
+    btn.disabled = false;
+    spinner.classList.add('d-none');
+  }
+}
+
+function renderCtxResults(data) {
+  const fps       = data.false_positives || [];
+  const confirmed = data.confirmed || [];
+  const skipped   = data.skipped || [];
+  let html = '';
+  if (fps.length) {
+    html += `<div class="mb-3"><p class="small fw-semibold text-secondary mb-2"><i class="bi bi-dash-circle me-1"></i>Auto-marked as False Positive (${fps.length})</p><div class="list-group list-group-flush">`;
+    fps.forEach(fp => {
+      html += `<div class="list-group-item list-group-item-secondary bg-transparent py-1 px-2 small"><span class="fw-semibold font-monospace">${escCtxHtml(fp.cve_id)}</span><span class="text-muted ms-2">— ${escCtxHtml(fp.product)} ${escCtxHtml(fp.version)}: ${escCtxHtml(fp.reason)}</span></div>`;
+    });
+    html += `</div></div>`;
+  }
+  if (confirmed.length) {
+    html += `<div class="mb-3"><p class="small fw-semibold text-danger mb-2"><i class="bi bi-exclamation-triangle me-1"></i>Version Confirmed Vulnerable (${confirmed.length})</p><div class="list-group list-group-flush">`;
+    confirmed.forEach(c => {
+      html += `<div class="list-group-item bg-transparent py-1 px-2 small"><span class="fw-semibold font-monospace">${escCtxHtml(c.cve_id)}</span><span class="text-muted ms-2">— ${escCtxHtml(c.product)} ${escCtxHtml(c.version)}</span></div>`;
+    });
+    html += `</div></div>`;
+  }
+  if (skipped.length) {
+    html += `<p class="small text-muted mb-0"><i class="bi bi-question-circle me-1"></i>${skipped.length} CVE(s) skipped — no matching CPE data found.</p>`;
+  }
+  if (!fps.length && !confirmed.length && !skipped.length) {
+    html = `<p class="text-muted small mb-0"><i class="bi bi-info-circle me-1"></i>No CVEs could be cross-referenced. Context saved.</p>`;
+  }
+  document.getElementById('ctx-results-body').innerHTML = html;
+  document.getElementById('ctx-results').classList.remove('d-none');
+}
+// ─────────────────────────────────────────────────────────────────────────────
 </script>
 {% endblock %}
