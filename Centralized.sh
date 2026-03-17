@@ -162,9 +162,9 @@ clone_or_update_repo() {
     else
         retry 3 git clone "$REPO_URL" "$INSTALL_DIR"
     fi
-}
 
-chmod +x "$INSTALL_DIR/update.sh"
+    chmod +x "$INSTALL_DIR/update.sh"
+}
 
 # ── Python virtual environment ─────────────────────────────────────────────────
 
