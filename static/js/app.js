@@ -199,7 +199,82 @@ function lookupCve(cveId) {
         </div>
         <p class="mb-3">${escHtml(data.description || 'No description available.')}</p>
         ${refs ? `<div class="border-top pt-3"><div class="small fw-semibold mb-1 text-muted">References</div>${refs}</div>` : ''}
+        <div id="cve-affected-wrap" class="border-top pt-3 mt-3">
+          <div class="small fw-semibold mb-2 text-muted">
+            <i class="bi bi-cpu me-1"></i>Affected Software
+            <span class="spinner-border spinner-border-sm text-secondary ms-2" id="cve-affected-spinner"></span>
+          </div>
+          <div id="cve-affected-body"></div>
+        </div>
       `;
+
+      // Second fetch: affected software (fires after body is injected)
+      fetch(`/api/cve/${encodeURIComponent(cveId)}/affected`)
+        .then(r => r.json())
+        .then(aff => {
+          const spinner = document.getElementById('cve-affected-spinner');
+          const affBody = document.getElementById('cve-affected-body');
+          const wrap    = document.getElementById('cve-affected-wrap');
+          if (spinner) spinner.remove();
+          if (!affBody) return;
+          if (aff.error || !aff.affected || aff.affected.length === 0) {
+            if (wrap) wrap.remove();
+            return;
+          }
+          const TYPE_CLASS = { App: 'primary', OS: 'info', HW: 'secondary' };
+          const SHOW_LIMIT = 8;
+          const all = aff.affected;
+
+          function renderRows(items) {
+            return items.map(a => {
+              const vList = a.versions.map(v =>
+                v === '*' ? '<span class="text-muted">all versions</span>'
+                          : `<code class="small">${escHtml(v)}</code>`
+              ).join(' <span class="text-muted mx-1">/</span> ');
+              return `<tr>
+                <td class="py-1"><span class="badge bg-${TYPE_CLASS[a.type] || 'secondary'}${a.type === 'OS' ? ' text-dark' : ''}">${escHtml(a.type)}</span></td>
+                <td class="py-1 small font-monospace">${escHtml(a.vendor)}</td>
+                <td class="py-1 small fw-semibold">${escHtml(a.product)}</td>
+                <td class="py-1 small">${vList}</td>
+              </tr>`;
+            }).join('');
+          }
+
+          const headerLabel = document.querySelector('#cve-affected-wrap .small.fw-semibold');
+          if (headerLabel) {
+            headerLabel.innerHTML = `<i class="bi bi-cpu me-1"></i>Affected Software <span class="badge bg-secondary ms-1">${all.length}</span>`;
+          }
+
+          const shown = all.slice(0, SHOW_LIMIT);
+          const hidden = all.slice(SHOW_LIMIT);
+          affBody.innerHTML = `
+            <div class="table-responsive">
+              <table class="table table-sm table-borderless align-middle mb-0">
+                <thead><tr class="text-muted" style="font-size:.75rem">
+                  <th class="fw-normal py-1">Type</th>
+                  <th class="fw-normal py-1">Vendor</th>
+                  <th class="fw-normal py-1">Product</th>
+                  <th class="fw-normal py-1">Affected Versions</th>
+                </tr></thead>
+                <tbody id="cve-aff-shown">${renderRows(shown)}</tbody>
+                ${hidden.length ? `<tbody id="cve-aff-hidden" class="d-none">${renderRows(hidden)}</tbody>` : ''}
+              </table>
+            </div>
+            ${hidden.length ? `
+              <button class="btn btn-sm btn-link ps-0 text-muted" id="cve-aff-toggle"
+                onclick="(function(btn){
+                  var h=document.getElementById('cve-aff-hidden');
+                  var vis=h.classList.toggle('d-none');
+                  btn.textContent = vis ? 'Show ${hidden.length} more…' : 'Show less';
+                })(this)">
+                Show ${hidden.length} more…
+              </button>` : ''}
+          `;
+        })
+        .catch(() => {
+          const wrap = document.getElementById('cve-affected-wrap');
+          if (wrap) wrap.remove();
+        });
     })
     .catch(err => {
       body.innerHTML = `<div class="alert alert-danger">Failed to contact NVD API: ${err}</div>`;
