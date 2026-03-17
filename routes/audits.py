@@ -100,6 +100,23 @@ def detail(audit_id):
     findings = Finding.query.filter_by(audit_id=audit_id).order_by(Finding.created_at.desc()).all()
     uploaded_files = audit.uploaded_files.order_by("created_at").all()
 
+    # Vulns with unknown/missing severity that need background enrichment on page load
+    unknown_vulns = (
+        Vulnerability.query
+        .join(Host, Host.id == Vulnerability.host_id)
+        .filter(
+            Host.audit_id == audit_id,
+            Vulnerability.cve_id.isnot(None),
+            db.or_(
+                Vulnerability.cvss_score.is_(None),
+                Vulnerability.severity.in_(["UNKNOWN"]),
+                Vulnerability.severity.is_(None),
+            ),
+        )
+        .with_entities(Vulnerability.id, Vulnerability.cve_id)
+        .all()
+    )
+
     return render_template(
         "audits/detail.html",
         audit=audit,
@@ -109,6 +126,7 @@ def detail(audit_id):
         port_svc=port_svc,
         findings=findings,
         uploaded_files=uploaded_files,
+        unknown_vulns=unknown_vulns,
     )
 
 

@@ -398,6 +398,28 @@ document.querySelectorAll('.host-tag-input').forEach(input => {
   });
 });
 
+// ── Auto-enrich UNKNOWN CVEs on audit page load ──────────────────────────
+const AUDIT_UNKNOWN_VULNS = [
+  {% for v in unknown_vulns %}{ id: {{ v.id }}, cve_id: "{{ v.cve_id }}" },{% endfor %}
+];
+
+async function enrichAuditVuln(vulnId, cveId) {
+  try {
+    await fetch(`/api/vulnerabilities/${vulnId}/enrich`, {
+      method: 'POST',
+      headers: { 'X-CSRFToken': getCsrfToken() },
+    });
+  } catch (e) { /* ignore network errors silently */ }
+}
+
+if (AUDIT_UNKNOWN_VULNS.length > 0) {
+  // Stagger requests to avoid hammering NVD API (400 ms between each)
+  AUDIT_UNKNOWN_VULNS.forEach((v, i) => {
+    setTimeout(() => enrichAuditVuln(v.id, v.cve_id), i * 400);
+  });
+}
+// ─────────────────────────────────────────────────────────────────────────
+
 async function analyzeAudit(auditId) {
   const btn = document.getElementById('analyzeAuditBtn');
   btn.disabled = true;
