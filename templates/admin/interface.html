@@ -89,6 +89,34 @@
           </div>
           {% endfor %}
 
+          <!-- Glass blob colors -->
+          <hr class="my-3"/>
+          <div class="small text-muted text-uppercase fw-semibold mb-3" style="letter-spacing:.06em;font-size:.7rem">
+            <i class="bi bi-circle-half me-1"></i>Glass Background Blobs
+            <span class="text-muted fw-normal ms-1">(only visible in Glassmorphic mode)</span>
+          </div>
+          {% for key, label, hint in [
+            ('glass_blob1', 'Blob Color 1', 'Top-right background orb color.'),
+            ('glass_blob2', 'Blob Color 2', 'Bottom-left background orb color.'),
+          ] %}
+          <div class="mb-3">
+            <label class="form-label fw-semibold small" for="{{ key }}">{{ label }}</label>
+            <div class="d-flex align-items-center gap-3">
+              <input type="color"
+                     class="form-control form-control-color flex-shrink-0 theme-picker"
+                     id="{{ key }}"
+                     name="{{ key }}"
+                     value="{{ settings[key] }}"
+                     style="width:48px;height:38px;padding:2px 4px"/>
+              <code class="small text-muted" id="{{ key }}_val">{{ settings[key] }}</code>
+              {% if settings[key] != defaults[key] %}
+              <span class="badge bg-secondary ms-auto" title="Default: {{ defaults[key] }}">custom</span>
+              {% endif %}
+            </div>
+            <div class="form-text">{{ hint }}</div>
+          </div>
+          {% endfor %}
+
           <div class="d-flex gap-2 mt-4">
             <button type="submit" class="btn btn-primary">
               <i class="bi bi-check2 me-1"></i>Save Changes
@@ -206,6 +234,8 @@ function applyPreview() {
   const sidebarBg = document.getElementById('sidebar_bg').value;
   const bgCard    = document.getElementById('bg_card').value;
   const bgSurface = document.getElementById('bg_surface').value;
+  const blob1     = document.getElementById('glass_blob1').value;
+  const blob2     = document.getElementById('glass_blob2').value;
 
   const root = document.documentElement;
   root.style.setProperty('--bg-card',    bgCard);
@@ -215,6 +245,11 @@ function applyPreview() {
   root.style.setProperty('--bs-primary',     accent);
   root.style.setProperty('--bs-primary-rgb', `${r},${g},${b}`);
   root.style.setProperty('--bs-link-color',  accent);
+
+  const [r1,g1,b1] = hexToRgb(blob1);
+  root.style.setProperty('--glass-blob1-rgb', `${r1},${g1},${b1}`);
+  const [r2,g2,b2] = hexToRgb(blob2);
+  root.style.setProperty('--glass-blob2-rgb', `${r2},${g2},${b2}`);
 
   document.querySelectorAll('.sidebar').forEach(el => el.style.backgroundColor = sidebarBg);
   document.querySelectorAll('.topbar').forEach(el  => el.style.backgroundColor = sidebarBg);

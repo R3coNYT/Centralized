@@ -273,8 +273,8 @@ html[data-glass="1"] body::before {
   background:
     radial-gradient(ellipse at 12% 20%,  rgba(var(--bs-primary-rgb, 13,110,253), 0.55) 0%, transparent 42%),
     radial-gradient(ellipse at 88% 78%,  rgba(var(--bs-primary-rgb, 13,110,253), 0.45) 0%, transparent 38%),
-    radial-gradient(ellipse at 68%  5%,  rgba(140, 40, 230, 0.40) 0%, transparent 38%),
-    radial-gradient(ellipse at 22% 88%,  rgba(0,  190, 170, 0.30) 0%, transparent 35%),
+    radial-gradient(ellipse at 68%  5%,  rgba(var(--glass-blob1-rgb, 140,40,230), 0.45) 0%, transparent 38%),
+    radial-gradient(ellipse at 22% 88%,  rgba(var(--glass-blob2-rgb, 0,190,170),  0.35) 0%, transparent 35%),
     radial-gradient(ellipse at 50% 50%,  rgba(var(--bs-primary-rgb, 13,110,253), 0.08) 0%, transparent 70%),
     var(--bg-surface);
   pointer-events: none;
