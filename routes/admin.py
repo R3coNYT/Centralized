@@ -69,6 +69,14 @@ def build_theme_css(settings: dict) -> str:
         if HEX_COLOR_RE.match(val):
             root_vars[css_var] = val
 
+    # RGB variants for glassmorphic CSS (rgba(var(--xx-rgb), alpha) pattern)
+    for css_var_rgb, key in [("--bg-card-rgb", "bg_card"), ("--bg-surface-rgb", "bg_surface"), ("--sidebar-bg-rgb", "sidebar_bg")]:
+        val = settings.get(key, "")
+        if HEX_COLOR_RE.match(val):
+            h2 = val.lstrip("#")
+            r2, g2, b2 = int(h2[0:2], 16), int(h2[2:4], 16), int(h2[4:6], 16)
+            root_vars[css_var_rgb] = f"{r2},{g2},{b2}"
+
     if root_vars:
         decls = "".join(f"{k}:{v};" for k, v in root_vars.items())
         parts.append(f":root{{{decls}}}")
@@ -146,6 +154,22 @@ def interface_reset():
     db.session.commit()
     flash("Interface settings reset to defaults.", "info")
     return redirect(url_for("admin.interface"))
+
+
+@admin_bp.route("/interface/glassmorphic", methods=["POST"])
+@login_required
+def toggle_glassmorphic():
+    if current_user.role != "admin":
+        return jsonify({"error": "Access denied"}), 403
+    row = SiteSettings.query.filter_by(key="glassmorphic").first()
+    current_val = row.value if row else "0"
+    new_val = "0" if current_val == "1" else "1"
+    if row:
+        row.value = new_val
+    else:
+        db.session.add(SiteSettings(key="glassmorphic", value=new_val))
+    db.session.commit()
+    return jsonify({"enabled": new_val == "1"})
 
 
 # ---------------------------------------------------------------------------
