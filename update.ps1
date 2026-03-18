@@ -7,7 +7,7 @@
     uploaded files, and any local .env configuration.
     Creates a timestamped backup before updating.
 .PARAMETER NoRestart
-    Skip stopping/starting the Windows service (used when called from the web UI).
+    Skip stopping/starting the Windows scheduled task (used when called from the web UI).
 #>
 param(
     [switch]$NoRestart
@@ -257,40 +257,40 @@ function Prune-Backups {
 # -- Service management --------------------------------------------------------
 
 function Stop-CentralizedService {
-    $svc = Get-Service "Centralized" -ErrorAction SilentlyContinue
-    if ($null -eq $svc) { return $false }
+    $task = Get-ScheduledTask -TaskName "Centralized" -ErrorAction SilentlyContinue
+    if ($null -eq $task) { return $false }
 
-    if ($svc.Status -eq "Running") {
-        Write-Log "Stopping Centralized service"
-        Stop-Service "Centralized" -Force -ErrorAction SilentlyContinue
-        # Wait up to 30 s for the service to stop
+    if ($task.State -eq "Running") {
+        Write-Log "Stopping Centralized scheduled task"
+        Stop-ScheduledTask -TaskName "Centralized" -ErrorAction SilentlyContinue
+        # Wait up to 30 s for the task to stop
         $timeout = 30
         $elapsed = 0
         while ($elapsed -lt $timeout) {
             Start-Sleep -Seconds 1
             $elapsed++
-            $svc = Get-Service "Centralized" -ErrorAction SilentlyContinue
-            if ($null -eq $svc -or $svc.Status -eq "Stopped") { break }
+            $task = Get-ScheduledTask -TaskName "Centralized" -ErrorAction SilentlyContinue
+            if ($null -eq $task -or $task.State -ne "Running") { break }
         }
-        Write-Ok "Service stopped"
+        Write-Ok "Task stopped"
     }
     return $true
 }
 
 function Start-CentralizedService {
-    $svc = Get-Service "Centralized" -ErrorAction SilentlyContinue
-    if ($null -eq $svc) { return }
+    $task = Get-ScheduledTask -TaskName "Centralized" -ErrorAction SilentlyContinue
+    if ($null -eq $task) { return }
 
-    Write-Log "Starting Centralized service"
-    Start-Service "Centralized" -ErrorAction SilentlyContinue
+    Write-Log "Starting Centralized scheduled task"
+    Start-ScheduledTask -TaskName "Centralized" -ErrorAction SilentlyContinue
     Start-Sleep -Seconds 4
 
-    $svc = Get-Service "Centralized" -ErrorAction SilentlyContinue
-    if ($svc -and $svc.Status -eq "Running") {
-        Write-Ok "Service running -> http://127.0.0.1:5000"
+    $task = Get-ScheduledTask -TaskName "Centralized" -ErrorAction SilentlyContinue
+    if ($task -and $task.State -eq "Running") {
+        Write-Ok "Task running -> http://127.0.0.1:5000"
     } else {
-        Write-Warn "Service may not be running yet"
-        Write-Warn "  Check: Get-Service Centralized"
+        Write-Warn "Task may not be running yet"
+        Write-Warn "  Check: Get-ScheduledTask -TaskName Centralized"
     }
 }
 
@@ -312,10 +312,10 @@ function Print-Done {
     Write-Host ""
     if ($ServicePresent) {
         if ($NoRestart) {
-            Write-Host "  Apply the update by restarting the service:" -ForegroundColor Yellow
-            Write-Host "    Restart-Service Centralized" -ForegroundColor Cyan
+            Write-Host "  Apply the update by restarting the task:" -ForegroundColor Yellow
+            Write-Host "    Stop-ScheduledTask -TaskName Centralized; Start-ScheduledTask -TaskName Centralized" -ForegroundColor Cyan
         } else {
-            Write-Host "  Service restarted -> http://127.0.0.1:5000" -ForegroundColor Cyan
+            Write-Host "  Task restarted -> http://127.0.0.1:5000" -ForegroundColor Cyan
         }
     } else {
         Write-Host "  Restart the app to apply changes:"
@@ -354,14 +354,14 @@ Print-Done         -InstallDir $InstallDir -BackupDir $BackupDir -Commit $Commit
 if (-not $NoRestart -and $ServicePresent) {
     Start-CentralizedService
 } elseif ($NoRestart -and $ServicePresent) {
-    # Called from web UI: schedule a delayed restart via Task Scheduler so the
-    # HTTP response can be delivered before the service process is killed.
-    Write-Log "Scheduling automatic service restart in 10 seconds"
+    # Called from web UI: schedule a delayed restart via a one-off Task Scheduler entry so the
+    # HTTP response can be delivered before the task process is killed.
+    Write-Log "Scheduling automatic task restart in 10 seconds"
     $Action    = New-ScheduledTaskAction -Execute "powershell.exe" `
-                     -Argument "-WindowStyle Hidden -NonInteractive -Command `"Restart-Service Centralized -Force`""
+                     -Argument "-WindowStyle Hidden -NonInteractive -Command `"Stop-ScheduledTask -TaskName 'Centralized' -ErrorAction SilentlyContinue; Start-Sleep 2; Start-ScheduledTask -TaskName 'Centralized'`""
     $Trigger   = New-ScheduledTaskTrigger -Once -At (Get-Date).AddSeconds(10)
     $Principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
-    Register-ScheduledTask -TaskName "CentralizedServiceRestart" `
+    Register-ScheduledTask -TaskName "CentralizedTaskRestart" `
         -Action $Action -Trigger $Trigger -Principal $Principal -Force | Out-Null
-    Write-Ok "Service will restart automatically in ~10 seconds"
+    Write-Ok "Task will restart automatically in ~10 seconds"
 }
