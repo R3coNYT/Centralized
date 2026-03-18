@@ -245,11 +245,11 @@ if ((Test-Path `$log) -and (Get-Item `$log).Length -gt 2MB) {
 
     $trigger = New-ScheduledTaskTrigger -AtStartup
 
-    # Auto-restart up to 3 times with 30-second delay
+    # Auto-restart up to 3 times with 1-minute delay (Task Scheduler minimum is 1 min)
     $settings = New-ScheduledTaskSettingsSet `
         -ExecutionTimeLimit      (New-TimeSpan -Seconds 0) `
         -RestartCount            3 `
-        -RestartInterval         (New-TimeSpan -Seconds 30) `
+        -RestartInterval         (New-TimeSpan -Minutes 1) `
         -StartWhenAvailable `
         -MultipleInstances       IgnoreNew
 
