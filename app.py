@@ -35,6 +35,7 @@ def create_app():
     from routes.cve_search import cve_bp
     from routes.admin import admin_bp
     from routes.autorecon_results import autorecon_results_bp
+    from routes.autorecon_launch import autorecon_launch_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(dashboard_bp)
@@ -46,17 +47,19 @@ def create_app():
     app.register_blueprint(cve_bp)
     app.register_blueprint(admin_bp)
     app.register_blueprint(autorecon_results_bp)
+    app.register_blueprint(autorecon_launch_bp)
 
-    # Inject theme CSS into every template
+    # Inject theme CSS and tool availability into every template
     from routes.admin import get_all_settings, build_theme_css
 
     @app.context_processor
-    def inject_theme():
+    def inject_globals():
         try:
             css = build_theme_css(get_all_settings())
         except Exception:
             css = ""
-        return {"theme_css": css}
+        autorecon_installed = os.path.isfile(r"C:\Tools\AutoRecon\main.py")
+        return {"theme_css": css, "autorecon_installed": autorecon_installed}
 
     # Import models here so SQLAlchemy sees them before create_all()
     import models  # noqa: F401
