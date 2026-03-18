@@ -94,13 +94,14 @@
 
   <!-- ── Version History ──────────────────────────────────────────────────── -->
   <div class="col-lg-5">
-    <div class="card sticky-top" style="top:80px; max-height:calc(100vh - 100px); overflow-y:auto;">
+    <div class="card sticky-top" style="top:80px;">
       <div class="card-header fw-semibold d-flex align-items-center gap-2">
         <i class="bi bi-clock-history me-1"></i>Version History
         <span id="vtSpinner" class="spinner-border spinner-border-sm ms-auto text-muted" role="status" aria-label="Loading"></span>
-        <span id="vtError" class="text-danger small ms-auto d-none"></span>
+        <span id="vtError" class="text-danger small ms-2 d-none"></span>
       </div>
-      <div id="versionTree" class="list-group list-group-flush">
+      <div id="versionTree" class="list-group list-group-flush"
+           style="max-height:calc(100vh - 160px); overflow-y:auto; overflow-x:hidden;">
         <div class="list-group-item text-muted small text-center py-3">Loading…</div>
       </div>
     </div>
@@ -255,56 +256,49 @@ async function loadVersions() {
     }
     tree.innerHTML = '';
     data.commits.forEach((v, idx) => {
-      const isCurrent  = CURRENT_HASH && CURRENT_HASH.startsWith(v.short);
-      const isLatest   = idx === 0;
-      const locked     = !v.installable;
+      const isCurrent = CURRENT_HASH && CURRENT_HASH.startsWith(v.short);
+      const isLatest  = idx === 0;
+      const locked    = !v.installable;
+      const safeTitle = v.title.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 
       const item = document.createElement('div');
-      item.className = 'list-group-item list-group-item-action px-3 py-2 d-flex align-items-start gap-2'
-                     + (locked  ? ' text-muted opacity-50 pe-none user-select-none' : '')
+      item.className = 'list-group-item px-3 py-2'
+                     + (locked    ? ' text-muted' : '')
                      + (isCurrent ? ' bg-primary bg-opacity-10' : '');
+      if (locked) { item.style.opacity = '0.5'; item.style.pointerEvents = 'none'; }
 
-      // Left: timeline dot
-      const dot = document.createElement('div');
-      dot.className = 'flex-shrink-0 mt-1';
-      dot.innerHTML = isCurrent
-        ? '<i class="bi bi-record-circle-fill text-primary" title="Currently installed"></i>'
+      // Icon
+      const icon = isCurrent
+        ? '<i class="bi bi-record-circle-fill text-primary me-1" style="font-size:.75rem" title="Currently installed"></i>'
         : locked
-          ? '<i class="bi bi-lock-fill text-secondary" style="font-size:.75rem"></i>'
-          : '<i class="bi bi-circle text-secondary" style="font-size:.75rem"></i>';
+          ? '<i class="bi bi-lock-fill text-secondary me-1" style="font-size:.75rem"></i>'
+          : '<i class="bi bi-circle text-secondary me-1" style="font-size:.75rem"></i>';
 
-      // Right: info
-      const info = document.createElement('div');
-      info.className = 'flex-grow-1 small';
+      // Badges row
+      const badges =
+          icon
+        + `<span class="badge ${v.installable ? 'bg-success' : 'bg-secondary'} me-1" style="font-size:.65rem">#${v.pr}</span>`
+        + `<code style="font-size:.68rem;color:var(--bs-secondary-color)">${v.short}</code>`
+        + (isCurrent ? ' <span class="badge bg-primary ms-1" style="font-size:.65rem">current</span>' : '')
+        + (isLatest && !isCurrent ? ' <span class="badge bg-warning text-dark ms-1" style="font-size:.65rem">latest</span>' : '');
 
-      const header = document.createElement('div');
-      header.className = 'd-flex align-items-center gap-1 flex-wrap';
-      header.innerHTML =
-        `<span class="badge ${v.installable ? 'bg-success' : 'bg-secondary'} me-1">#${v.pr}</span>`
-        + `<code class="text-muted" style="font-size:.7rem">${v.short}</code>`
-        + (isCurrent ? ' <span class="badge bg-primary ms-1">current</span>' : '')
-        + (isLatest && !isCurrent ? ' <span class="badge bg-warning text-dark ms-1">latest</span>' : '')
-        + `<span class="ms-auto text-muted" style="font-size:.7rem">${v.date}</span>`;
+      // Install button html
+      const btnHtml = (v.installable && !isCurrent)
+        ? `<br><button class="btn btn-outline-warning btn-sm mt-1 py-0" style="font-size:.68rem">Install</button>`
+        : '';
 
-      const title = document.createElement('div');
-      title.className = 'mt-1 text-truncate';
-      title.title = v.title;
-      title.textContent = v.title;
-
-      info.appendChild(header);
-      info.appendChild(title);
+      item.innerHTML =
+        `<div class="d-flex align-items-center" style="min-width:0">`
+        + `<div class="flex-shrink-0">${badges}</div>`
+        + `<div class="ms-auto ps-2 text-muted flex-shrink-0" style="font-size:.68rem;white-space:nowrap">${v.date}</div>`
+        + `</div>`
+        + `<div class="small text-truncate mt-1" style="max-width:100%" title="${safeTitle}">${safeTitle}</div>`
+        + btnHtml;
 
       if (v.installable && !isCurrent) {
-        const btn = document.createElement('button');
-        btn.className = 'btn btn-outline-warning btn-sm mt-1 py-0';
-        btn.style.fontSize = '.7rem';
-        btn.textContent = 'Install';
-        btn.onclick = () => runRollback(v.sha, v.pr, v.title);
-        info.appendChild(btn);
+        item.querySelector('button').onclick = () => runRollback(v.sha, v.pr, v.title);
       }
 
-      item.appendChild(dot);
-      item.appendChild(info);
       tree.appendChild(item);
     });
   } catch (e) {
