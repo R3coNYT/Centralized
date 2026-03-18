@@ -273,9 +273,9 @@ if ((Test-Path `$log) -and (Get-Item `$log).Length -gt 2MB) {
 
     $state = (Get-ScheduledTask -TaskName $TaskName).State
     if ($state -eq "Running") {
-        Write-Ok "Tâche démarrée  ->  http://127.0.0.1:$AppPort"
+        Write-Ok "Task started  ->  http://127.0.0.1:$AppPort"
     } else {
-        Write-Warn "Tâche enregistrée (état : $state) — vérifiez dans quelques secondes :"
+        Write-Warn "Task registered (state: $state) — check again in a moment:"
         Write-Warn "  Get-ScheduledTask -TaskName Centralized"
         Write-Warn "  Logs : $LogDir\service.log"
     }
@@ -295,9 +295,9 @@ function Write-Done {
     Write-Host ""
     $task = Get-ScheduledTask -TaskName "Centralized" -ErrorAction SilentlyContinue
     if ($task) {
-        Write-Host "  Tâche       : Centralized (démarre au boot, tourne en arrière-plan)" -ForegroundColor Cyan
-        Write-Host "  Arrêter     : Stop-ScheduledTask -TaskName Centralized"              -ForegroundColor Yellow
-        Write-Host "  Désactiver  : Disable-ScheduledTask -TaskName Centralized"           -ForegroundColor Yellow
+        Write-Host "  Task        : Centralized (starts at boot, runs in background)" -ForegroundColor Cyan
+        Write-Host "  Stop        : Stop-ScheduledTask -TaskName Centralized"              -ForegroundColor Yellow
+        Write-Host "  Disable     : Disable-ScheduledTask -TaskName Centralized"           -ForegroundColor Yellow
         Write-Host "  Logs        : $InstallDir\logs\service.log"                          -ForegroundColor Yellow
     } else {
         Write-Host "  Start the app (pick one):"             -ForegroundColor Cyan

@@ -66,7 +66,7 @@ def start_scan():
     target = (data.get("target") or "").strip()
 
     if not target or not _TARGET_RE.match(target):
-        return jsonify({"error": "Cible invalide (domaine, IP ou CIDR requis)."}), 400
+        return jsonify({"error": "Invalid target (domain, IP or CIDR required)."}), 400
 
     # Build CLI args from validated, pre-defined options only (prevents injection)
     args = ["-t", target]
@@ -149,7 +149,7 @@ def send_input(session_id: str):
     with _lock:
         session = _sessions.get(session_id)
     if not session:
-        return jsonify({"error": "Session introuvable"}), 404
+        return jsonify({"error": "Session not found"}), 404
 
     text = (request.get_json(silent=True) or {}).get("input", "")
     try:
@@ -167,7 +167,7 @@ def kill_scan(session_id: str):
     with _lock:
         session = _sessions.pop(session_id, None)
     if not session:
-        return jsonify({"error": "Session introuvable"}), 404
+        return jsonify({"error": "Session not found"}), 404
 
     proc = session["proc"]
     try:
