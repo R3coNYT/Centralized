@@ -1,140 +1,219 @@
 """
-Launch AutoRecon from the Centralized web interface.
-Output is streamed in real-time via Server-Sent Events (SSE) — no WebSocket needed,
-works with any WSGI server (waitress, gunicorn, dev server).
-"""
-import os
-import re
-import sys
-import uuid
-import queue
-import threading
-import subprocess
+AutoRecon interactive terminal via SSE.
 
-from flask import (
-    Blueprint, Response, abort, jsonify, render_template,
-    request, stream_with_context,
-)
+Launches AutoRecon as a fully interactive process (PTY when available) and
+streams its output to the browser in real time.  xterm.js sends raw keystrokes
+(including arrow-key escape sequences) back to the process stdin so the
+AutoRecon interactive CLI works exactly like a local terminal.
+
+PTY support (strongly recommended for arrow keys / cursor movement):
+  Windows  : pip install pywinpty>=2.0
+  Linux/mac: pip install ptyprocess>=0.7
+Without a PTY the process runs with plain pipes; basic text input still works
+but readline/curses-based navigation will be limited.
+"""
+import base64
+import os
+import queue
+import shutil
+import subprocess
+import threading
+import time
+import uuid
+
+from flask import Blueprint, Response, jsonify, render_template, request, stream_with_context
 from flask_login import login_required
 
 autorecon_launch_bp = Blueprint("autorecon_launch", __name__, url_prefix="/autorecon")
 
-AUTORECON_DIR     = r"C:\Tools\AutoRecon"
-AUTORECON_MAIN    = os.path.join(AUTORECON_DIR, "main.py")
-AUTORECON_VENV_PY = os.path.join(AUTORECON_DIR, "venv", "Scripts", "python.exe")
+# ── PTY backend detection ─────────────────────────────────────────────────────
+
+_PTY_TYPE: str | None = None  # "winpty" | "ptyprocess" | None
+
+if os.name == "nt":
+    try:
+        import winpty as _winpty      # pywinpty 2.x  (pip install pywinpty)
+        _PTY_TYPE = "winpty"
+    except ImportError:
+        pass
+else:
+    try:
+        from ptyprocess import PtyProcessUnicode as _PtyProcess   # pip install ptyprocess
+        _PTY_TYPE = "ptyprocess"
+    except ImportError:
+        pass
+
+
+def _spawn(cmd: list, rows: int, cols: int):
+    """
+    Spawn *cmd* inside a PTY (when available) or a plain subprocess.
+    Returns the process object; the caller must check _PTY_TYPE to know which
+    API to use.
+    """
+    if _PTY_TYPE == "ptyprocess":
+        return _PtyProcess.spawn(cmd, dimensions=(rows, cols))
+
+    if _PTY_TYPE == "winpty":
+        # winpty.PtyProcess.spawn expects a single string command.
+        # Wrap .bat files through cmd.exe so Windows executes them properly.
+        cmdlist = list(cmd)
+        if cmdlist[0].lower().endswith(".bat"):
+            cmdlist = ["cmd.exe", "/C"] + cmdlist
+        cmd_str = " ".join(f'"{c}"' if " " in c else c for c in cmdlist)
+        return _winpty.PtyProcess.spawn(cmd_str, dimensions=(rows, cols))
+
+    # Fallback: plain subprocess with pipes
+    return subprocess.Popen(
+        cmd,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        bufsize=0,
+        creationflags=(subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0),
+    )
+
+
+# ── AutoRecon command detection ───────────────────────────────────────────────
+
+def find_autorecon():
+    """Return the argv list needed to start AutoRecon, or None if not found."""
+    # Windows: prefer the .bat launcher
+    if os.name == "nt":
+        bat = r"C:\Tools\AutoRecon\AutoRecon.bat"
+        if os.path.isfile(bat):
+            return [bat]
+
+    # Any platform: check PATH
+    for name in ("AutoRecon", "autorecon"):
+        found = shutil.which(name)
+        if found:
+            return [found]
+
+    # Linux default install
+    linux = "/opt/autorecon/autorecon.py"
+    if os.path.isfile(linux):
+        py = shutil.which("python3") or "python3"
+        return [py, linux]
+
+    # macOS default install
+    macos = os.path.expanduser("~/Tools/AutoRecon/AutoRecon.py")
+    if os.path.isfile(macos):
+        py = shutil.which("python3") or "python3"
+        return [py, macos]
+
+    return None
+
 
 # ── Session registry ──────────────────────────────────────────────────────────
-# {session_id: {"proc": Popen, "queue": Queue}}
+# sid -> {"proc": <process>, "queue": Queue, "pty": _PTY_TYPE | None}
 _sessions: dict = {}
 _lock = threading.Lock()
 
-# Accepts FQDN, bare hostname, IPv4, IPv4/CIDR — rejects any shell metacharacters
-_TARGET_RE = re.compile(
-    r'^(?:'
-    r'(?:[a-zA-Z0-9](?:[a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}'  # FQDN
-    r'|(?:[a-zA-Z0-9][a-zA-Z0-9\-]{0,61}[a-zA-Z0-9]?)'                      # bare hostname
-    r'|(?:\d{1,3}\.){3}\d{1,3}(?:/(?:[12]?\d|3[0-2]))?'                      # IPv4 / CIDR
-    r')$'
-)
 
-
-def _reader(proc: subprocess.Popen, q: queue.Queue) -> None:
-    """Background thread: read stdout/stderr lines and push to queue."""
+def _reader_thread(sid: str, proc, q: queue.Queue) -> None:
+    """Read terminal output from the process and push encoded chunks to the queue."""
     try:
-        for raw in iter(proc.stdout.readline, b""):
-            q.put(raw.decode("utf-8", errors="replace"))
+        while True:
+            if _PTY_TYPE == "ptyprocess":
+                # read() returns str; raises EOFError when the process exits
+                data = proc.read(4096)
+
+            elif _PTY_TYPE == "winpty":
+                data = proc.read(4096)
+                if isinstance(data, bytes):
+                    data = data.decode("utf-8", errors="replace")
+                if not data:
+                    if not proc.isalive():
+                        break
+                    time.sleep(0.01)
+                    continue
+
+            else:
+                # Plain subprocess — proc.stdout.read() returns bytes
+                raw = proc.stdout.read(256)
+                if not raw:
+                    break
+                data = raw.decode("utf-8", errors="replace")
+
+            if data:
+                q.put(data)
+
+    except EOFError:
+        pass
+    except OSError:
+        pass
     finally:
-        q.put(None)  # sentinel — tells the SSE generator to close
-
-
-def _python_exe() -> str:
-    return AUTORECON_VENV_PY if os.path.isfile(AUTORECON_VENV_PY) else sys.executable
+        with _lock:
+            _sessions.pop(sid, None)
+        q.put(None)   # EOF sentinel consumed by the SSE generator
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 
 @autorecon_launch_bp.route("/")
 @login_required
-def launch_page():
-    return render_template("autorecon/launch.html")
+def index():
+    cmd = find_autorecon()
+    return render_template(
+        "autorecon/launch.html",
+        autorecon_found=(cmd is not None),
+        has_pty=(_PTY_TYPE is not None),
+    )
 
 
-@autorecon_launch_bp.route("/start", methods=["POST"])
+@autorecon_launch_bp.route("/launch", methods=["POST"])
 @login_required
-def start_scan():
-    data   = request.get_json(silent=True) or {}
-    target = (data.get("target") or "").strip()
+def launch():
+    cmd = find_autorecon()
+    if not cmd:
+        return jsonify({"error": "AutoRecon not found on this system."}), 404
 
-    if not target or not _TARGET_RE.match(target):
-        return jsonify({"error": "Invalid target (domain, IP or CIDR required)."}), 400
+    data = request.get_json(silent=True) or {}
+    cols = max(40, int(data.get("cols", 220)))
+    rows = max(10, int(data.get("rows", 50)))
 
-    # Build CLI args from validated, pre-defined options only (prevents injection)
-    args = ["-t", target]
-
-    if data.get("full"):
-        args.append("--full")
-    if data.get("no_crawl"):
-        args.append("--no-crawl")
-    if data.get("no_nvd"):
-        args.append("--no-nvd")
-    if data.get("pdf"):
-        args.append("--pdf")
-
-    threads_val = data.get("threads")
-    if isinstance(threads_val, int) and 1 <= threads_val <= 64:
-        args += ["--threads", str(threads_val)]
-
-    cmd = [_python_exe(), AUTORECON_MAIN] + args
+    sid = uuid.uuid4().hex
+    q   = queue.Queue()
 
     try:
-        proc = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            stdin=subprocess.PIPE,
-            cwd=AUTORECON_DIR,
-            bufsize=0,
-        )
+        proc = _spawn(cmd, rows, cols)
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
 
-    sid = str(uuid.uuid4())
-    q   = queue.Queue()
-    t   = threading.Thread(target=_reader, args=(proc, q), daemon=True)
+    t = threading.Thread(target=_reader_thread, args=(sid, proc, q), daemon=True)
     t.start()
 
     with _lock:
-        _sessions[sid] = {"proc": proc, "queue": q}
+        _sessions[sid] = {"proc": proc, "queue": q, "pty": _PTY_TYPE}
 
     return jsonify({"session_id": sid})
 
 
-@autorecon_launch_bp.route("/stream/<session_id>")
+@autorecon_launch_bp.route("/stream/<sid>")
 @login_required
-def stream(session_id: str):
+def stream(sid: str):
     with _lock:
-        session = _sessions.get(session_id)
+        session = _sessions.get(sid)
     if not session:
-        abort(404)
+        return jsonify({"error": "Session not found"}), 404
+
+    q = session["queue"]
 
     def generate():
-        q = session["queue"]
         while True:
             try:
-                line = q.get(timeout=30)
+                chunk = q.get(timeout=30)
             except queue.Empty:
                 yield ": keepalive\n\n"
                 continue
 
-            if line is None:
-                # Process finished — send end sentinel then clean up
-                yield "data: \x00\n\n"
-                with _lock:
-                    _sessions.pop(session_id, None)
+            if chunk is None:
+                yield "data: __EOF__\n\n"
                 break
 
-            # Strip trailing newline so SSE framing stays valid
-            yield f"data: {line.rstrip(chr(10))}\n\n"
+            # Base64-encode: ANSI escape sequences and \r\n would break SSE framing
+            encoded = base64.b64encode(chunk.encode("utf-8")).decode("ascii")
+            yield f"data: {encoded}\n\n"
 
     return Response(
         stream_with_context(generate()),
@@ -143,35 +222,63 @@ def stream(session_id: str):
     )
 
 
-@autorecon_launch_bp.route("/input/<session_id>", methods=["POST"])
+@autorecon_launch_bp.route("/input/<sid>", methods=["POST"])
 @login_required
-def send_input(session_id: str):
+def send_input(sid: str):
+    """Receive raw terminal data from xterm.js onData (includes arrow-key escape sequences)."""
     with _lock:
-        session = _sessions.get(session_id)
+        session = _sessions.get(sid)
     if not session:
         return jsonify({"error": "Session not found"}), 404
 
-    text = (request.get_json(silent=True) or {}).get("input", "")
+    data = (request.get_json(silent=True) or {}).get("data", "")
+    proc = session["proc"]
     try:
-        session["proc"].stdin.write((text + "\n").encode())
-        session["proc"].stdin.flush()
+        if session["pty"] in ("ptyprocess", "winpty"):
+            proc.write(data)
+        else:
+            proc.stdin.write(data.encode("utf-8"))
+            proc.stdin.flush()
     except OSError as exc:
         return jsonify({"error": str(exc)}), 400
 
     return jsonify({"ok": True})
 
 
-@autorecon_launch_bp.route("/kill/<session_id>", methods=["POST"])
+@autorecon_launch_bp.route("/resize/<sid>", methods=["POST"])
 @login_required
-def kill_scan(session_id: str):
+def resize(sid: str):
+    """Update the PTY window size when xterm.js is resized."""
     with _lock:
-        session = _sessions.pop(session_id, None)
+        session = _sessions.get(sid)
+    if not session or not session["pty"]:
+        return jsonify({"ok": True})
+
+    data = request.get_json(silent=True) or {}
+    cols = max(10, int(data.get("cols", 80)))
+    rows = max(5,  int(data.get("rows", 24)))
+    try:
+        session["proc"].setwinsize(rows, cols)
+    except Exception:
+        pass
+    return jsonify({"ok": True})
+
+
+@autorecon_launch_bp.route("/kill/<sid>", methods=["POST"])
+@login_required
+def kill_scan(sid: str):
+    with _lock:
+        session = _sessions.pop(sid, None)
     if not session:
         return jsonify({"error": "Session not found"}), 404
 
     proc = session["proc"]
     try:
-        if os.name == "nt":
+        if session["pty"] == "ptyprocess":
+            proc.terminate(force=True)
+        elif session["pty"] == "winpty":
+            proc.close()
+        elif os.name == "nt":
             subprocess.call(
                 ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
                 stdout=subprocess.DEVNULL,
