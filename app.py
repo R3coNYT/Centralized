@@ -56,9 +56,12 @@ def create_app():
     @app.context_processor
     def inject_globals():
         try:
-            css = build_theme_css(get_all_settings())
+            _settings = get_all_settings()
+            css = build_theme_css(_settings)
+            glass_enabled = _settings.get("glassmorphic") == "1"
         except Exception:
             css = ""
+            glass_enabled = False
         autorecon_installed = bool(
             (os.name == "nt" and os.path.isfile(r"C:\Tools\AutoRecon\AutoRecon.bat")) or
             shutil.which("AutoRecon") or
@@ -66,7 +69,7 @@ def create_app():
             os.path.isfile("/opt/autorecon/autorecon.py") or
             os.path.isfile(os.path.expanduser("~/Tools/AutoRecon/AutoRecon.py"))
         )
-        return {"theme_css": css, "autorecon_installed": autorecon_installed}
+        return {"theme_css": css, "autorecon_installed": autorecon_installed, "glass_enabled": glass_enabled}
 
     # Import models here so SQLAlchemy sees them before create_all()
     import models  # noqa: F401

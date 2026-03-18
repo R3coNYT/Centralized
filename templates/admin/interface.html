@@ -148,6 +148,24 @@
         </div>
       </div>
     </div>
+
+    <!-- Visual Style -->
+    <div class="card mt-4">
+      <div class="card-header fw-semibold"><i class="bi bi-stars me-2"></i>Visual Style</div>
+      <div class="card-body">
+        <div class="small text-muted mb-3">Add a frosted-glass effect to the whole interface. All your custom colors are preserved &mdash; only transparency and blur are added.</div>
+        <button type="button"
+                id="glassBtn"
+                class="btn btn-glass {% if glass_enabled %}btn-glass-on{% endif %} w-100 py-2"
+                onclick="toggleGlass()">
+          <span class="d-flex align-items-center">
+            <i class="bi bi-moisture me-2"></i>
+            <span id="glassLabel">{% if glass_enabled %}Glassmorphic &mdash; ON{% else %}Glassmorphic &mdash; OFF{% endif %}</span>
+            <i class="bi {% if glass_enabled %}bi-toggle-on text-primary{% else %}bi-toggle-off text-muted{% endif %} ms-auto fs-5" id="glassToggleIcon"></i>
+          </span>
+        </button>
+      </div>
+    </div>
   </div>
 
 </div>
@@ -413,6 +431,39 @@ function showSwatchPicker(swatchEl, hex) {
   pop.style.left = (rect.left  + window.scrollX) + 'px';
   document.body.appendChild(pop);
   setTimeout(() => document.addEventListener('click', () => pop.remove(), { once: true }), 0);
+}
+
+/* ── Glassmorphic toggle ─────────────────────────────────────────────── */
+
+function getCsrfToken() {
+  const m = document.querySelector('meta[name="csrf-token"]');
+  return m ? m.getAttribute('content') : '';
+}
+
+async function toggleGlass() {
+  const btn   = document.getElementById('glassBtn');
+  const label = document.getElementById('glassLabel');
+  const icon  = document.getElementById('glassToggleIcon');
+  btn.disabled = true;
+  try {
+    const resp = await fetch('/admin/interface/glassmorphic', {
+      method: 'POST',
+      headers: { 'X-CSRFToken': getCsrfToken() },
+    });
+    const data = await resp.json();
+    const on = data.enabled;
+    document.documentElement.dataset.glass = on ? '1' : '0';
+    label.textContent = on ? 'Glassmorphic \u2014 ON' : 'Glassmorphic \u2014 OFF';
+    icon.className = on
+      ? 'bi bi-toggle-on text-primary ms-auto fs-5'
+      : 'bi bi-toggle-off text-muted ms-auto fs-5';
+    if (on) btn.classList.add('btn-glass-on');
+    else    btn.classList.remove('btn-glass-on');
+  } catch (e) {
+    console.error('Glass toggle failed', e);
+  } finally {
+    btn.disabled = false;
+  }
 }
 </script>
 {% endblock %}

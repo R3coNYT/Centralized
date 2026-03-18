@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-bs-theme="dark">
+<html lang="en" data-bs-theme="dark" {% if glass_enabled %}data-glass="1"{% endif %}>
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
@@ -81,8 +81,8 @@
     <li>
       <a href="{{ url_for('admin.update_page') }}"
          id="sidebar-update-link"
-         class="nav-link {% if request.endpoint == 'admin.update_page' %}active{% endif %}">
-        <i class="bi bi-arrow-repeat me-2" id="sidebar-update-icon"></i>Update
+         class="nav-link d-flex align-items-center {% if request.endpoint == 'admin.update_page' %}active{% endif %}">
+        <i class="bi bi-arrow-repeat me-2" id="sidebar-update-icon"></i><span>Update</span>
         <span id="sidebar-update-badge"
               class="badge bg-warning text-dark ms-auto d-none"
               style="font-size:.65rem">!</span>
@@ -162,7 +162,10 @@
     badge.classList.remove('d-none');
     badge.classList.add('ar-pulse');
     const link = document.getElementById('sidebar-update-link');
-    if (link) link.title = 'Update available!';
+    if (link) {
+      link.classList.add('nav-link-update-available');
+      link.title = 'Update available!';
+    }
   }
 
   // Poll once immediately, then every 5 minutes
