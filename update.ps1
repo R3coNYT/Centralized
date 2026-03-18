@@ -354,14 +354,13 @@ Print-Done         -InstallDir $InstallDir -BackupDir $BackupDir -Commit $Commit
 if (-not $NoRestart -and $ServicePresent) {
     Start-CentralizedService
 } elseif ($NoRestart -and $ServicePresent) {
-    # Called from web UI: schedule a delayed restart via a one-off Task Scheduler entry so the
-    # HTTP response can be delivered before the task process is killed.
-    Write-Log "Scheduling automatic task restart in 10 seconds"
-    $Action    = New-ScheduledTaskAction -Execute "powershell.exe" `
-                     -Argument "-WindowStyle Hidden -NonInteractive -Command `"Stop-ScheduledTask -TaskName 'Centralized' -ErrorAction SilentlyContinue; Start-Sleep 2; Start-ScheduledTask -TaskName 'Centralized'`""
-    $Trigger   = New-ScheduledTaskTrigger -Once -At (Get-Date).AddSeconds(10)
-    $Principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
-    Register-ScheduledTask -TaskName "CentralizedTaskRestart" `
-        -Action $Action -Trigger $Trigger -Principal $Principal -Force | Out-Null
-    Write-Ok "Task will restart automatically in ~10 seconds"
+    # Called from web UI: spawn a detached powershell.exe process that restarts the
+    # task after a short delay.  Start-Process creates an independent process on Windows
+    # (not a child) so it survives when Stop-ScheduledTask kills the Centralized service.
+    Write-Log "Scheduling automatic task restart in ~5 seconds"
+    $RestartCmd = "Start-Sleep 5; Stop-ScheduledTask -TaskName 'Centralized' -ErrorAction SilentlyContinue; Start-Sleep 3; Start-ScheduledTask -TaskName 'Centralized'"
+    Start-Process powershell.exe `
+        -ArgumentList "-NonInteractive -NoProfile -WindowStyle Hidden -Command `"$RestartCmd`"" `
+        -WindowStyle Hidden
+    Write-Ok "Task will restart automatically in ~8 seconds"
 }
