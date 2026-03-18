@@ -152,6 +152,34 @@ def interface_reset():
 # Update routes
 # ---------------------------------------------------------------------------
 
+import time as _time
+
+_update_cache: dict = {}   # {"ts": float, "available": bool}
+_UPDATE_CACHE_TTL = 300    # seconds (5 minutes)
+
+
+def _check_update_available() -> bool:
+    """Return True if a newer commit exists on GitHub. Result is cached for 5 min."""
+    now = _time.monotonic()
+    if _update_cache.get("ts") and now - _update_cache["ts"] < _UPDATE_CACHE_TTL:
+        return _update_cache["available"]
+    current, _ = _get_local_commit()
+    latest, _, _ = _get_github_latest_commit()
+    available = bool(latest and current and current != latest)
+    _update_cache["ts"] = now
+    _update_cache["available"] = available
+    return available
+
+
+@admin_bp.route("/update-status")
+@login_required
+def update_status():
+    """Lightweight JSON endpoint used by the sidebar to poll update availability."""
+    if current_user.role != "admin":
+        return jsonify({"available": False})
+    return jsonify({"available": _check_update_available()})
+
+
 @admin_bp.route("/update")
 @login_required
 def update_page():
