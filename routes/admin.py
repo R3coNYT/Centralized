@@ -18,13 +18,15 @@ admin_bp = Blueprint("admin", __name__, url_prefix="/admin")
 
 HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 
-SETTING_KEYS = ["accent_color", "sidebar_bg", "bg_card", "bg_surface"]
+SETTING_KEYS = ["accent_color", "sidebar_bg", "bg_card", "bg_surface", "glass_blob1", "glass_blob2"]
 
 DEFAULT_SETTINGS = {
     "accent_color": "#0d6efd",
     "sidebar_bg":   "#0f1117",
     "bg_card":      "#1a1d23",
     "bg_surface":   "#13161b",
+    "glass_blob1":  "#8c28e6",
+    "glass_blob2":  "#00bea2",
 }
 
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -70,7 +72,13 @@ def build_theme_css(settings: dict) -> str:
             root_vars[css_var] = val
 
     # RGB variants for glassmorphic CSS (rgba(var(--xx-rgb), alpha) pattern)
-    for css_var_rgb, key in [("--bg-card-rgb", "bg_card"), ("--bg-surface-rgb", "bg_surface"), ("--sidebar-bg-rgb", "sidebar_bg")]:
+    for css_var_rgb, key in [
+        ("--bg-card-rgb",     "bg_card"),
+        ("--bg-surface-rgb",  "bg_surface"),
+        ("--sidebar-bg-rgb",  "sidebar_bg"),
+        ("--glass-blob1-rgb", "glass_blob1"),
+        ("--glass-blob2-rgb", "glass_blob2"),
+    ]:
         val = settings.get(key, "")
         if HEX_COLOR_RE.match(val):
             h2 = val.lstrip("#")
