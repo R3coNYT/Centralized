@@ -3,7 +3,7 @@
 {% block page_title %}Application Update{% endblock %}
 
 {% block content %}
-<div class="row justify-content-center">
+<div class="row g-4 align-items-start">
   <div class="col-lg-7">
 
     <!-- Version status -->
@@ -91,6 +91,21 @@
     </div>
 
   </div>
+
+  <!-- ── Version History ──────────────────────────────────────────────────── -->
+  <div class="col-lg-5">
+    <div class="card sticky-top" style="top:80px; max-height:calc(100vh - 100px); overflow-y:auto;">
+      <div class="card-header fw-semibold d-flex align-items-center gap-2">
+        <i class="bi bi-clock-history me-1"></i>Version History
+        <span id="vtSpinner" class="spinner-border spinner-border-sm ms-auto text-muted" role="status" aria-label="Loading"></span>
+        <span id="vtError" class="text-danger small ms-auto d-none"></span>
+      </div>
+      <div id="versionTree" class="list-group list-group-flush">
+        <div class="list-group-item text-muted small text-center py-3">Loading…</div>
+      </div>
+    </div>
+  </div>
+
 </div>
 {% endblock %}
 
@@ -215,5 +230,163 @@ function getCsrfToken() {
   const m = document.querySelector('meta[name="csrf-token"]');
   return m ? m.getAttribute('content') : '';
 }
+
+/* ── Version tree ──────────────────────────────────────────────────────────── */
+
+const CURRENT_HASH = {{ current_hash | tojson }};
+
+async function loadVersions() {
+  const tree    = document.getElementById('versionTree');
+  const spinner = document.getElementById('vtSpinner');
+  const errEl   = document.getElementById('vtError');
+  try {
+    const resp = await fetch('/admin/versions');
+    const data = await resp.json();
+    spinner.classList.add('d-none');
+    if (data.error) {
+      errEl.textContent = data.error;
+      errEl.classList.remove('d-none');
+      tree.innerHTML = '';
+      return;
+    }
+    if (!data.commits || !data.commits.length) {
+      tree.innerHTML = '<div class="list-group-item text-muted small text-center py-3">No versions found.</div>';
+      return;
+    }
+    tree.innerHTML = '';
+    data.commits.forEach((v, idx) => {
+      const isCurrent  = CURRENT_HASH && CURRENT_HASH.startsWith(v.short);
+      const isLatest   = idx === 0;
+      const locked     = !v.installable;
+
+      const item = document.createElement('div');
+      item.className = 'list-group-item list-group-item-action px-3 py-2 d-flex align-items-start gap-2'
+                     + (locked  ? ' text-muted opacity-50 pe-none user-select-none' : '')
+                     + (isCurrent ? ' bg-primary bg-opacity-10' : '');
+
+      // Left: timeline dot
+      const dot = document.createElement('div');
+      dot.className = 'flex-shrink-0 mt-1';
+      dot.innerHTML = isCurrent
+        ? '<i class="bi bi-record-circle-fill text-primary" title="Currently installed"></i>'
+        : locked
+          ? '<i class="bi bi-lock-fill text-secondary" style="font-size:.75rem"></i>'
+          : '<i class="bi bi-circle text-secondary" style="font-size:.75rem"></i>';
+
+      // Right: info
+      const info = document.createElement('div');
+      info.className = 'flex-grow-1 small';
+
+      const header = document.createElement('div');
+      header.className = 'd-flex align-items-center gap-1 flex-wrap';
+      header.innerHTML =
+        `<span class="badge ${v.installable ? 'bg-success' : 'bg-secondary'} me-1">#${v.pr}</span>`
+        + `<code class="text-muted" style="font-size:.7rem">${v.short}</code>`
+        + (isCurrent ? ' <span class="badge bg-primary ms-1">current</span>' : '')
+        + (isLatest && !isCurrent ? ' <span class="badge bg-warning text-dark ms-1">latest</span>' : '')
+        + `<span class="ms-auto text-muted" style="font-size:.7rem">${v.date}</span>`;
+
+      const title = document.createElement('div');
+      title.className = 'mt-1 text-truncate';
+      title.title = v.title;
+      title.textContent = v.title;
+
+      info.appendChild(header);
+      info.appendChild(title);
+
+      if (v.installable && !isCurrent) {
+        const btn = document.createElement('button');
+        btn.className = 'btn btn-outline-warning btn-sm mt-1 py-0';
+        btn.style.fontSize = '.7rem';
+        btn.textContent = 'Install';
+        btn.onclick = () => runRollback(v.sha, v.pr, v.title);
+        info.appendChild(btn);
+      }
+
+      item.appendChild(dot);
+      item.appendChild(info);
+      tree.appendChild(item);
+    });
+  } catch (e) {
+    spinner.classList.add('d-none');
+    errEl.textContent = 'Failed to load versions.';
+    errEl.classList.remove('d-none');
+    tree.innerHTML = '';
+  }
+}
+
+async function runRollback(sha, prNum, title) {
+  const msg = `Install version PR #${prNum}?\n\n"${title}"\n\nThis will:\n• Back up your current database and uploads\n• Reset the code to commit ${sha.slice(0,7)}\n• Reinstall Python dependencies\n• Restart the service\n\nProceed?`;
+  if (!confirm(msg)) return;
+
+  const card        = document.getElementById('outputCard');
+  const console_    = document.getElementById('outputConsole');
+  const statusBadge = document.getElementById('outputStatus');
+
+  // Disable all install buttons while running
+  document.querySelectorAll('#versionTree button').forEach(b => b.disabled = true);
+
+  card.classList.remove('d-none');
+  card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  console_.textContent = `$ rollback --commit ${sha.slice(0,7)}  (PR #${prNum}: ${title})\n\n`;
+  statusBadge.textContent = 'running…';
+  statusBadge.className   = 'badge bg-warning text-dark';
+
+  try {
+    const resp = await fetch('/admin/rollback', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrfToken() },
+      body: JSON.stringify({ commit: sha }),
+    });
+    const data = await resp.json();
+
+    if (data.error) {
+      appendOutput('[ERROR] ' + data.error, 'text-danger');
+      statusBadge.textContent = 'error';
+      statusBadge.className   = 'badge bg-danger';
+      document.querySelectorAll('#versionTree button').forEach(b => b.disabled = false);
+      return;
+    }
+
+    if (data.stdout) appendOutput(data.stdout);
+    if (data.stderr) appendOutput('\n--- stderr ---\n' + data.stderr, 'text-warning');
+
+    if (data.returncode === 0) {
+      appendOutput('\n✔ Rollback complete.');
+      statusBadge.textContent = 'success';
+      statusBadge.className   = 'badge bg-success';
+      if (data.restart_required) {
+        {% if is_windows %}
+        appendOutput('\n⏱ Service restarting — polling until back online…', 'text-info');
+        document.getElementById('restartNotice').classList.remove('d-none');
+        pollReload();
+        {% else %}
+        if (data.auto_restarting) {
+          appendOutput('\n⏳ Service restarting… polling for server comeback.', 'text-info');
+          document.getElementById('restartNotice').classList.remove('d-none');
+          pollReload();
+        } else {
+          appendOutput('\nRestart the service: sudo systemctl restart centralized', 'text-info');
+        }
+        {% endif %}
+      } else {
+        appendOutput(' Reloading in 3 seconds…');
+        setTimeout(() => location.reload(), 3000);
+      }
+    } else {
+      statusBadge.textContent = `exit ${data.returncode}`;
+      statusBadge.className   = 'badge bg-danger';
+      document.querySelectorAll('#versionTree button').forEach(b => b.disabled = false);
+    }
+  } catch (_) {
+    appendOutput('\n[Connection lost — server may be restarting…]', 'text-info');
+    statusBadge.textContent = 'restarting?';
+    statusBadge.className   = 'badge bg-info text-dark';
+    pollReload();
+  }
+}
+
+// Load version tree on page load
+document.addEventListener('DOMContentLoaded', loadVersions);
 </script>
 {% endblock %}
