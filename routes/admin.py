@@ -283,6 +283,158 @@ def run_update():
 
 
 # ---------------------------------------------------------------------------
+# Version history routes
+# ---------------------------------------------------------------------------
+
+_VERSIONS_CACHE: dict = {}
+_VERSIONS_CACHE_TTL = 600  # 10 minutes
+
+
+@admin_bp.route("/versions")
+@login_required
+def get_versions():
+    """Return a list of merge-commit versions from GitHub, cached for 10 min."""
+    if current_user.role != "admin":
+        return jsonify({"error": "Access denied"}), 403
+
+    now = _time.monotonic()
+    if _VERSIONS_CACHE.get("ts") and now - _VERSIONS_CACHE["ts"] < _VERSIONS_CACHE_TTL:
+        return jsonify(_VERSIONS_CACHE["data"])
+
+    commits = []
+    try:
+        page = 1
+        while len(commits) < 200:
+            req = urllib.request.Request(
+                f"https://api.github.com/repos/{GITHUB_REPO}/commits?sha=main&per_page=100&page={page}",
+                headers={
+                    "Accept": "application/vnd.github.v3+json",
+                    "User-Agent": "Centralized-App/1.0",
+                },
+            )
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read())
+            if not data:
+                break
+            for commit in data:
+                msg = (commit.get("commit", {}).get("message") or "").strip()
+                first_line = msg.split("\n")[0]
+                m = re.search(r"Merge pull request #(\d+)", first_line)
+                if not m:
+                    continue
+                pr_num = int(m.group(1))
+                sha = commit.get("sha") or ""
+                date_str = (commit.get("commit", {}).get("author", {}).get("date") or "")[:10]
+                # PR title is on the second non-empty line of the merge commit message
+                non_empty = [l.strip() for l in msg.split("\n") if l.strip()]
+                title = non_empty[1] if len(non_empty) > 1 else first_line
+                commits.append({
+                    "sha": sha,
+                    "short": sha[:7] if sha else "",
+                    "pr": pr_num,
+                    "title": title,
+                    "date": date_str,
+                    "installable": pr_num >= 74,
+                })
+            if len(data) < 100:
+                break
+            page += 1
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+    result = {"commits": commits}
+    _VERSIONS_CACHE["ts"] = now
+    _VERSIONS_CACHE["data"] = result
+    return jsonify(result)
+
+
+@admin_bp.route("/rollback", methods=["POST"])
+@login_required
+def run_rollback():
+    """Install a specific commit SHA via rollback.ps1 / rollback.sh."""
+    import platform
+    if current_user.role != "admin":
+        return jsonify({"error": "Access denied"}), 403
+
+    data = request.get_json(silent=True) or {}
+    commit = (data.get("commit") or "").strip()
+
+    # Validate: only hex chars, 7-40 length — prevents any command injection
+    if not re.match(r'^[0-9a-fA-F]{7,40}$', commit):
+        return jsonify({"error": "Invalid commit SHA."}), 400
+
+    _ansi = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
+
+    if platform.system() == "Windows":
+        script = os.path.join(BASE_DIR, "rollback.ps1")
+        if not os.path.exists(script):
+            return jsonify({"error": "rollback.ps1 not found in the application directory."}), 404
+        cmd = [
+            "powershell.exe",
+            "-NonInteractive",
+            "-NoProfile",
+            "-ExecutionPolicy", "Bypass",
+            "-File", script,
+            "-Commit", commit,
+            "-NoRestart",
+        ]
+    else:
+        script = os.path.join(BASE_DIR, "rollback.sh")
+        if not os.path.exists(script):
+            return jsonify({"error": "rollback.sh not found in the application directory."}), 404
+        cmd = ["bash", script, "--commit", commit, "--no-restart"]
+
+    try:
+        result = subprocess.run(
+            cmd,
+            cwd=BASE_DIR,
+            capture_output=True,
+            text=True,
+            timeout=300,
+            encoding="utf-8",
+            errors="replace",
+        )
+        stdout = _ansi.sub("", result.stdout or "")
+        stderr = _ansi.sub("", result.stderr or "")
+
+        auto_restarting = False
+        if result.returncode == 0 and platform.system() != "Windows":
+            import shutil as _shutil
+            if _shutil.which("systemctl"):
+                import threading
+                def _restart_service():
+                    import time as _time
+                    _time.sleep(2)
+                    subprocess.run(
+                        ["sudo", "systemctl", "restart", "centralized"],
+                        capture_output=True,
+                        timeout=30,
+                    )
+                t = threading.Thread(target=_restart_service, daemon=True)
+                t.start()
+                auto_restarting = True
+
+        # Invalidate the update-status and versions caches after any successful rollback
+        if result.returncode == 0:
+            _update_cache.clear()
+            _VERSIONS_CACHE.clear()
+
+        return jsonify({
+            "returncode": result.returncode,
+            "stdout": stdout[-3000:],
+            "stderr": stderr[-1000:],
+            "restart_required": result.returncode == 0,
+            "auto_restarting": auto_restarting,
+        })
+    except subprocess.TimeoutExpired:
+        return jsonify({"error": "Rollback timed out after 300 seconds."}), 500
+    except FileNotFoundError as exc:
+        return jsonify({"error": f"Interpreter not found: {exc}"}), 500
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+# ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
 
