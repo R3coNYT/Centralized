@@ -212,17 +212,45 @@ function Get-Nssm {
     $NssmExe = "$InstallDir\nssm.exe"
     if (Test-Path $NssmExe) { return $NssmExe }
 
-    Write-Info "Downloading NSSM (Windows service manager)"
+    Write-Info "Downloading NSSM from github.com/kirillkovalenko/nssm"
     $Zip  = "$env:TEMP\nssm.zip"
     $Dest = "$env:TEMP\nssm_extract"
     try {
         [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-        Invoke-WebRequest "https://nssm.cc/release/nssm-2.24.zip" -OutFile $Zip -UseBasicParsing
+
+        # Récupère l'URL du dernier release via l'API GitHub
+        $ApiUrl  = "https://api.github.com/repos/kirillkovalenko/nssm/releases/latest"
+        $Headers = @{ "User-Agent" = "Centralized-Installer" }
+        $Release = Invoke-RestMethod -Uri $ApiUrl -Headers $Headers -UseBasicParsing
+
+        # Cherche un asset zip dans les assets du release
+        $Asset = $Release.assets | Where-Object { $_.name -like "*.zip" } | Select-Object -First 1
+
+        if (-not $Asset) {
+            throw "Aucun asset .zip trouvé dans le dernier release (kirillkovalenko/nssm)."
+        }
+
+        Write-Info "Asset trouvé : $($Asset.name)  [$($Asset.browser_download_url)]"
+        Invoke-WebRequest $Asset.browser_download_url -OutFile $Zip -UseBasicParsing
         Expand-Archive $Zip -DestinationPath $Dest -Force
-        Copy-Item "$Dest\nssm-2.24\win64\nssm.exe" $NssmExe -Force
-        Write-Ok "NSSM ready"
+
+        # Cherche nssm.exe dans win64/ en priorité, sinon n'importe où dans l'archive
+        $Exe = Get-ChildItem $Dest -Recurse -Filter "nssm.exe" |
+               Where-Object { $_.FullName -like "*win64*" } |
+               Select-Object -First 1
+
+        if (-not $Exe) {
+            $Exe = Get-ChildItem $Dest -Recurse -Filter "nssm.exe" | Select-Object -First 1
+        }
+
+        if (-not $Exe) {
+            throw "nssm.exe introuvable dans l'archive téléchargée."
+        }
+
+        Copy-Item $Exe.FullName $NssmExe -Force
+        Write-Ok "NSSM prêt  ($($Exe.FullName))"
     } catch {
-        Write-Warn "Could not download NSSM: $_"
+        Write-Warn "Impossible de télécharger NSSM : $_"
         return $null
     } finally {
         Remove-Item $Zip  -Force -ErrorAction SilentlyContinue
