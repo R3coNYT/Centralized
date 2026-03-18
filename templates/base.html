@@ -80,8 +80,12 @@
     </li>
     <li>
       <a href="{{ url_for('admin.update_page') }}"
+         id="sidebar-update-link"
          class="nav-link {% if request.endpoint == 'admin.update_page' %}active{% endif %}">
-        <i class="bi bi-arrow-repeat me-2"></i>Update
+        <i class="bi bi-arrow-repeat me-2" id="sidebar-update-icon"></i>Update
+        <span id="sidebar-update-badge"
+              class="badge bg-warning text-dark ms-auto d-none"
+              style="font-size:.65rem">!</span>
       </a>
     </li>
     {% endif %}
@@ -133,6 +137,48 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 <!-- App JS -->
 <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+
+{% if current_user.is_authenticated and current_user.role == 'admin' %}
+<style>
+@keyframes ar-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+@keyframes ar-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: .7; transform: scale(1.25); }
+}
+.ar-spin   { display: inline-block; animation: ar-spin  1.1s linear infinite; }
+.ar-pulse  { animation: ar-pulse 1.4s ease-in-out infinite; }
+</style>
+<script>
+(function () {
+  const icon  = document.getElementById('sidebar-update-icon');
+  const badge = document.getElementById('sidebar-update-badge');
+  if (!icon || !badge) return;
+
+  function applyUpdate() {
+    icon.classList.add('ar-spin');
+    badge.classList.remove('d-none');
+    badge.classList.add('ar-pulse');
+    const link = document.getElementById('sidebar-update-link');
+    if (link) link.title = 'Update available!';
+  }
+
+  // Poll once immediately, then every 5 minutes
+  function checkUpdate() {
+    fetch('/admin/update-status')
+      .then(r => r.ok ? r.json() : null)
+      .then(data => { if (data && data.available) applyUpdate(); })
+      .catch(() => {});
+  }
+
+  checkUpdate();
+  setInterval(checkUpdate, 300000);
+})();
+</script>
+{% endif %}
+
 {% block scripts %}{% endblock %}
 </body>
 </html>
