@@ -1,5 +1,6 @@
 from flask import Flask
 import os
+import shutil
 from extensions import db, login_manager, csrf
 
 
@@ -58,7 +59,13 @@ def create_app():
             css = build_theme_css(get_all_settings())
         except Exception:
             css = ""
-        autorecon_installed = os.path.isfile(r"C:\Tools\AutoRecon\main.py")
+        autorecon_installed = bool(
+            (os.name == "nt" and os.path.isfile(r"C:\Tools\AutoRecon\AutoRecon.bat")) or
+            shutil.which("AutoRecon") or
+            shutil.which("autorecon") or
+            os.path.isfile("/opt/autorecon/autorecon.py") or
+            os.path.isfile(os.path.expanduser("~/Tools/AutoRecon/AutoRecon.py"))
+        )
         return {"theme_css": css, "autorecon_installed": autorecon_installed}
 
     # Import models here so SQLAlchemy sees them before create_all()
