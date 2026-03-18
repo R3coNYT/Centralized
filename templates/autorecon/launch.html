@@ -15,13 +15,13 @@
 
         <div class="mb-3">
           <label class="form-label fw-semibold">
-            Cible <span class="text-danger">*</span>
+            Target <span class="text-danger">*</span>
           </label>
           <input id="ar-target" type="text" class="form-control font-monospace"
                  placeholder="example.com ou 10.0.0.1" autocomplete="off" spellcheck="false">
           <div class="form-text text-warning">
             <i class="bi bi-exclamation-triangle me-1"></i>
-            Cibler uniquement des systèmes dont vous avez l'autorisation.
+            Only scan systems you are authorized to test.
           </div>
         </div>
 
@@ -40,19 +40,19 @@
           <div class="form-check">
             <input class="form-check-input" type="checkbox" id="ar-no-crawl">
             <label class="form-check-label" for="ar-no-crawl">
-              Désactiver le crawling web
+              Disable web crawling
             </label>
           </div>
           <div class="form-check">
             <input class="form-check-input" type="checkbox" id="ar-no-nvd">
             <label class="form-check-label" for="ar-no-nvd">
-              Désactiver la recherche NVD / CVE
+              Disable NVD / CVE lookup
             </label>
           </div>
           <div class="form-check">
             <input class="form-check-input" type="checkbox" id="ar-pdf">
             <label class="form-check-label" for="ar-pdf">
-              Générer un rapport PDF
+              Generate PDF report
             </label>
           </div>
         </div>
@@ -62,7 +62,7 @@
             <i class="bi bi-play-fill me-1"></i>Lancer
           </button>
           <button id="btn-stop" class="btn btn-danger flex-grow-1 d-none" onclick="stopScan()">
-            <i class="bi bi-stop-fill me-1"></i>Arrêter
+            <i class="bi bi-stop-fill me-1"></i>Stop
           </button>
         </div>
 
@@ -93,10 +93,10 @@
         <div class="input-group input-group-sm">
           <span class="input-group-text font-monospace text-muted">stdin&nbsp;&gt;</span>
           <input id="stdin-input" type="text" class="form-control font-monospace"
-                 placeholder="Envoyer une entrée au processus (Entrée pour valider)…" disabled
+                 placeholder="Send input to process (press Enter to submit)…" disabled
                  autocomplete="off" spellcheck="false">
           <button class="btn btn-outline-secondary" id="btn-send-stdin"
-                  onclick="sendStdin()" disabled title="Envoyer">
+                  onclick="sendStdin()" disabled title="Send">
             <i class="bi bi-arrow-return-left"></i>
           </button>
         </div>
@@ -180,7 +180,7 @@ function setScanUI(running) {
 async function launchScan() {
   const target = document.getElementById('ar-target').value.trim();
   if (!target) {
-    setStatus('Veuillez saisir une cible.', 'text-warning');
+    setStatus('Please enter a target.', 'text-warning');
     return;
   }
 
@@ -190,7 +190,7 @@ async function launchScan() {
   term.writeln('\x1b[1;32m╔══════════════════════════════════════╗\x1b[0m');
   term.writeln('\x1b[1;32m║       AutoRecon — Centralized        ║\x1b[0m');
   term.writeln('\x1b[1;32m╚══════════════════════════════════════╝\x1b[0m');
-  term.writeln(`\x1b[1;37mCible : \x1b[0;36m${target}\x1b[0m`);
+  term.writeln(`\x1b[1;37mTarget: \x1b[0;36m${target}\x1b[0m`);
   term.writeln('');
 
   const payload = {
@@ -210,14 +210,14 @@ async function launchScan() {
       body:    JSON.stringify(payload),
     });
   } catch (e) {
-    term.writeln(`\x1b[1;31m[Erreur réseau] ${e}\x1b[0m`);
-    setStatus(`Erreur réseau : ${e}`, 'text-danger');
+    term.writeln(`\x1b[1;31m[Network error] ${e}\x1b[0m`);
+    setStatus(`Network error: ${e}`, 'text-danger');
     return;
   }
 
   const json = await resp.json();
   if (!resp.ok) {
-    term.writeln(`\x1b[1;31m[Erreur] ${json.error}\x1b[0m`);
+    term.writeln(`\x1b[1;31m[Error] ${json.error}\x1b[0m`);
     setStatus(json.error, 'text-danger');
     return;
   }
@@ -233,8 +233,8 @@ async function launchScan() {
   currentEvtSrc.onmessage = (e) => {
     if (e.data === '\x00') {
       term.writeln('');
-      term.writeln('\x1b[1;32m[Centralized] Scan terminé.\x1b[0m');
-      onScanEnded('Scan terminé.', 'text-success');
+      term.writeln('\x1b[1;32m[Centralized] Scan complete.\x1b[0m');
+      onScanEnded('Scan complete.', 'text-success');
       return;
     }
     term.writeln(e.data);
@@ -242,8 +242,8 @@ async function launchScan() {
 
   currentEvtSrc.onerror = () => {
     if (currentSession) {
-      term.writeln('\x1b[1;31m[Centralized] Connexion SSE perdue.\x1b[0m');
-      onScanEnded('Connexion perdue.', 'text-danger');
+      term.writeln('\x1b[1;31m[Centralized] SSE connection lost.\x1b[0m');
+      onScanEnded('Connection lost.', 'text-danger');
     }
   };
 }
@@ -251,7 +251,7 @@ async function launchScan() {
 /* ── Stop ───────────────────────────────────────────────────────────────── */
 async function stopScan() {
   if (!currentSession) return;
-  if (!confirm('Arrêter le scan en cours ?')) return;
+  if (!confirm('Stop the running scan?')) return;
 
   const sid = currentSession;
   currentSession = null;
@@ -263,8 +263,8 @@ async function stopScan() {
   });
 
   term.writeln('');
-  term.writeln('\x1b[1;33m[Centralized] Scan arrêté manuellement.\x1b[0m');
-  onScanEnded('Scan arrêté.', 'text-warning');
+  term.writeln('\x1b[1;33m[Centralized] Scan stopped manually.\x1b[0m');
+  onScanEnded('Scan stopped.', 'text-warning');
 }
 
 /* ── Scan ended (common cleanup) ────────────────────────────────────────── */
