@@ -134,11 +134,11 @@ async function runUpdate() {
       statusBadge.className   = 'badge bg-success';
       if (data.restart_required) {
         {% if is_windows %}
-        // Service auto-restarts via scheduled task (update.ps1 registered a 10s delayed restart)
-        appendOutput('\n⏱ Service restarting in ~10 s — page will reload automatically…', 'text-info');
+        // Service auto-restarts via detached process (update.ps1 spawned a background restart)
+        appendOutput('\n⏱ Service restarting — polling until back online…', 'text-info');
         document.getElementById('restartNotice').classList.remove('d-none');
         document.getElementById('restartNotice').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-        setTimeout(() => location.reload(), 15000);
+        pollReload();
         {% else %}
         const notice = document.getElementById('restartNotice');
         const body   = document.getElementById('restartBody');
