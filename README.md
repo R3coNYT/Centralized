@@ -75,31 +75,36 @@ centralized
 ### Windows
 
 ```powershell
-# Run from an Administrator PowerShell terminal (required to register the service)
+# Run from an Administrator PowerShell terminal (required to register the scheduled task)
 Set-ExecutionPolicy Bypass -Scope Process -Force
 irm https://raw.githubusercontent.com/R3coNYT/Centralized/main/Centralized.ps1 | iex
 ```
 
 - Installs to **`C:\Tools\Centralized`**
-- Downloads **[NSSM](https://nssm.cc)** and registers Centralized as a **Windows service** (`Centralized`) that:
-  - Starts automatically on Windows boot (delayed-auto)
+- Registers Centralized as a **Windows Scheduled Task** (`Centralized`) that:
+  - Starts automatically on Windows boot (runs as SYSTEM)
   - Runs in the background — no console window needed
+  - Restarts automatically up to 3 times on failure (30 s delay)
   - Logs to `C:\Tools\Centralized\logs\service.log`
   - Can be stopped / disabled at any time
 
-**Manage the service:**
+**Manage the task:**
 ```powershell
 # Check status
-Get-Service Centralized
+Get-ScheduledTask -TaskName Centralized
 
-# Stop the service
-Stop-Service Centralized
+# Stop the task
+Stop-ScheduledTask -TaskName Centralized
 
-# Stop and disable auto-start on boot
-Set-Service Centralized -StartupType Manual; Stop-Service Centralized
+# Disable auto-start on boot (without deleting)
+Disable-ScheduledTask -TaskName Centralized
 
 # Re-enable auto-start
-Set-Service Centralized -StartupType Automatic; Start-Service Centralized
+Enable-ScheduledTask -TaskName Centralized
+Start-ScheduledTask -TaskName Centralized
+
+# View live logs
+Get-Content C:\Tools\Centralized\logs\service.log -Wait
 ```
 
 > Git and Python 3.10+ must be installed before running the script.  
@@ -178,12 +183,12 @@ The script automatically stops the `Centralized` service before updating and res
 |---|---|
 | 1 | Locate the install directory automatically |
 | 2 | Create a timestamped backup → `backups/YYYYMMDD_HHMMSS/` |
-| 3 | **Windows:** stop the `Centralized` service |
+| 3 | **Windows:** stop the `Centralized` scheduled task |
 | 4 | `git fetch` + `git reset --hard origin/main` — pulls latest code |
 | 5 | `pip install -r requirements.txt --upgrade` — updates dependencies |
 | 6 | Auto-detect and apply any new tables/columns in the database |
 | 7 | Prune old backups (keeps last 5) |
-| 8 | **Windows:** restart the `Centralized` service automatically (CLI: immediate restart; web UI: scheduled 10 s delayed restart via Task Scheduler) |
+| 8 | **Windows:** restart the `Centralized` scheduled task automatically |
 
 > **Your database and uploads are in `.gitignore`** — `git reset --hard` never touches them.  
 > The backup is a safety net in case anything goes wrong mid-update.
@@ -239,8 +244,7 @@ Centralized/
 ├── Centralized.ps1         # Installer — Windows (requires Admin)
 ├── update.sh               # Updater — Linux & macOS
 ├── update.ps1              # Updater — Windows
-├── centralized_service.py  # Windows service wrapper (used by NSSM registration)
-├── nssm.exe                # NSSM binary (downloaded at install time, Windows only)
+├── start_service.ps1       # Wrapper lancé par la tâche planifiée Windows (auto-créé à l'install)
 ├── app.py                  # Flask factory + startup
 ├── config.py               # Configuration
 ├── models/__init__.py      # SQLAlchemy models
@@ -253,6 +257,7 @@ Centralized/
 │   ├── clients.py          # Client CRUD
 │   ├── uploads.py          # File upload & parsing pipeline
 │   ├── hosts.py            # Host detail view
+│   ├── autorecon_launch.py # AutoRecon terminal live (SSE)
 │   └── api.py              # JSON API (stats, CVE lookup/search)
 ├── templates/              # Jinja2 HTML templates
 ├── static/
