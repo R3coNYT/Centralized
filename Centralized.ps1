@@ -60,14 +60,14 @@ function Find-Python {
 
     foreach ($cand in $candidates) {
         $exe  = ($cand -split ' ')[0]
-        $args = ($cand -split ' ')[1..99]
+        $pythonArgs = ($cand -split ' ')[1..99]
 
         if (Test-Cmd $exe) {
             try {
-                $ver = & $exe @args -c "import sys; v=sys.version_info; print(f'{v.major}.{v.minor}')" 2>$null
+                $ver = & $exe @pythonArgs -c "import sys; v=sys.version_info; print(f'{v.major}.{v.minor}')" 2>$null
                 if ($ver -match '^3\.(1[0-9]|[2-9]\d)') {
                     Write-Ok "Python detected: $exe $ver"
-                    return @{ Exe = $exe; Args = $args }
+                    return @{ Exe = $exe; Args = $pythonArgs }
                 }
             } catch {}
         }
@@ -202,118 +202,82 @@ function Update-UserPath {
     Write-Ok "User PATH updated"
 }
 
-# ── Windows Service registration (via NSSM) ───────────────────────────────────
-# pythonservice.exe (pywin32) fails under the SYSTEM account because the base
-# Python Lib\ directory is not found at runtime. NSSM wraps venv\Scripts\python.exe
-# directly, avoiding all DLL / PATH issues.
+# ── Startup task (Windows Task Scheduler) ────────────────────────────────────
+# Uses only built-in Windows cmdlets — no NSSM or pywin32 required.
+# The task runs as SYSTEM at startup, with automatic restart on failure,
+# and redirects stdout/stderr to a log file via a small wrapper script.
 
-function Get-Nssm {
-    # If already present in the install dir, reuse it
-    $NssmExe = "$InstallDir\nssm.exe"
-    if (Test-Path $NssmExe) { return $NssmExe }
+function Install-CentralizedTask {
+    $TaskName   = "Centralized"
+    $VenvPython = "$InstallDir\venv\Scripts\python.exe"
+    $LogDir     = "$InstallDir\logs"
+    $WrapperPs1 = "$InstallDir\start_service.ps1"
 
-    Write-Info "Downloading NSSM from github.com/kirillkovalenko/nssm"
-    $Zip  = "$env:TEMP\nssm.zip"
-    $Dest = "$env:TEMP\nssm_extract"
-    try {
-        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    # Ensure logs directory exists
+    New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
 
-        # Récupère l'URL du dernier release via l'API GitHub
-        $ApiUrl  = "https://api.github.com/repos/kirillkovalenko/nssm/releases/latest"
-        $Headers = @{ "User-Agent" = "Centralized-Installer" }
-        $Release = Invoke-RestMethod -Uri $ApiUrl -Headers $Headers -UseBasicParsing
-
-        # Cherche un asset zip dans les assets du release
-        $Asset = $Release.assets | Where-Object { $_.name -like "*.zip" } | Select-Object -First 1
-
-        if (-not $Asset) {
-            throw "Aucun asset .zip trouvé dans le dernier release (kirillkovalenko/nssm)."
-        }
-
-        Write-Info "Asset trouvé : $($Asset.name)  [$($Asset.browser_download_url)]"
-        Invoke-WebRequest $Asset.browser_download_url -OutFile $Zip -UseBasicParsing
-        Expand-Archive $Zip -DestinationPath $Dest -Force
-
-        # Cherche nssm.exe dans win64/ en priorité, sinon n'importe où dans l'archive
-        $Exe = Get-ChildItem $Dest -Recurse -Filter "nssm.exe" |
-               Where-Object { $_.FullName -like "*win64*" } |
-               Select-Object -First 1
-
-        if (-not $Exe) {
-            $Exe = Get-ChildItem $Dest -Recurse -Filter "nssm.exe" | Select-Object -First 1
-        }
-
-        if (-not $Exe) {
-            throw "nssm.exe introuvable dans l'archive téléchargée."
-        }
-
-        Copy-Item $Exe.FullName $NssmExe -Force
-        Write-Ok "NSSM prêt  ($($Exe.FullName))"
-    } catch {
-        Write-Warn "Impossible de télécharger NSSM : $_"
-        return $null
-    } finally {
-        Remove-Item $Zip  -Force -ErrorAction SilentlyContinue
-        Remove-Item $Dest -Recurse -Force -ErrorAction SilentlyContinue
-    }
-    return $NssmExe
+    # Wrapper script: starts waitress and tee-s output to a rotating log
+    $wrapper = @"
+Set-Location '$InstallDir'
+`$log = '$LogDir\service.log'
+# Keep at most 2 MB of log (rough rotation)
+if ((Test-Path `$log) -and (Get-Item `$log).Length -gt 2MB) {
+    Move-Item `$log "`$log.bak" -Force
 }
+& '$VenvPython' -m waitress --port=$AppPort --call app:create_app *>> `$log
+"@
+    Set-Content -Path $WrapperPs1 -Value $wrapper -Encoding UTF8
 
-function Install-CentralizedService {
-    $ServiceName = "Centralized"
-    $VenvPython  = "$InstallDir\venv\Scripts\python.exe"
-    $NssmExe     = Get-Nssm
+    Write-Info "Registering Centralized as a Windows scheduled task"
 
-    if (-not $NssmExe) {
-        Write-Warn "NSSM not available — service registration skipped"
-        Write-Warn "Start the app manually: $InstallDir\centralized.bat"
-        return
-    }
-
-    Write-Info "Registering Centralized as a Windows service (NSSM)"
-
-    # Remove any existing service first (pywin32 or NSSM)
-    $existing = Get-Service $ServiceName -ErrorAction SilentlyContinue
+    # Remove existing task if present
+    $existing = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
     if ($existing) {
-        Write-Warn "Existing service found — reinstalling"
-        if ($existing.Status -eq "Running") {
-            Stop-Service $ServiceName -Force -ErrorAction SilentlyContinue
-            Start-Sleep -Seconds 3
-        }
-        & $NssmExe remove $ServiceName confirm 2>$null | Out-Null
-        # Also attempt pywin32 removal in case it was registered that way
-        if (Test-Path "$InstallDir\centralized_service.py") {
-            & $VenvPython "$InstallDir\centralized_service.py" remove 2>$null | Out-Null
-        }
-        Start-Sleep -Seconds 1
+        Write-Warn "Existing task found — reinstalling"
+        Stop-ScheduledTask  -TaskName $TaskName -ErrorAction SilentlyContinue
+        Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
     }
 
-    # Ensure logs directory exists (NSSM will write stdout/stderr there)
-    New-Item -ItemType Directory -Path "$InstallDir\logs" -Force | Out-Null
+    $action = New-ScheduledTaskAction `
+        -Execute    "powershell.exe" `
+        -Argument   "-NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$WrapperPs1`"" `
+        -WorkingDirectory $InstallDir
 
-    # Register via NSSM — points directly at the venv Python, no DLL tricks needed
-    & $NssmExe install     $ServiceName $VenvPython
-    & $NssmExe set         $ServiceName AppParameters   "-m waitress --port=$AppPort --call app:create_app"
-    & $NssmExe set         $ServiceName AppDirectory    $InstallDir
-    & $NssmExe set         $ServiceName DisplayName     "Centralized - Pentest Audit Platform"
-    & $NssmExe set         $ServiceName Description     "R3coNYT Centralized pentest audit management platform"
-    & $NssmExe set         $ServiceName Start           SERVICE_DELAYED_AUTO_START
-    & $NssmExe set         $ServiceName AppStdout       "$InstallDir\logs\service.log"
-    & $NssmExe set         $ServiceName AppStderr       "$InstallDir\logs\service.log"
-    & $NssmExe set         $ServiceName AppRotateFiles  1
-    & $NssmExe set         $ServiceName AppRotateBytes  1048576
+    $trigger = New-ScheduledTaskTrigger -AtStartup
 
-    # Start the service now
-    & $NssmExe start $ServiceName | Out-Null
-    Start-Sleep -Seconds 5
+    # Auto-restart up to 3 times with 30-second delay
+    $settings = New-ScheduledTaskSettingsSet `
+        -ExecutionTimeLimit      (New-TimeSpan -Seconds 0) `
+        -RestartCount            3 `
+        -RestartInterval         (New-TimeSpan -Seconds 30) `
+        -StartWhenAvailable `
+        -MultipleInstances       IgnoreNew
 
-    $svc = Get-Service $ServiceName -ErrorAction SilentlyContinue
-    if ($svc -and $svc.Status -eq "Running") {
-        Write-Ok "Service running  ->  http://127.0.0.1:$AppPort"
+    $principal = New-ScheduledTaskPrincipal `
+        -UserId    "SYSTEM" `
+        -LogonType ServiceAccount `
+        -RunLevel  Highest
+
+    Register-ScheduledTask `
+        -TaskName    $TaskName `
+        -Action      $action `
+        -Trigger     $trigger `
+        -Settings    $settings `
+        -Principal   $principal `
+        -Description "R3coNYT Centralized pentest audit management platform" `
+        -Force | Out-Null
+
+    # Start immediately
+    Start-ScheduledTask -TaskName $TaskName
+    Start-Sleep -Seconds 4
+
+    $state = (Get-ScheduledTask -TaskName $TaskName).State
+    if ($state -eq "Running") {
+        Write-Ok "Tâche démarrée  ->  http://127.0.0.1:$AppPort"
     } else {
-        Write-Warn "Service installed — check status in a moment:"
-        Write-Warn "  Get-Service Centralized"
-        Write-Warn "  Logs: $InstallDir\logs\service.log"
+        Write-Warn "Tâche enregistrée (état : $state) — vérifiez dans quelques secondes :"
+        Write-Warn "  Get-ScheduledTask -TaskName Centralized"
+        Write-Warn "  Logs : $LogDir\service.log"
     }
 }
 
@@ -329,11 +293,12 @@ function Write-Done {
     Write-Host "  App URL     : http://127.0.0.1:$AppPort" -ForegroundColor White
     Write-Host "  Login       : admin / admin"            -ForegroundColor White
     Write-Host ""
-    $svc = Get-Service "Centralized" -ErrorAction SilentlyContinue
-    if ($svc) {
-        Write-Host "  Service     : Centralized (auto-start, runs in background)" -ForegroundColor Cyan
-        Write-Host "  Stop        : Stop-Service Centralized" -ForegroundColor Yellow
-        Write-Host "  Disable     : Set-Service Centralized -StartupType Manual; Stop-Service Centralized" -ForegroundColor Yellow
+    $task = Get-ScheduledTask -TaskName "Centralized" -ErrorAction SilentlyContinue
+    if ($task) {
+        Write-Host "  Tâche       : Centralized (démarre au boot, tourne en arrière-plan)" -ForegroundColor Cyan
+        Write-Host "  Arrêter     : Stop-ScheduledTask -TaskName Centralized"              -ForegroundColor Yellow
+        Write-Host "  Désactiver  : Disable-ScheduledTask -TaskName Centralized"           -ForegroundColor Yellow
+        Write-Host "  Logs        : $InstallDir\logs\service.log"                          -ForegroundColor Yellow
     } else {
         Write-Host "  Start the app (pick one):"             -ForegroundColor Cyan
         Write-Host "    $InstallDir\centralized.bat"         -ForegroundColor Yellow
@@ -362,7 +327,7 @@ function Main {
     New-UploadsDir
     New-Launcher
     Update-UserPath
-    Install-CentralizedService
+    Install-CentralizedTask
 
     Write-Done
 }
