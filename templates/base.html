@@ -210,6 +210,10 @@ thead .tbl-filter-row input,
 thead .tbl-filter-row select{width:100%;font-size:.72rem;padding:.15rem .35rem;border:1px solid rgba(255,255,255,.18);border-radius:.25rem;background:rgba(255,255,255,.07);color:inherit}
 thead .tbl-filter-row input::placeholder{opacity:.45}
 thead .tbl-filter-row select option{background:#1e2a36;color:#cdd3da}
+th[data-sort]{cursor:pointer;user-select:none;white-space:nowrap}
+th[data-sort]::after{content:' ⇅';opacity:.35;font-size:.75em;vertical-align:middle}
+th[data-sort][aria-sort="ascending"]::after{content:' ↑';opacity:1}
+th[data-sort][aria-sort="descending"]::after{content:' ↓';opacity:1}
 </style>
 <script>
 (function(){
@@ -241,7 +245,28 @@ thead .tbl-filter-row select option{background:#1e2a36;color:#cdd3da}
     document.querySelectorAll('thead [data-fc]').forEach(function(inp){
       inp.addEventListener('input',function(){filterTable(inp.closest('table'))});
     });
+    document.querySelectorAll('th[data-sort]').forEach(function(th){
+      th.addEventListener('click',function(){sortTable(th)});
+    });
   });
+  function sortTable(th){
+    var tbl=th.closest('table');
+    var col=+th.dataset.sort;
+    var asc=th.getAttribute('aria-sort')!=='ascending';
+    tbl.querySelectorAll('th[data-sort]').forEach(function(t){t.removeAttribute('aria-sort');});
+    th.setAttribute('aria-sort',asc?'ascending':'descending');
+    var tbody=tbl.tBodies[0];
+    if(!tbody)return;
+    var rows=Array.from(tbody.rows).filter(function(r){return!r.classList.contains('no-filter-results')});
+    rows.sort(function(a,b){
+      var av=a.cells[col]?a.cells[col].textContent.trim():'';
+      var bv=b.cells[col]?b.cells[col].textContent.trim():'';
+      var an=parseFloat(av.replace(/[^0-9.\-]/g,'')),bn=parseFloat(bv.replace(/[^0-9.\-]/g,''));
+      if(!isNaN(an)&&!isNaN(bn))return asc?an-bn:bn-an;
+      return asc?av.localeCompare(bv,undefined,{sensitivity:'base'}):bv.localeCompare(av,undefined,{sensitivity:'base'});
+    });
+    rows.forEach(function(r){tbody.appendChild(r);});
+  }
 })();
 </script>
 <!-- ─────────────────────────────────────────────────────────────────────────── -->

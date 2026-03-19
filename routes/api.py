@@ -417,6 +417,9 @@ def set_host_context(host_id):
     ctx.os_version = os_version or None
     ctx.service_versions = _json.dumps(services) if services else None
     ctx.notes = notes or None
+    # Mirror analyst OS into the host's main OS field so it appears in the audit host list
+    if os_version:
+        host.os_info = os_version
     db.session.flush()
 
     if not correlate:
