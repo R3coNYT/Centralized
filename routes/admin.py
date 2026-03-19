@@ -2,6 +2,7 @@ import json
 import os
 import re
 import subprocess
+import urllib.error
 import urllib.request
 
 from flask import Blueprint, jsonify, redirect, render_template, request, url_for, flash
@@ -187,7 +188,7 @@ def toggle_glassmorphic():
 import time as _time
 
 _update_cache: dict = {}   # {"ts": float, "available": bool}
-_UPDATE_CACHE_TTL = 60     # seconds (1 minute)
+_UPDATE_CACHE_TTL = 300     # seconds (5 minutes)
 
 
 def _check_update_available() -> bool:
@@ -319,7 +320,7 @@ def run_update():
 # ---------------------------------------------------------------------------
 
 _VERSIONS_CACHE: dict = {}
-_VERSIONS_CACHE_TTL = 600  # 10 minutes
+_VERSIONS_CACHE_TTL = 1800  # 30 minutes
 
 
 @admin_bp.route("/versions")
@@ -334,6 +335,7 @@ def get_versions():
         return jsonify(_VERSIONS_CACHE["data"])
 
     commits = []
+    rate_limited = False
     try:
         page = 1
         while len(commits) < 200:
@@ -371,8 +373,24 @@ def get_versions():
             if len(data) < 100:
                 break
             page += 1
+    except urllib.error.HTTPError as exc:
+        if exc.code in (403, 429):
+            rate_limited = True
+        else:
+            # Return stale cache on any HTTP error if available
+            if _VERSIONS_CACHE.get("data"):
+                return jsonify(_VERSIONS_CACHE["data"])
+            return jsonify({"error": f"GitHub API error: {exc.code} {exc.reason}"})
     except Exception as exc:
-        return jsonify({"error": str(exc)}), 500
+        if _VERSIONS_CACHE.get("data"):
+            return jsonify(_VERSIONS_CACHE["data"])
+        return jsonify({"error": str(exc)})
+
+    if rate_limited:
+        # Return stale cache if we have it; otherwise friendly message
+        if _VERSIONS_CACHE.get("data"):
+            return jsonify(_VERSIONS_CACHE["data"])
+        return jsonify({"error": "GitHub API rate limit exceeded — please wait a few minutes and refresh."})
 
     result = {"commits": commits}
     _VERSIONS_CACHE["ts"] = now
@@ -467,6 +485,7 @@ def run_rollback():
 
 
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
 
@@ -486,11 +505,21 @@ def _get_local_commit():
         return (None, None)
 
 
+_GITHUB_COMMIT_CACHE: dict = {}
+_GITHUB_COMMIT_TTL   = 300   # 5 minutes — shared by update page + sidebar poll
+
+
 def _get_github_latest_commit():
     """
     Fetch the latest commit on the default branch (main) from the GitHub API.
     Returns (full_sha, short_sha, commit_message_first_line).
+    Result is cached for 5 minutes to stay well under the 60 req/hour limit.
     """
+    now = _time.monotonic()
+    if _GITHUB_COMMIT_CACHE.get("ts") and now - _GITHUB_COMMIT_CACHE["ts"] < _GITHUB_COMMIT_TTL:
+        return _GITHUB_COMMIT_CACHE.get("data", (None, None, None))
+
+    result = (None, None, None)
     try:
         req = urllib.request.Request(
             f"https://api.github.com/repos/{GITHUB_REPO}/commits/main",
@@ -503,6 +532,14 @@ def _get_github_latest_commit():
             data = json.loads(resp.read())
         sha = data.get("sha") or ""
         message = (data.get("commit", {}).get("message") or "").split("\n")[0][:80]
-        return (sha or None, sha[:7] if sha else None, message or None)
+        result = (sha or None, sha[:7] if sha else None, message or None)
+    except urllib.error.HTTPError as exc:
+        # On rate-limit (403/429) keep any stale cached result rather than None
+        if exc.code in (403, 429) and _GITHUB_COMMIT_CACHE.get("data"):
+            return _GITHUB_COMMIT_CACHE["data"]
     except Exception:
-        return (None, None, None)
+        pass
+
+    _GITHUB_COMMIT_CACHE["ts"]   = now
+    _GITHUB_COMMIT_CACHE["data"] = result
+    return result
