@@ -12,6 +12,33 @@ Chart.defaults.font.family = "'Segoe UI', system-ui, sans-serif";
 /* Detect glassmorphic mode — used to tweak chart rendering */
 const _isGlass = () => document.documentElement.dataset.glass === '1';
 
+/* Convert solid hex colors to semi-transparent rgba for glass style */
+function glassColors(colors) {
+  if (!_isGlass()) return colors;
+  return colors.map(c => {
+    if (typeof c === 'string' && c.startsWith('#') && c.length >= 7) {
+      const r = parseInt(c.slice(1,3), 16);
+      const g = parseInt(c.slice(3,5), 16);
+      const b = parseInt(c.slice(5,7), 16);
+      return `rgba(${r},${g},${b},0.78)`;
+    }
+    return c;
+  });
+}
+
+/* Chart.js glass tooltip defaults */
+function applyGlassChartDefaults() {
+  if (!_isGlass()) return;
+  Chart.defaults.plugins.tooltip.backgroundColor = 'rgba(10,12,18,0.72)';
+  Chart.defaults.plugins.tooltip.borderColor     = 'rgba(255,255,255,0.16)';
+  Chart.defaults.plugins.tooltip.borderWidth     = 1;
+  Chart.defaults.plugins.tooltip.titleColor      = '#fff';
+  Chart.defaults.plugins.tooltip.bodyColor       = '#cbd3da';
+  Chart.defaults.plugins.tooltip.padding         = 10;
+  Chart.defaults.plugins.tooltip.cornerRadius    = 8;
+}
+applyGlassChartDefaults();
+
 const SEV_COLORS = {
   CRITICAL: '#dc3545',
   HIGH:     '#fd7e14',
@@ -27,23 +54,29 @@ function initDashboardCharts(sevData, svcLabels, svcValues, monthLabels, monthVa
   // Severity doughnut
   const sevCtx = document.getElementById('sevChart');
   if (sevCtx) {
+    const glass = _isGlass();
     new Chart(sevCtx, {
       type: 'doughnut',
       data: {
         labels: sevData.labels,
         datasets: [{
-          data: sevData.values,
-          backgroundColor: sevData.colors,
-          borderWidth: _isGlass() ? 0 : 2,
-          borderColor: _isGlass() ? 'transparent' : '#1a1d23',
-          hoverOffset: _isGlass() ? 8 : 4,
+          data:            sevData.values,
+          backgroundColor: glassColors(sevData.colors),
+          borderWidth:     glass ? 0 : 2,
+          borderColor:     glass ? 'transparent' : '#1a1d23',
+          hoverOffset:     glass ? 10 : 4,
+          hoverBorderWidth: glass ? 2 : 2,
+          hoverBorderColor: glass ? 'rgba(255,255,255,0.45)' : '#fff',
         }],
       },
       options: {
         plugins: {
-          legend: { position: 'right', labels: { color: '#adb5bd', font: { size: 12 }, padding: 12 } },
+          legend: {
+            position: 'right',
+            labels: { color: '#adb5bd', font: { size: 12 }, padding: 12, usePointStyle: true, pointStyleWidth: 10 },
+          },
         },
-        cutout: '68%',
+        cutout: glass ? '70%' : '68%',
       },
     });
   }
@@ -51,6 +84,7 @@ function initDashboardCharts(sevData, svcLabels, svcValues, monthLabels, monthVa
   // Services bar
   const svcCtx = document.getElementById('svcChart');
   if (svcCtx) {
+    const glass = _isGlass();
     new Chart(svcCtx, {
       type: 'bar',
       data: {
@@ -58,17 +92,23 @@ function initDashboardCharts(sevData, svcLabels, svcValues, monthLabels, monthVa
         datasets: [{
           label: 'Ports',
           data: svcValues,
-          backgroundColor: _isGlass() ? 'rgba(13,110,253,0.55)' : 'rgba(13,110,253,0.7)',
-          borderRadius: 5,
-          borderColor: _isGlass() ? 'rgba(13,110,253,0.75)' : undefined,
-          borderWidth: _isGlass() ? 1 : 0,
+          backgroundColor: glass
+            ? svcValues.map(() => 'rgba(13,110,253,0.50)')
+            : 'rgba(13,110,253,0.72)',
+          borderColor:  glass ? 'rgba(13,110,253,0.80)' : undefined,
+          borderWidth:  glass ? 1 : 0,
+          borderRadius: glass ? 6 : 5,
+          hoverBackgroundColor: glass ? 'rgba(13,110,253,0.72)' : 'rgba(13,110,253,0.85)',
         }],
       },
       options: {
         plugins: { legend: { display: false } },
         scales: {
           x: { ticks: { color: '#adb5bd' }, grid: { display: false } },
-          y: { ticks: { color: '#adb5bd', stepSize: 1 }, grid: { color: 'rgba(255,255,255,0.05)' } },
+          y: {
+            ticks: { color: '#adb5bd', stepSize: 1 },
+            grid:  { color: glass ? 'rgba(255,255,255,0.04)' : 'rgba(255,255,255,0.05)' },
+          },
         },
       },
     });
@@ -77,6 +117,7 @@ function initDashboardCharts(sevData, svcLabels, svcValues, monthLabels, monthVa
   // Monthly line chart
   const monthCtx = document.getElementById('monthChart');
   if (monthCtx) {
+    const glass = _isGlass();
     new Chart(monthCtx, {
       type: 'line',
       data: {
@@ -84,19 +125,25 @@ function initDashboardCharts(sevData, svcLabels, svcValues, monthLabels, monthVa
         datasets: [{
           label: 'Audits',
           data: monthValues,
-          borderColor: '#0d6efd',
-          backgroundColor: _isGlass() ? 'rgba(13,110,253,0.08)' : 'rgba(13,110,253,0.1)',
-          tension: 0.35,
+          borderColor: glass ? 'rgba(77,148,255,0.90)' : '#0d6efd',
+          backgroundColor: glass ? 'rgba(13,110,253,0.07)' : 'rgba(13,110,253,0.10)',
+          tension: 0.38,
           fill: true,
-          pointBackgroundColor: '#0d6efd',
-          pointBorderColor: _isGlass() ? 'rgba(255,255,255,0.5)' : '#0d6efd',
+          pointBackgroundColor: glass ? 'rgba(77,148,255,0.85)' : '#0d6efd',
+          pointBorderColor:    glass ? 'rgba(255,255,255,0.60)' : '#0d6efd',
+          pointBorderWidth:    glass ? 1.5 : 1,
+          pointRadius:         glass ? 4 : 3,
+          pointHoverRadius:    glass ? 6 : 5,
         }],
       },
       options: {
         plugins: { legend: { display: false } },
         scales: {
           x: { ticks: { color: '#adb5bd' }, grid: { display: false } },
-          y: { ticks: { color: '#adb5bd', stepSize: 1 }, grid: { color: 'rgba(255,255,255,0.05)' } },
+          y: {
+            ticks: { color: '#adb5bd', stepSize: 1 },
+            grid:  { color: glass ? 'rgba(255,255,255,0.04)' : 'rgba(255,255,255,0.05)' },
+          },
         },
       },
     });
@@ -129,21 +176,29 @@ function initAuditCharts(sevMap, svcLabels, svcValues) {
           </div>`;
       }
     } else {
+      const glass = _isGlass();
       new Chart(sevCtx, {
         type: 'doughnut',
         data: {
           labels,
           datasets: [{
             data: values,
-            backgroundColor: colors,
-            borderWidth: _isGlass() ? 0 : 2,
-            borderColor: _isGlass() ? 'transparent' : '#1a1d23',
-            hoverOffset: _isGlass() ? 8 : 4,
+            backgroundColor: glassColors(colors),
+            borderWidth:      glass ? 0 : 2,
+            borderColor:      glass ? 'transparent' : '#1a1d23',
+            hoverOffset:      glass ? 10 : 4,
+            hoverBorderWidth: glass ? 2 : 2,
+            hoverBorderColor: glass ? 'rgba(255,255,255,0.45)' : '#fff',
           }],
         },
         options: {
-          plugins: { legend: { position: 'right', labels: { color: '#adb5bd', font: { size: 11 }, padding: 10 } } },
-          cutout: '65%',
+          plugins: {
+            legend: {
+              position: 'right',
+              labels: { color: '#adb5bd', font: { size: 11 }, padding: 10, usePointStyle: true, pointStyleWidth: 9 },
+            },
+          },
+          cutout: glass ? '68%' : '65%',
         },
       });
     }
@@ -151,6 +206,7 @@ function initAuditCharts(sevMap, svcLabels, svcValues) {
 
   const svcCtx = document.getElementById('auditSvcChart');
   if (svcCtx) {
+    const glass = _isGlass();
     new Chart(svcCtx, {
       type: 'bar',
       data: {
@@ -158,10 +214,13 @@ function initAuditCharts(sevMap, svcLabels, svcValues) {
         datasets: [{
           label: 'Ports',
           data: svcValues,
-          backgroundColor: _isGlass() ? 'rgba(13,110,253,0.55)' : 'rgba(13,110,253,0.7)',
-          borderRadius: 5,
-          borderColor: _isGlass() ? 'rgba(13,110,253,0.75)' : undefined,
-          borderWidth: _isGlass() ? 1 : 0,
+          backgroundColor: glass
+            ? svcValues.map(() => 'rgba(13,110,253,0.50)')
+            : 'rgba(13,110,253,0.72)',
+          borderColor:  glass ? 'rgba(13,110,253,0.80)' : undefined,
+          borderWidth:  glass ? 1 : 0,
+          borderRadius: glass ? 6 : 5,
+          hoverBackgroundColor: glass ? 'rgba(13,110,253,0.72)' : 'rgba(13,110,253,0.85)',
         }],
       },
       options: {
