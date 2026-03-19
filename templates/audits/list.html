@@ -36,6 +36,20 @@
             <th>Created</th>
             <th></th>
           </tr>
+          <tr class="tbl-filter-row">
+            <th><input data-fc="0" type="text" placeholder="Name…"></th>
+            <th><input data-fc="1" type="text" placeholder="Client…"></th>
+            <th><input data-fc="2" type="text" placeholder="Target…"></th>
+            <th>
+              <select data-fc="3">
+                <option value="">All statuses</option>
+                <option value="in progress">In Progress</option>
+                <option value="completed">Completed</option>
+                <option value="archived">Archived</option>
+              </select>
+            </th>
+            <th></th><th></th><th></th><th></th><th></th>
+          </tr>
         </thead>
         <tbody>
         {% for audit in audits %}

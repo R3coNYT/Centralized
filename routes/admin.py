@@ -33,6 +33,30 @@ DEFAULT_SETTINGS = {
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 GITHUB_REPO = "R3coNYT/Centralized"
+GITHUB_TOKEN_FILE = os.path.join(BASE_DIR, "github_token.txt")
+
+
+def _get_github_token() -> str:
+    """Read the user-supplied GitHub PAT from github_token.txt (if present)."""
+    try:
+        with open(GITHUB_TOKEN_FILE, "r", encoding="utf-8") as f:
+            return f.read().strip()
+    except FileNotFoundError:
+        return ""
+    except Exception:
+        return ""
+
+
+def _github_headers() -> dict:
+    """Return GitHub API headers, adding Authorization if a token is configured."""
+    headers = {
+        "Accept":     "application/vnd.github.v3+json",
+        "User-Agent": "Centralized-App/1.0",
+    }
+    token = _get_github_token()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -150,6 +174,7 @@ def interface():
         "admin/interface.html",
         settings=settings,
         defaults=DEFAULT_SETTINGS,
+        github_token_active=bool(_get_github_token()),
     )
 
 
@@ -179,6 +204,71 @@ def toggle_glassmorphic():
         db.session.add(SiteSettings(key="glassmorphic", value=new_val))
     db.session.commit()
     return jsonify({"enabled": new_val == "1"})
+
+
+@admin_bp.route("/github-token", methods=["POST"])
+@login_required
+def save_github_token():
+    """Save (or clear) the GitHub Personal Access Token used for API calls."""
+    if current_user.role != "admin":
+        return jsonify({"error": "Access denied"}), 403
+
+    data = request.get_json(silent=True) or {}
+    token = (data.get("token") or "").strip()
+
+    # Validate: GitHub PATs are alphanumeric + underscores, 20-255 chars
+    # Allow empty string to clear the token
+    if token and not re.match(r'^[A-Za-z0-9_\-]{20,255}$', token):
+        return jsonify({"error": "Invalid token format."}), 400
+
+    try:
+        if token:
+            with open(GITHUB_TOKEN_FILE, "w", encoding="utf-8") as f:
+                f.write(token)
+        else:
+            # Clear: delete the file
+            if os.path.exists(GITHUB_TOKEN_FILE):
+                os.remove(GITHUB_TOKEN_FILE)
+        # Invalidate cached GitHub results so next call uses new credentials
+        _update_cache.clear()
+        _GITHUB_COMMIT_CACHE.clear()
+        _VERSIONS_CACHE.clear()
+        return jsonify({"ok": True, "active": bool(token)})
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@admin_bp.route("/github-token/test")
+@login_required
+def test_github_token():
+    """Test the configured GitHub token and return rate-limit info."""
+    if current_user.role != "admin":
+        return jsonify({"error": "Access denied"}), 403
+    try:
+        req = urllib.request.Request(
+            "https://api.github.com/rate_limit",
+            headers=_github_headers(),
+        )
+        with urllib.request.urlopen(req, timeout=6) as resp:
+            data = json.loads(resp.read())
+        core = data.get("rate") or data.get("resources", {}).get("core", {})
+        limit     = core.get("limit", 0)
+        remaining = core.get("remaining", 0)
+        reset_ts  = core.get("reset", 0)
+        import datetime
+        reset_dt = datetime.datetime.fromtimestamp(reset_ts).strftime("%H:%M:%S") if reset_ts else "?"
+        authenticated = limit >= 5000
+        return jsonify({
+            "ok":            True,
+            "authenticated": authenticated,
+            "limit":         limit,
+            "remaining":     remaining,
+            "reset":         reset_dt,
+        })
+    except urllib.error.HTTPError as exc:
+        return jsonify({"error": f"GitHub API error {exc.code}: {exc.reason}"}), 200
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 200
 
 
 # ---------------------------------------------------------------------------
@@ -341,10 +431,7 @@ def get_versions():
         while len(commits) < 200:
             req = urllib.request.Request(
                 f"https://api.github.com/repos/{GITHUB_REPO}/commits?sha=main&per_page=100&page={page}",
-                headers={
-                    "Accept": "application/vnd.github.v3+json",
-                    "User-Agent": "Centralized-App/1.0",
-                },
+                headers=_github_headers(),
             )
             with urllib.request.urlopen(req, timeout=10) as resp:
                 data = json.loads(resp.read())
@@ -523,10 +610,7 @@ def _get_github_latest_commit():
     try:
         req = urllib.request.Request(
             f"https://api.github.com/repos/{GITHUB_REPO}/commits/main",
-            headers={
-                "Accept": "application/vnd.github.v3+json",
-                "User-Agent": "Centralized-App/1.0",
-            },
+            headers=_github_headers(),
         )
         with urllib.request.urlopen(req, timeout=6) as resp:
             data = json.loads(resp.read())

@@ -140,6 +140,23 @@
       <table class="table table-hover align-middle mb-0">
         <thead class="table-header">
           <tr><th>IP</th><th>Hostname</th><th>OS</th><th>Risk</th><th>CMS/WAF</th><th class="text-center">Ports</th><th class="text-center">Vulns</th><th></th></tr>
+          <tr class="tbl-filter-row">
+            <th><input data-fc="0" type="text" placeholder="IP…"></th>
+            <th><input data-fc="1" type="text" placeholder="Hostname…"></th>
+            <th><input data-fc="2" type="text" placeholder="OS…"></th>
+            <th>
+              <select data-fc="3">
+                <option value="">All risks</option>
+                <option value="critical">Critical</option>
+                <option value="high">High</option>
+                <option value="medium">Medium</option>
+                <option value="low">Low</option>
+                <option value="info">Info</option>
+              </select>
+            </th>
+            <th><input data-fc="4" type="text" placeholder="CMS/WAF…"></th>
+            <th></th><th></th><th></th>
+          </tr>
         </thead>
         <tbody>
         {% for host in hosts %}
@@ -235,7 +252,23 @@
   <div class="card-body p-0">
     <div class="table-responsive">
       <table class="table table-hover align-middle mb-0">
-        <thead class="table-header"><tr><th>Filename</th><th>Type</th><th>Size</th><th>Parsed</th><th>Date</th><th></th></tr></thead>
+        <thead class="table-header">
+          <tr><th>Filename</th><th>Type</th><th>Size</th><th>Parsed</th><th>Date</th><th></th></tr>
+          <tr class="tbl-filter-row">
+            <th><input data-fc="0" type="text" placeholder="Filename…"></th>
+            <th><input data-fc="1" type="text" placeholder="Type…"></th>
+            <th></th>
+            <th>
+              <select data-fc="3">
+                <option value="">All</option>
+                <option value="ok">OK</option>
+                <option value="error">Error</option>
+                <option value="pending">Pending</option>
+              </select>
+            </th>
+            <th></th><th></th>
+          </tr>
+        </thead>
         <tbody>
         {% for uf in uploaded_files %}
         <tr>

@@ -88,6 +88,13 @@ function Backup-Data {
         Write-Ok ".env backed up"
     }
 
+    # GitHub API token
+    $TokenPath = Join-Path $InstallDir "github_token.txt"
+    if (Test-Path $TokenPath) {
+        Copy-Item $TokenPath -Destination $BackupDir
+        Write-Ok "GitHub token backed up"
+    }
+
     Write-Ok "Backup complete -> $BackupDir"
     return $BackupDir
 }
@@ -232,6 +239,14 @@ function Restore-Data {
     if ((Test-Path $BackupEnv) -and -not (Test-Path $TargetEnv)) {
         Copy-Item $BackupEnv -Destination $TargetEnv -Force
         Write-Ok ".env restored"
+    }
+
+    # GitHub API token
+    $BackupToken = Join-Path $BackupDir "github_token.txt"
+    $TargetToken = Join-Path $InstallDir "github_token.txt"
+    if ((Test-Path $BackupToken) -and -not (Test-Path $TargetToken)) {
+        Copy-Item $BackupToken -Destination $TargetToken -Force
+        Write-Ok "GitHub token restored"
     }
 }
 

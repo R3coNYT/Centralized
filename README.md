@@ -143,6 +143,10 @@ Before each update the scripts create a timestamped backup of:
 - `centralized.db` — all your clients, audits, hosts and vulnerabilities
 - `uploads/` — all uploaded scan files
 - `.env` — any local configuration overrides
+- `github_token.txt` — your GitHub API token (if set)
+
+> **Tip:** add a GitHub Personal Access Token via **Admin → Interface** before checking for updates.  
+> Without it the unauthenticated GitHub API is limited to 60 requests/hour, which can cause the version check to fail on busy networks. See the [GitHub API Token](#github-api-token) section for setup instructions.
 
 ---
 
@@ -218,6 +222,26 @@ Edit `config.py` or set environment variables:
 | `DATABASE_URL`  | `sqlite:///centralized.db` | SQLAlchemy DB URI                   |
 | `NVD_API_KEY`   | *(empty)*                  | NVD API key — raises rate limit from 5 to 50 req/30s |
 | `UPLOAD_FOLDER` | `./uploads/`               | Where uploaded files are stored      |
+
+### GitHub API Token
+
+Centralized checks GitHub for the latest version and available updates (visible in **Admin → Update**).
+Without authentication this uses the **unauthenticated GitHub API**, which is capped at **60 requests/hour** per IP — enough for normal use but easy to exhaust on shared networks or frequent refreshes.
+
+Adding a **Personal Access Token (PAT)** raises the limit to **5 000 requests/hour**.
+
+**How to set it up:**
+
+1. Go to <https://github.com/settings/tokens> → **Generate new token (classic)**
+2. Tick only the **`public_repo`** scope (read-only public repositories is sufficient)
+3. Copy the generated token
+4. In Centralized, open **Admin → Interface** and paste it in the **GitHub API Token** card
+5. Click **Save Token** — the token is written to `github_token.txt` in the install directory
+
+The token file is excluded from git (`.gitignore`) and is preserved across updates (backed up/restored by the update scripts).
+
+> **Never commit `github_token.txt` to a public repository.**  
+> If you suspect a token has been exposed, revoke it immediately at <https://github.com/settings/tokens>.
 
 ---
 

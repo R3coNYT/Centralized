@@ -20,6 +20,7 @@ backups/
 
 # ── Local config overrides ───────────────────────────────
 .env
+github_token.txt
 instance/
 
 # ── Logs ────────────────────────────────────────────────
