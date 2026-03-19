@@ -340,6 +340,10 @@ Write-Info "Install directory: $InstallDir"
 $ServicePresent = $false
 if (-not $NoRestart) {
     $ServicePresent = Stop-CentralizedService
+} else {
+    # Web UI call (-NoRestart): don't stop the service, but still detect whether
+    # the scheduled task exists so we can schedule the post-update restart.
+    $ServicePresent = $null -ne (Get-ScheduledTask -TaskName "Centralized" -ErrorAction SilentlyContinue)
 }
 
 $BackupDir  = Backup-Data    -InstallDir $InstallDir

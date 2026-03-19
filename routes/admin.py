@@ -187,7 +187,7 @@ def toggle_glassmorphic():
 import time as _time
 
 _update_cache: dict = {}   # {"ts": float, "available": bool}
-_UPDATE_CACHE_TTL = 300    # seconds (5 minutes)
+_UPDATE_CACHE_TTL = 60     # seconds (1 minute)
 
 
 def _check_update_available() -> bool:

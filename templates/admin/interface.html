@@ -385,11 +385,31 @@ function buildAssignment(palette) {
                byVivid.find(c => lum(c) > 30) ||
                byVivid[0] || palette[0];
 
+  // glass_blob1 — 2nd most vivid, distinct from accent (used for top-right orb)
+  let blob1 = byVivid.find(c => {
+    const h = toHex(c.r, c.g, c.b);
+    const ha = toHex(accent.r, accent.g, accent.b);
+    return h !== ha && lum(c) > 40 && lum(c) < 230;
+  }) || byVivid.find(c => toHex(c.r,c.g,c.b) !== toHex(accent.r,accent.g,accent.b)) || accent;
+
+  // glass_blob2 — 3rd most vivid, distinct from both (used for bottom-left orb)
+  const accentHex = toHex(accent.r, accent.g, accent.b);
+  const blob1Hex  = toHex(blob1.r,  blob1.g,  blob1.b);
+  let blob2 = byVivid.find(c => {
+    const h = toHex(c.r, c.g, c.b);
+    return h !== accentHex && h !== blob1Hex && lum(c) > 40 && lum(c) < 230;
+  }) || byVivid.find(c => {
+    const h = toHex(c.r, c.g, c.b);
+    return h !== accentHex && h !== blob1Hex;
+  }) || blob1;
+
   return {
     bg_surface:   toHex(bgSurface.r, bgSurface.g, bgSurface.b),
     sidebar_bg:   toHex(sidebarBg.r, sidebarBg.g, sidebarBg.b),
     bg_card:      toHex(bgCard.r,    bgCard.g,    bgCard.b),
     accent_color: toHex(accent.r,    accent.g,    accent.b),
+    glass_blob1:  blob1Hex,
+    glass_blob2:  toHex(blob2.r, blob2.g, blob2.b),
   };
 }
 
@@ -398,6 +418,8 @@ const ASSIGNMENT_LABELS = {
   sidebar_bg:   'Sidebar Background',
   bg_card:      'Card Background',
   bg_surface:   'Body Background',
+  glass_blob1:  'Glass Blob 1 (top-right)',
+  glass_blob2:  'Glass Blob 2 (bottom-left)',
 };
 
 function renderPaletteSwatches(palette) {
