@@ -194,6 +194,59 @@
         </button>
       </div>
     </div>
+
+    <!-- GitHub API Token -->
+    <div class="card mt-4">
+      <div class="card-header fw-semibold">
+        <i class="bi bi-github me-2"></i>GitHub API Token
+        <span class="text-muted fw-normal ms-2" style="font-size:.8rem">Authenticated: 5&thinsp;000 req/h &mdash; Anonymous: 60 req/h</span>
+      </div>
+      <div class="card-body">
+        <div class="small text-muted mb-3">
+          Enter a <a href="https://github.com/settings/tokens" target="_blank" rel="noopener noreferrer" class="text-decoration-none">GitHub Personal Access Token</a>
+          (classic PAT, no scopes needed for public repos) to increase the API rate limit and avoid the &ldquo;rate limit exceeded&rdquo; error on the Update page.
+          The token is saved locally in <code>github_token.txt</code> and is backed up automatically on every update.
+        </div>
+
+        <div class="mb-3" style="max-width:480px">
+          <label class="form-label fw-semibold small" for="githubTokenInput">Personal Access Token</label>
+          <div class="input-group">
+            <input type="password"
+                   id="githubTokenInput"
+                   class="form-control font-monospace"
+                   placeholder="ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                   autocomplete="off"
+                   spellcheck="false"
+                   {% if github_token_active %}value="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;"{% endif %}
+                   style="font-size:.875rem"/>
+            <button class="btn btn-outline-secondary" type="button" id="tokenVisBtn" onclick="toggleTokenVisibility()" title="Show/hide">
+              <i class="bi bi-eye" id="tokenVisIcon"></i>
+            </button>
+          </div>
+          <div class="form-text">
+            {% if github_token_active %}
+            <span class="text-success"><i class="bi bi-check-circle-fill me-1"></i>Token is active &mdash; type a new one to replace it, or clear and save to remove it.</span>
+            {% else %}
+            No token configured &mdash; running in anonymous mode (60 req/h).
+            {% endif %}
+          </div>
+        </div>
+
+        <div class="d-flex gap-2 flex-wrap align-items-center">
+          <button class="btn btn-primary btn-sm" onclick="saveToken()" id="saveTokenBtn">
+            <i class="bi bi-floppy me-1"></i>Save Token
+          </button>
+          <button class="btn btn-outline-secondary btn-sm" onclick="clearToken()" id="clearTokenBtn" {% if not github_token_active %}style="display:none"{% endif %}>
+            <i class="bi bi-trash me-1"></i>Remove Token
+          </button>
+          <button class="btn btn-outline-info btn-sm" onclick="testToken()" id="testTokenBtn">
+            <i class="bi bi-arrow-repeat me-1"></i>Test
+          </button>
+          <span id="tokenStatusMsg" class="small ms-1"></span>
+        </div>
+      </div>
+    </div>
+
   </div>
 
 </div>
@@ -518,6 +571,83 @@ async function toggleGlass() {
     else    btn.classList.remove('btn-glass-on');
   } catch (e) {
     console.error('Glass toggle failed', e);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+/* ── GitHub token management ────────────────────────────────────── */
+
+function toggleTokenVisibility() {
+  const inp = document.getElementById('githubTokenInput');
+  const ico = document.getElementById('tokenVisIcon');
+  if (inp.type === 'password') {
+    inp.type = 'text';
+    ico.className = 'bi bi-eye-slash';
+  } else {
+    inp.type = 'password';
+    ico.className = 'bi bi-eye';
+  }
+}
+
+function setTokenMsg(msg, cls = 'text-muted') {
+  const el = document.getElementById('tokenStatusMsg');
+  el.className = 'small ms-1 ' + cls;
+  el.textContent = msg;
+  if (msg) setTimeout(() => { if (el.textContent === msg) el.textContent = ''; }, 6000);
+}
+
+async function saveToken() {
+  const inp = document.getElementById('githubTokenInput');
+  const btn = document.getElementById('saveTokenBtn');
+  let token = inp.value.trim();
+  // If the field still shows the bullet placeholder, the user didn't change it — abort
+  if (token.startsWith('\u2022')) { setTokenMsg('No change detected.', 'text-muted'); return; }
+  btn.disabled = true;
+  setTokenMsg('Saving…', 'text-muted');
+  try {
+    const resp = await fetch('/admin/github-token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrfToken() },
+      body: JSON.stringify({ token }),
+    });
+    const data = await resp.json();
+    if (data.error) { setTokenMsg(data.error, 'text-danger'); return; }
+    setTokenMsg(data.active ? '\u2713 Token saved.' : '\u2713 Token removed.', 'text-success');
+    document.getElementById('clearTokenBtn').style.display = data.active ? '' : 'none';
+    if (data.active) inp.value = '\u2022'.repeat(12);
+    else             inp.value = '';
+    inp.type = 'password';
+    document.getElementById('tokenVisIcon').className = 'bi bi-eye';
+  } catch (e) {
+    setTokenMsg('Request failed.', 'text-danger');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function clearToken() {
+  if (!confirm('Remove the GitHub token?')) return;
+  const inp = document.getElementById('githubTokenInput');
+  inp.value = '';
+  await saveToken();
+}
+
+async function testToken() {
+  const btn = document.getElementById('testTokenBtn');
+  btn.disabled = true;
+  setTokenMsg('Testing…', 'text-muted');
+  try {
+    const resp = await fetch('/admin/github-token/test');
+    const d    = await resp.json();
+    if (d.error) { setTokenMsg(d.error, 'text-danger'); return; }
+    if (d.authenticated) {
+      setTokenMsg(`\u2713 Authenticated — ${d.remaining}/${d.limit} requests remaining (resets ${d.reset})`, 'text-success');
+    } else {
+      setTokenMsg(`Anonymous — ${d.remaining}/${d.limit} req remaining (resets ${d.reset})`, 'text-warning');
+    }
+  } catch (e) {
+    setTokenMsg('Connection failed.', 'text-danger');
   } finally {
     btn.disabled = false;
   }

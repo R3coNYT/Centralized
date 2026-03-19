@@ -197,6 +197,48 @@
 </script>
 {% endif %}
 
+<!-- ── Column filter (shared) ─────────────────────────────────────────────── -->
+<style>
+thead .tbl-filter-row th{padding:.2rem .4rem;background:rgba(0,0,0,.18)}
+thead .tbl-filter-row input,
+thead .tbl-filter-row select{width:100%;font-size:.72rem;padding:.15rem .35rem;border:1px solid rgba(255,255,255,.18);border-radius:.25rem;background:rgba(255,255,255,.07);color:inherit}
+thead .tbl-filter-row input::placeholder{opacity:.45}
+thead .tbl-filter-row select option{background:#1e2a36;color:#cdd3da}
+</style>
+<script>
+(function(){
+  function filterTable(tbl){
+    var inputs=tbl.querySelectorAll('thead [data-fc]');
+    var filters=Array.from(inputs).map(function(i){return{col:+i.dataset.fc,val:i.value.toLowerCase().trim()}}).filter(function(f){return f.val});
+    var rows=tbl.tBodies[0]?tbl.tBodies[0].rows:[];
+    var visible=0;
+    for(var i=0;i<rows.length;i++){
+      var row=rows[i];
+      if(row.classList.contains('no-filter-results'))continue;
+      if(row.cells.length<=1){row.style.display='';continue}
+      var show=!filters.length||filters.every(function(f){return(row.cells[f.col]?row.cells[f.col].textContent:' ').toLowerCase().includes(f.val)});
+      row.style.display=show?'':'none';
+      if(show)visible++;
+    }
+    var placeholder=tbl.querySelector('.no-filter-results');
+    if(visible===0&&filters.length){
+      if(!placeholder){
+        placeholder=document.createElement('tr');
+        placeholder.className='no-filter-results';
+        placeholder.innerHTML='<td colspan="99" class="text-center text-muted py-4"><i class="bi bi-search me-2"></i>No results match your filters.</td>';
+        tbl.tBodies[0].appendChild(placeholder);
+      }
+      placeholder.style.display='';
+    }else if(placeholder){placeholder.style.display='none'}
+  }
+  document.addEventListener('DOMContentLoaded',function(){
+    document.querySelectorAll('thead [data-fc]').forEach(function(inp){
+      inp.addEventListener('input',function(){filterTable(inp.closest('table'))});
+    });
+  });
+})();
+</script>
+<!-- ─────────────────────────────────────────────────────────────────────────── -->
 {% block scripts %}{% endblock %}
 </body>
 </html>
