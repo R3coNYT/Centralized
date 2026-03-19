@@ -168,16 +168,31 @@
     }
   }
 
-  // Poll once immediately, then every 5 minutes
+  function removeUpdate() {
+    icon.classList.remove('ar-spin');
+    badge.classList.add('d-none');
+    badge.classList.remove('ar-pulse');
+    const link = document.getElementById('sidebar-update-link');
+    if (link) {
+      link.classList.remove('nav-link-update-available');
+      link.title = '';
+    }
+  }
+
+  // Poll once immediately, then every 60 seconds
   function checkUpdate() {
     fetch('/admin/update-status')
       .then(r => r.ok ? r.json() : null)
-      .then(data => { if (data && data.available) applyUpdate(); })
+      .then(data => {
+        if (!data) return;
+        if (data.available) applyUpdate();
+        else removeUpdate();
+      })
       .catch(() => {});
   }
 
   checkUpdate();
-  setInterval(checkUpdate, 300000);
+  setInterval(checkUpdate, 60000);
 })();
 </script>
 {% endif %}
