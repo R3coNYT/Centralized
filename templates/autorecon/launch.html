@@ -314,30 +314,6 @@ function _onEnded() {
 </script>
 {% endblock %}
 
-
-{% block content %}
-<!-- Full-height terminal layout -->
-<div class="d-flex flex-column" style="height:calc(100vh - 115px); min-height:400px;">
-
-  <!-- ── Toolbar ──────────────────────────────────────────────────────────── -->
-  <div class="d-flex align-items-center gap-2 mb-2 flex-wrap">
-
-    {% if not autorecon_found %}
-    <div class="alert alert-warning mb-0 py-1 px-3 flex-grow-1" role="alert">
-      <i class="bi bi-exclamation-triangle me-1"></i>
-      AutoRecon was not found on this system.
-    </div>
-    {% endif %}
-
-    {% if autorecon_found %}
-    <button id="btn-launch" class="btn btn-success" onclick="launchAutoRecon()">
-      <i class="bi bi-play-fill me-1"></i>Launch AutoRecon
-    </button>
-    <button id="btn-stop" class="btn btn-danger d-none" onclick="stopAutoRecon()">
-      <i class="bi bi-stop-fill me-1"></i>Stop
-    </button>
-    {% endif %}
-
     <span id="status-badge" class="badge bg-secondary" style="display:none">idle</span>
 
     {% if not has_pty %}
