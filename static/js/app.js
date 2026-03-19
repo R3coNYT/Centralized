@@ -9,6 +9,9 @@ Chart.defaults.color = '#adb5bd';
 Chart.defaults.borderColor = 'rgba(255,255,255,0.06)';
 Chart.defaults.font.family = "'Segoe UI', system-ui, sans-serif";
 
+/* Detect glassmorphic mode — used to tweak chart rendering */
+const _isGlass = () => document.documentElement.dataset.glass === '1';
+
 const SEV_COLORS = {
   CRITICAL: '#dc3545',
   HIGH:     '#fd7e14',
@@ -31,8 +34,9 @@ function initDashboardCharts(sevData, svcLabels, svcValues, monthLabels, monthVa
         datasets: [{
           data: sevData.values,
           backgroundColor: sevData.colors,
-          borderWidth: 2,
-          borderColor: '#1a1d23',
+          borderWidth: _isGlass() ? 0 : 2,
+          borderColor: _isGlass() ? 'transparent' : '#1a1d23',
+          hoverOffset: _isGlass() ? 8 : 4,
         }],
       },
       options: {
@@ -54,8 +58,10 @@ function initDashboardCharts(sevData, svcLabels, svcValues, monthLabels, monthVa
         datasets: [{
           label: 'Ports',
           data: svcValues,
-          backgroundColor: 'rgba(13,110,253,0.7)',
+          backgroundColor: _isGlass() ? 'rgba(13,110,253,0.55)' : 'rgba(13,110,253,0.7)',
           borderRadius: 5,
+          borderColor: _isGlass() ? 'rgba(13,110,253,0.75)' : undefined,
+          borderWidth: _isGlass() ? 1 : 0,
         }],
       },
       options: {
@@ -79,10 +85,11 @@ function initDashboardCharts(sevData, svcLabels, svcValues, monthLabels, monthVa
           label: 'Audits',
           data: monthValues,
           borderColor: '#0d6efd',
-          backgroundColor: 'rgba(13,110,253,0.1)',
+          backgroundColor: _isGlass() ? 'rgba(13,110,253,0.08)' : 'rgba(13,110,253,0.1)',
           tension: 0.35,
           fill: true,
           pointBackgroundColor: '#0d6efd',
+          pointBorderColor: _isGlass() ? 'rgba(255,255,255,0.5)' : '#0d6efd',
         }],
       },
       options: {
@@ -126,7 +133,13 @@ function initAuditCharts(sevMap, svcLabels, svcValues) {
         type: 'doughnut',
         data: {
           labels,
-          datasets: [{ data: values, backgroundColor: colors, borderWidth: 2, borderColor: '#1a1d23' }],
+          datasets: [{
+            data: values,
+            backgroundColor: colors,
+            borderWidth: _isGlass() ? 0 : 2,
+            borderColor: _isGlass() ? 'transparent' : '#1a1d23',
+            hoverOffset: _isGlass() ? 8 : 4,
+          }],
         },
         options: {
           plugins: { legend: { position: 'right', labels: { color: '#adb5bd', font: { size: 11 }, padding: 10 } } },
@@ -145,8 +158,10 @@ function initAuditCharts(sevMap, svcLabels, svcValues) {
         datasets: [{
           label: 'Ports',
           data: svcValues,
-          backgroundColor: 'rgba(13,110,253,0.7)',
+          backgroundColor: _isGlass() ? 'rgba(13,110,253,0.55)' : 'rgba(13,110,253,0.7)',
           borderRadius: 5,
+          borderColor: _isGlass() ? 'rgba(13,110,253,0.75)' : undefined,
+          borderWidth: _isGlass() ? 1 : 0,
         }],
       },
       options: {
