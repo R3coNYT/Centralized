@@ -378,3 +378,117 @@ html[data-glass="1"] pre {
   border-color: rgba(var(--bs-primary-rgb, 13,110,253), 0.45) !important;
   color: var(--bs-primary, #0d6efd) !important;
 }
+
+/* ── Glassmorphic — Badges ────────────────────────────────── */
+
+html[data-glass="1"] .badge {
+  backdrop-filter: blur(10px) saturate(160%);
+  -webkit-backdrop-filter: blur(10px) saturate(160%);
+  border: 1px solid rgba(255,255,255,0.18) !important;
+}
+
+html[data-glass="1"] .badge.bg-primary    { background: rgba(13,110,253,0.40) !important; }
+html[data-glass="1"] .badge.bg-secondary  { background: rgba(108,117,125,0.35) !important; }
+html[data-glass="1"] .badge.bg-success    { background: rgba(25,135,84,0.42) !important; }
+html[data-glass="1"] .badge.bg-danger     { background: rgba(220,53,69,0.42) !important; }
+html[data-glass="1"] .badge.bg-warning    { background: rgba(255,193,7,0.45) !important; }
+html[data-glass="1"] .badge.bg-info       { background: rgba(13,202,240,0.35) !important; }
+html[data-glass="1"] .badge.bg-dark       { background: rgba(33,37,41,0.45) !important; }
+
+/* Severity badges */
+html[data-glass="1"] .badge.sev-critical  { background: rgba(220,53,69,0.42) !important; }
+html[data-glass="1"] .badge.sev-high      { background: rgba(253,126,20,0.42) !important; }
+html[data-glass="1"] .badge.sev-medium    { background: rgba(255,193,7,0.45) !important; }
+html[data-glass="1"] .badge.sev-low       { background: rgba(13,202,240,0.35) !important; }
+html[data-glass="1"] .badge.sev-info      { background: rgba(108,117,125,0.35) !important; }
+html[data-glass="1"] .badge.sev-potential { background: rgba(180,79,255,0.42) !important; }
+
+/* ── Glassmorphic — Alerts ────────────────────────────────── */
+
+html[data-glass="1"] .alert {
+  backdrop-filter: blur(14px) saturate(160%);
+  -webkit-backdrop-filter: blur(14px) saturate(160%);
+  border: 1px solid rgba(255,255,255,0.12) !important;
+}
+html[data-glass="1"] .alert-primary    { background: rgba(13,110,253,0.22) !important; }
+html[data-glass="1"] .alert-success    { background: rgba(25,135,84,0.22) !important; }
+html[data-glass="1"] .alert-danger     { background: rgba(220,53,69,0.22) !important; }
+html[data-glass="1"] .alert-warning    { background: rgba(255,193,7,0.20) !important; }
+html[data-glass="1"] .alert-info       { background: rgba(13,202,240,0.18) !important; }
+html[data-glass="1"] .alert-secondary  { background: rgba(108,117,125,0.18) !important; }
+
+/* ── Glassmorphic — Dropdowns ─────────────────────────────── */
+
+html[data-glass="1"] .dropdown-menu {
+  background: rgba(var(--bg-card-rgb, 26,29,35), 0.50) !important;
+  backdrop-filter: blur(26px) saturate(170%);
+  -webkit-backdrop-filter: blur(26px) saturate(170%);
+  border: 1px solid rgba(255,255,255,0.13) !important;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.38) !important;
+}
+html[data-glass="1"] .dropdown-item:hover,
+html[data-glass="1"] .dropdown-item:focus {
+  background: rgba(255,255,255,0.08) !important;
+}
+html[data-glass="1"] .dropdown-divider {
+  border-color: rgba(255,255,255,0.08) !important;
+}
+
+/* ── Glassmorphic — Progress bars ─────────────────────────── */
+
+html[data-glass="1"] .progress {
+  background: rgba(255,255,255,0.07) !important;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  border: 1px solid rgba(255,255,255,0.08) !important;
+}
+html[data-glass="1"] .progress-bar {
+  opacity: 0.80;
+}
+
+/* ── Glassmorphic — Stat icons ────────────────────────────── */
+
+html[data-glass="1"] .stat-icon {
+  background: rgba(255,255,255,0.09) !important;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255,255,255,0.13) !important;
+}
+
+/* ── Glassmorphic — Nav tabs ──────────────────────────────── */
+
+html[data-glass="1"] .nav-tabs {
+  border-bottom-color: rgba(255,255,255,0.09) !important;
+}
+html[data-glass="1"] .nav-tabs .nav-link {
+  background: rgba(255,255,255,0.04) !important;
+  border-color: rgba(255,255,255,0.08) !important;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+html[data-glass="1"] .nav-tabs .nav-link.active {
+  background: rgba(13,110,253,0.28) !important;
+  border-color: rgba(255,255,255,0.14) !important;
+  border-bottom-color: transparent !important;
+}
+
+/* ── Glassmorphic — Chart.js canvas ───────────────────────── */
+
+html[data-glass="1"] canvas {
+  /* transparent background — glass card shines through */
+  background: transparent !important;
+}
+
+/* ── Glassmorphic — Toasts ────────────────────────────────── */
+
+html[data-glass="1"] .toast {
+  background: rgba(var(--bg-card-rgb, 26,29,35), 0.50) !important;
+  backdrop-filter: blur(22px) saturate(160%);
+  -webkit-backdrop-filter: blur(22px) saturate(160%);
+  border: 1px solid rgba(255,255,255,0.11) !important;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.32) !important;
+}
+html[data-glass="1"] .toast-header {
+  background: rgba(255,255,255,0.04) !important;
+  border-bottom-color: rgba(255,255,255,0.08) !important;
+}
