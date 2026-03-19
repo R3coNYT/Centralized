@@ -58,6 +58,15 @@
 <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.5.0/lib/xterm-addon-fit.min.js"></script>
 
 <script>
+/* Patch canvas getContext so xterm.js doesn't trigger the willReadFrequently warning */
+(function () {
+  const _orig = HTMLCanvasElement.prototype.getContext;
+  HTMLCanvasElement.prototype.getContext = function (type, attrs) {
+    if (type === '2d') attrs = Object.assign({ willReadFrequently: true }, attrs);
+    return _orig.call(this, type, attrs);
+  };
+})();
+
 /* ── xterm init ─────────────────────────────────────────────────────────── */
 const term = new Terminal({
   theme: {
