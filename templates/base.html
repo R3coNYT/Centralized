@@ -31,19 +31,19 @@
         <i class="bi bi-speedometer2 me-2"></i>Dashboard
       </a>
     </li>
-    <li>
+    <li class="nav-item">
       <a href="{{ url_for('audits.list_audits') }}"
          class="nav-link {% if request.blueprint == 'audits' %}active{% endif %}">
         <i class="bi bi-clipboard2-data me-2"></i>Audits
       </a>
     </li>
-    <li>
+    <li class="nav-item">
       <a href="{{ url_for('clients.list_clients') }}"
          class="nav-link {% if request.blueprint == 'clients' %}active{% endif %}">
         <i class="bi bi-people me-2"></i>Clients
       </a>
     </li>
-    <li>
+    <li class="nav-item">
       <a href="{{ url_for('cve.search_page') }}"
          class="nav-link {% if request.blueprint == 'cve' %}active{% endif %}">
         <i class="bi bi-bug me-2"></i>CVE Search
@@ -51,13 +51,13 @@
     </li>
     {% if autorecon_installed %}
     <li class="mt-3 nav-section-label px-2">AutoRecon</li>
-    <li>
+    <li class="nav-item">
       <a href="{{ url_for('autorecon_launch.index') }}"
          class="nav-link {% if request.blueprint == 'autorecon_launch' %}active{% endif %}">
         <i class="bi bi-play-circle me-2"></i>AutoRecon
       </a>
     </li>
-    <li>
+    <li class="nav-item">
       <a href="{{ url_for('autorecon_results.index') }}"
          class="nav-link {% if request.blueprint == 'autorecon_results' %}active{% endif %}">
         <i class="bi bi-folder2-open me-2"></i>Results
@@ -66,19 +66,25 @@
     {% endif %}
     {% if current_user.role == 'admin' %}
     <li class="mt-3 nav-section-label px-2">Administration</li>
-    <li>
+    <li class="nav-item">
       <a href="{{ url_for('auth.users_list') }}"
          class="nav-link {% if request.blueprint == 'auth' and request.endpoint != 'auth.login' %}active{% endif %}">
         <i class="bi bi-person-gear me-2"></i>Users
       </a>
     </li>
-    <li>
+    <li class="nav-item">
       <a href="{{ url_for('admin.interface') }}"
          class="nav-link {% if request.endpoint == 'admin.interface' or request.endpoint == 'admin.interface_reset' %}active{% endif %}">
         <i class="bi bi-palette me-2"></i>Interface
       </a>
     </li>
-    <li>
+    <li class="nav-item">
+      <a href="{{ url_for('admin.settings') }}"
+         class="nav-link {% if request.endpoint == 'admin.settings' %}active{% endif %}">
+        <i class="bi bi-sliders me-2"></i>Settings
+      </a>
+    </li>
+    <li class="nav-item">
       <a href="{{ url_for('admin.update_page') }}"
          id="sidebar-update-link"
          class="nav-link d-flex align-items-center {% if request.endpoint == 'admin.update_page' %}active{% endif %}">

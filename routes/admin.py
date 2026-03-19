@@ -206,6 +206,18 @@ def toggle_glassmorphic():
     return jsonify({"enabled": new_val == "1"})
 
 
+@admin_bp.route("/settings", methods=["GET"])
+@login_required
+def settings():
+    if current_user.role != "admin":
+        flash("Access denied.", "danger")
+        return redirect(url_for("dashboard.index"))
+    return render_template(
+        "admin/settings.html",
+        github_token_active=bool(_get_github_token()),
+    )
+
+
 @admin_bp.route("/github-token", methods=["POST"])
 @login_required
 def save_github_token():

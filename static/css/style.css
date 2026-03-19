@@ -38,6 +38,10 @@ body {
   letter-spacing: .3px;
 }
 
+.sidebar .nav-item {
+  margin-bottom: 2px;
+}
+
 .sidebar .nav-link {
   color: #adb5bd;
   border-radius: 8px;
