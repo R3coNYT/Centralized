@@ -467,7 +467,7 @@ def get_versions():
                     "pr": pr_num,
                     "title": title,
                     "date": date_str,
-                    "installable": pr_num >= 74,
+                    "installable": pr_num >= 90,
                 })
             if len(data) < 100:
                 break
