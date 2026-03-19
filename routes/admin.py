@@ -368,7 +368,7 @@ def run_update():
         script = os.path.join(BASE_DIR, "update.sh")
         if not os.path.exists(script):
             return jsonify({"error": "update.sh not found in the application directory."}), 404
-        cmd = ["bash", script, "--no-restart"]
+        cmd = ["bash", script]
 
     try:
         result = subprocess.run(
@@ -531,7 +531,7 @@ def run_rollback():
         script = os.path.join(BASE_DIR, "rollback.sh")
         if not os.path.exists(script):
             return jsonify({"error": "rollback.sh not found in the application directory."}), 404
-        cmd = ["bash", script, "--commit", commit, "--no-restart"]
+        cmd = ["bash", script, "--commit", commit]
 
     try:
         result = subprocess.run(
