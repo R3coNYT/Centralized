@@ -23,6 +23,319 @@
     <button id="btn-stop" class="btn btn-danger d-none" onclick="stopAutoRecon()">
       <i class="bi bi-stop-fill me-1"></i>Stop
     </button>
+    <button id="btn-new" class="btn btn-outline-secondary d-none" onclick="newSession()" title="Discard current session and reset the terminal">
+      <i class="bi bi-plus-circle me-1"></i>New Session
+    </button>
+    {% endif %}
+
+    <span id="status-badge" class="badge bg-secondary" style="display:none">idle</span>
+
+    {% if not has_pty %}
+    <span class="badge bg-warning text-dark ms-auto" title="Install pywinpty (Windows) or ptyprocess (Linux/macOS) for full arrow-key support">
+      <i class="bi bi-exclamation-circle me-1"></i>No PTY — limited interactivity
+    </span>
+    {% endif %}
+
+    <button class="btn btn-sm btn-outline-secondary {% if has_pty %}ms-auto{% endif %}" onclick="term.clear()" title="Clear terminal">
+      <i class="bi bi-trash"></i>
+    </button>
+  </div>
+
+  <!-- ── Terminal card ────────────────────────────────────────────────────── -->
+  <div class="card flex-grow-1 overflow-hidden d-flex flex-column">
+    <div class="card-body p-0 flex-grow-1 overflow-hidden" style="background:#0d0d0d;">
+      <div id="terminal" style="height:100%; width:100%;"></div>
+    </div>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<!-- xterm.js 4.x (stable UMD builds) -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@4.19.0/css/xterm.min.css"/>
+<script src="https://cdn.jsdelivr.net/npm/xterm@4.19.0/lib/xterm.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.5.0/lib/xterm-addon-fit.min.js"></script>
+
+<script>
+/* ── xterm init ─────────────────────────────────────────────────────────── */
+const term = new Terminal({
+  theme: {
+    background:  '#0d0d0d',
+    foreground:  '#d4d4d4',
+    cursor:      '#d4d4d4',
+    black:       '#1e1e1e',
+    brightBlack: '#555555',
+  },
+  fontFamily: "'Cascadia Code', 'Consolas', 'Courier New', monospace",
+  fontSize: 13,
+  lineHeight: 1.25,
+  scrollback: 10000,
+  convertEol: false,
+  disableStdin: true,
+  cursorBlink: true,
+});
+
+const fitAddon = new FitAddon.FitAddon();
+term.loadAddon(fitAddon);
+term.open(document.getElementById('terminal'));
+
+function fitTerm() { try { fitAddon.fit(); } catch (_) {} }
+fitTerm();
+new ResizeObserver(fitTerm).observe(document.getElementById('terminal'));
+window.addEventListener('resize', fitTerm);
+
+/* ── State ──────────────────────────────────────────────────────────────── */
+const CSRF   = () => document.querySelector('meta[name="csrf-token"]')?.content ?? '';
+const LS_KEY = 'autorecon_sid';
+let sid      = null;   // active session id
+let evtSrc   = null;   // EventSource
+let inputBuf = '';     // keystroke batch buffer
+let inputT   = null;   // flush timer
+
+/* ── PTY resize ─────────────────────────────────────────────────────────── */
+term.onResize(({ cols, rows }) => {
+  if (!sid) return;
+  fetch(`/autorecon/resize/${sid}`, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF() },
+    body:    JSON.stringify({ cols, rows }),
+  }).catch(() => {});
+});
+
+/* ── Keystroke input (batched 10 ms) ────────────────────────────────────── */
+term.onData(data => {
+  if (!sid) return;
+  inputBuf += data;
+  clearTimeout(inputT);
+  inputT = setTimeout(flushInput, 10);
+});
+
+function flushInput() {
+  if (!sid || !inputBuf) return;
+  const payload = inputBuf;
+  inputBuf = '';
+  fetch(`/autorecon/input/${sid}`, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF() },
+    body:    JSON.stringify({ data: payload }),
+  }).catch(() => {});
+}
+
+/* ── Badge / UI helpers ─────────────────────────────────────────────────── */
+function setBadge(text, cls) {
+  const b = document.getElementById('status-badge');
+  b.textContent = text;
+  b.className   = `badge ${cls}`;
+  b.style.display = '';
+}
+
+function setRunning(running) {
+  const launch = document.getElementById('btn-launch');
+  const stop   = document.getElementById('btn-stop');
+  if (launch) launch.classList.toggle('d-none', running);
+  if (stop)   stop.classList.toggle('d-none',  !running);
+  term.options.disableStdin = !running;
+  if (running) term.focus();
+  _updateNewBtn();
+}
+
+function _updateNewBtn() {
+  const btnNew = document.getElementById('btn-new');
+  if (btnNew) btnNew.classList.toggle('d-none', !sid);
+}
+
+/* ── SSE connection ─────────────────────────────────────────────────────── */
+function connectSSE() {
+  if (evtSrc) { evtSrc.close(); evtSrc = null; }
+  evtSrc = new EventSource(`/autorecon/stream/${sid}`);
+
+  evtSrc.onmessage = (e) => {
+    if (e.data === '__EOF__') {
+      _onEnded();
+      return;
+    }
+    try {
+      const bytes = Uint8Array.from(atob(e.data), c => c.charCodeAt(0));
+      term.write(bytes);
+    } catch (_) {
+      term.write(e.data);
+    }
+  };
+
+  evtSrc.onerror = () => {
+    if (sid) {
+      term.writeln('\r\n\x1b[1;31m[Centralized] SSE connection lost.\x1b[0m');
+      _onEnded();
+    }
+  };
+}
+
+/* ── Page load: restore saved session ──────────────────────────────────── */
+(async function init() {
+  const saved = localStorage.getItem(LS_KEY);
+  if (!saved) return;
+
+  let info;
+  try {
+    const r = await fetch(`/autorecon/status/${saved}`);
+    info = await r.json();
+  } catch (e) {
+    localStorage.removeItem(LS_KEY);
+    return;
+  }
+
+  if (!info.exists) {
+    // Server no longer knows this session (TTL expired or was killed)
+    localStorage.removeItem(LS_KEY);
+    return;
+  }
+
+  sid = saved;
+
+  if (info.alive) {
+    term.writeln('\x1b[1;36m[Centralized] Reconnecting to active session\u2026\x1b[0m\r\n');
+    connectSSE();
+    setRunning(true);
+    setBadge('running', 'bg-success');
+    // Sync PTY window size
+    fitTerm();
+    fetch(`/autorecon/resize/${sid}`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF() },
+      body:    JSON.stringify({ cols: term.cols, rows: term.rows }),
+    }).catch(() => {});
+  } else {
+    // Process already finished — replay buffered output then show done state
+    term.writeln('\x1b[1;33m[Centralized] Replaying completed session output\u2026\x1b[0m\r\n');
+    setBadge('done', 'bg-secondary');
+    connectSSE();  // will replay buffer then emit __EOF__ → _onEnded()
+    _updateNewBtn();
+  }
+})();
+
+/* ── Launch ─────────────────────────────────────────────────────────────── */
+async function launchAutoRecon() {
+  // If an existing session is alive, confirm before replacing
+  if (sid) {
+    try {
+      const r = await fetch(`/autorecon/status/${sid}`);
+      const info = await r.json();
+      if (info.exists && info.alive) {
+        if (!confirm('An AutoRecon session is already running.\nStop it and start a new one?')) return;
+        await fetch(`/autorecon/kill/${sid}`, {
+          method: 'POST', headers: { 'X-CSRFToken': CSRF() },
+        }).catch(() => {});
+      }
+    } catch (e) { /* ignore */ }
+  }
+
+  if (evtSrc) { evtSrc.close(); evtSrc = null; }
+  sid = null;
+  term.clear();
+  fitTerm();
+
+  let resp;
+  try {
+    resp = await fetch('/autorecon/launch', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF() },
+      body:    JSON.stringify({ cols: term.cols, rows: term.rows }),
+    });
+  } catch (e) {
+    term.writeln(`\r\x1b[1;31m[Error] Network error: ${e}\x1b[0m`);
+    return;
+  }
+
+  const json = await resp.json();
+  if (!resp.ok) {
+    term.writeln(`\r\x1b[1;31m[Error] ${json.error}\x1b[0m`);
+    return;
+  }
+
+  sid = json.session_id;
+  localStorage.setItem(LS_KEY, sid);
+  setRunning(true);
+  setBadge('running', 'bg-success');
+  connectSSE();
+}
+
+/* ── Stop ───────────────────────────────────────────────────────────────── */
+async function stopAutoRecon() {
+  if (!sid) return;
+  if (!confirm('Stop the running AutoRecon session?')) return;
+
+  const killSid = sid;
+  if (evtSrc) { evtSrc.close(); evtSrc = null; }
+  // Clear session immediately — explicit stop means no replay needed
+  sid = null;
+  localStorage.removeItem(LS_KEY);
+
+  await fetch(`/autorecon/kill/${killSid}`, {
+    method: 'POST', headers: { 'X-CSRFToken': CSRF() },
+  }).catch(() => {});
+
+  term.writeln('\r\n\x1b[1;33m[Centralized] Session stopped.\x1b[0m');
+  setRunning(false);
+  setBadge('stopped', 'bg-warning text-dark');
+}
+
+/* ── New Session ────────────────────────────────────────────────────────── */
+async function newSession() {
+  if (sid) {
+    try {
+      const r = await fetch(`/autorecon/status/${sid}`);
+      const info = await r.json();
+      if (info.exists && info.alive) {
+        if (!confirm('Stop the running scan and start fresh?')) return;
+        await fetch(`/autorecon/kill/${sid}`, {
+          method: 'POST', headers: { 'X-CSRFToken': CSRF() },
+        }).catch(() => {});
+      }
+    } catch (e) { /* ignore */ }
+  }
+
+  if (evtSrc) { evtSrc.close(); evtSrc = null; }
+  sid = null;
+  localStorage.removeItem(LS_KEY);
+  term.clear();
+  setRunning(false);
+  document.getElementById('status-badge').style.display = 'none';
+}
+
+/* ── Session ended (EOF received) ───────────────────────────────────────── */
+function _onEnded() {
+  if (evtSrc) { evtSrc.close(); evtSrc = null; }
+  setRunning(false);
+  setBadge('done', 'bg-secondary');
+  term.writeln('\r\n\x1b[1;33m[Centralized] Session ended.\x1b[0m');
+  // Keep sid + localStorage so the user can replay on the next visit
+}
+</script>
+{% endblock %}
+
+
+{% block content %}
+<!-- Full-height terminal layout -->
+<div class="d-flex flex-column" style="height:calc(100vh - 115px); min-height:400px;">
+
+  <!-- ── Toolbar ──────────────────────────────────────────────────────────── -->
+  <div class="d-flex align-items-center gap-2 mb-2 flex-wrap">
+
+    {% if not autorecon_found %}
+    <div class="alert alert-warning mb-0 py-1 px-3 flex-grow-1" role="alert">
+      <i class="bi bi-exclamation-triangle me-1"></i>
+      AutoRecon was not found on this system.
+    </div>
+    {% endif %}
+
+    {% if autorecon_found %}
+    <button id="btn-launch" class="btn btn-success" onclick="launchAutoRecon()">
+      <i class="bi bi-play-fill me-1"></i>Launch AutoRecon
+    </button>
+    <button id="btn-stop" class="btn btn-danger d-none" onclick="stopAutoRecon()">
+      <i class="bi bi-stop-fill me-1"></i>Stop
+    </button>
     {% endif %}
 
     <span id="status-badge" class="badge bg-secondary" style="display:none">idle</span>
