@@ -286,7 +286,9 @@ EOF
     if [ -d /etc/sudoers.d ]; then
         local systemctl_path
         systemctl_path="$(command -v systemctl 2>/dev/null || echo '/usr/bin/systemctl')"
-        echo "$USER ALL=(ALL) NOPASSWD: $systemctl_path restart centralized" \
+        # !requiretty lets sudo work from a non-interactive process (web server / script)
+        printf 'Defaults:%s !requiretty\n%s ALL=(ALL) NOPASSWD: %s restart centralized\n' \
+            "$USER" "$USER" "$systemctl_path" \
             | $SUDO tee /etc/sudoers.d/centralized-restart >/dev/null
         $SUDO chmod 440 /etc/sudoers.d/centralized-restart
         ok "Sudoers rule added — web UI can auto-restart the service"

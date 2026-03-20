@@ -211,6 +211,27 @@ prune_backups() {
     ok "Old backups pruned"
 }
 
+# ── Refresh sudoers rule (adds !requiretty if missing) ───────────────────────
+
+refresh_sudoers() {
+    if [ "$PLATFORM" != "linux" ]; then return; fi
+    if [ ! -d /etc/sudoers.d ]; then return; fi
+
+    local systemctl_path
+    systemctl_path="$(command -v systemctl 2>/dev/null || echo '/usr/bin/systemctl')"
+    local sudoers_file="/etc/sudoers.d/centralized-restart"
+    local expected_rule="Defaults:$USER !requiretty
+$USER ALL=(ALL) NOPASSWD: $systemctl_path restart centralized"
+
+    # Only rewrite if the !requiretty line is missing (avoids unnecessary sudo prompts)
+    if [ ! -f "$sudoers_file" ] || ! grep -q "!requiretty" "$sudoers_file" 2>/dev/null; then
+        printf '%s\n' "$expected_rule" | sudo tee "$sudoers_file" >/dev/null 2>&1 \
+            && sudo chmod 440 "$sudoers_file" 2>/dev/null \
+            && ok "Sudoers rule updated (added !requiretty for passwordless restart)" \
+            || warn "Could not update sudoers rule — web-UI restart may prompt for a password"
+    fi
+}
+
 # ── Restart service ──────────────────────────────────────────────────────────
 
 restart_service() {
@@ -275,6 +296,7 @@ main() {
     update_deps
     apply_db_migrations
     prune_backups
+    refresh_sudoers
     restart_service
     chmod +x "$INSTALL_DIR/update.sh"
     print_done
