@@ -434,212 +434,9 @@ def set_host_context(host_id):
         db.session.commit()
         return jsonify({"saved": True, "false_positives": [], "confirmed": [], "skipped": []})
 
-    # Service lookup: name → version (only entries that have a version filled in)
-    service_map: dict[str, str] = {}
-    for svc in services:
-        name = (svc.get("name") or "").strip().lower()
-        ver  = (svc.get("version") or "").strip()
-        if name and ver:
-            service_map[name] = ver
-
-    # Resolve OS string → specific CPE product hint (e.g. "Windows 11" → "windows_11")
-    # Using the exact product name prevents "windows" from matching "windows_2000" etc.
-    import re as _re
-    _OS_PRODUCT_MAP = [
-        (r"windows\s*11",                "windows_11"),
-        (r"windows\s*10",                "windows_10"),
-        (r"windows\s*8\.1",              "windows_8.1"),
-        (r"windows\s*8\b",               "windows_8"),
-        (r"windows\s*7",                 "windows_7"),
-        (r"windows\s*vista",             "windows_vista"),
-        (r"windows\s*xp",                "windows_xp"),
-        (r"windows\s*2000",              "windows_2000"),
-        (r"windows\s*nt",                "windows_nt"),
-        (r"windows\s*server\s*2022",     "windows_server_2022"),
-        (r"windows\s*server\s*2019",     "windows_server_2019"),
-        (r"windows\s*server\s*2016",     "windows_server_2016"),
-        (r"windows\s*server\s*2012\s*r2","windows_server_2012_r2"),
-        (r"windows\s*server\s*2012",     "windows_server_2012"),
-        (r"windows\s*server\s*2008\s*r2","windows_server_2008_r2"),
-        (r"windows\s*server\s*2008",     "windows_server_2008"),
-        (r"windows\s*server\s*2003",     "windows_server_2003"),
-        (r"ubuntu",                      "ubuntu_linux"),
-        (r"debian",                      "debian_linux"),
-        (r"centos",                      "centos"),
-        (r"red\s*hat|rhel",              "enterprise_linux"),
-        (r"fedora",                      "fedora"),
-        (r"kali",                        "kali_linux"),
-        (r"rocky",                       "rocky_linux"),
-        (r"alma",                        "almalinux"),
-        (r"mac\s*os|macos|os\s*x",       "mac_os_x"),
-        (r"freebsd",                     "freebsd"),
-        (r"android",                     "android"),
-        (r"alpine",                      "alpine_linux"),
-    ]
-    os_product_hint = None
-    os_ver_for_compare = None
-    if os_version:
-        os_lower = os_version.lower()
-        for pattern, product in _OS_PRODUCT_MAP:
-            if _re.search(pattern, os_lower):
-                os_product_hint = product
-                m = _re.search(r"\d+(?:[.\d]+)?", os_version)
-                os_ver_for_compare = m.group(0) if m else None
-                break
-
-    if not service_map and not os_product_hint:
-        db.session.commit()
-        return jsonify({"saved": True, "false_positives": [], "confirmed": [], "skipped": [],
-                        "message": "No versioned services or recognisable OS provided — nothing to correlate."})
-
-    from services.cve_service import (
-        fetch_cve_configurations, cpe_match_for_product,
-        is_version_affected, has_os_cpe_entries,
-    )
-    from routes.uploads import _compute_host_risk
-
-    false_positives = []
-    confirmed       = []
-    skipped         = []
-
-    # Only check CVEs that are currently active (not already corrected/fp)
-    active_cve_vulns = [
-        v for v in host.vulnerabilities
-        if v.cve_id and v.cve_status not in ("corrected", "false_positive")
-    ]
-
-    for vuln in active_cve_vulns:
-        try:
-            configs = fetch_cve_configurations(vuln.cve_id)
-        except Exception:
-            skipped.append({"vuln_id": vuln.id, "cve_id": vuln.cve_id, "reason": "NVD fetch error"})
-            continue
-
-        if not configs:
-            skipped.append({"vuln_id": vuln.id, "cve_id": vuln.cve_id, "reason": "No CPE data"})
-            continue
-
-        decided = False
-        # When the OS check signals a likely false positive we defer the final
-        # decision until after Phase 2: if an app-level CPE in the same CVE
-        # matches one of the user's services, the CVE is still relevant even
-        # though the OS version isn't listed.
-        os_fp_candidate      = False
-        os_fp_product        = None
-        os_fp_version        = None
-        os_fp_reason         = None
-
-        # ── Phase 1: OS-level check ───────────────────────────────────────────
-        # If the CVE explicitly lists OS-type CPEs and the user's specific OS
-        # product (e.g. "windows_11") is NOT among them → FP *candidate*.
-        # We still run Phase 2 so that app-level matches can override this.
-        if os_product_hint and has_os_cpe_entries(configs):
-            os_cpe_entries = cpe_match_for_product(configs, os_product_hint)
-            if not os_cpe_entries:
-                # CVE names specific OS versions — ours isn't one of them
-                os_fp_candidate = True
-                os_fp_product   = os_product_hint
-                os_fp_version   = os_ver_for_compare or "N/A"
-                os_fp_reason    = (
-                    f"CVE does not affect {os_product_hint} "
-                    f"(not listed in CPE configurations)"
-                )
-            elif os_ver_for_compare:
-                # Our OS product IS listed — additionally check version bounds
-                affected = is_version_affected(os_ver_for_compare, os_cpe_entries)
-                if affected is False:
-                    os_fp_candidate = True
-                    os_fp_product   = os_product_hint
-                    os_fp_version   = os_ver_for_compare
-                    os_fp_reason    = (
-                        f"{os_product_hint} {os_ver_for_compare} "
-                        f"is not in the affected version range"
-                    )
-                elif affected is True:
-                    confirmed.append({
-                        "vuln_id": vuln.id,
-                        "cve_id": vuln.cve_id,
-                        "product": os_product_hint,
-                        "version": os_ver_for_compare,
-                        "reason": f"{os_product_hint} {os_ver_for_compare} is within the affected version range",
-                    })
-                    decided = True
-
-        if decided:
-            continue
-
-        # ── Phase 2: Service / software version check ─────────────────────────
-        matched_product = None
-        matched_version = None
-        matched_cpe_entries = []
-
-        for name, ver in service_map.items():
-            cpe_entries = cpe_match_for_product(configs, name)
-            if cpe_entries:
-                matched_product = name
-                matched_version = ver
-                matched_cpe_entries = cpe_entries
-                break
-
-        if not matched_cpe_entries:
-            # No app-level service match found.
-            # If the OS check already flagged this as a FP candidate, now we
-            # can finalise it — no app in the user's context overrides the OS
-            # determination.
-            if os_fp_candidate:
-                vuln.cve_status = "false_positive"
-                false_positives.append({
-                    "vuln_id": vuln.id,
-                    "cve_id": vuln.cve_id,
-                    "product": os_fp_product,
-                    "version": os_fp_version,
-                    "reason": os_fp_reason,
-                })
-            else:
-                skipped.append({"vuln_id": vuln.id, "cve_id": vuln.cve_id,
-                                "reason": "No matching product in CVE CPE data"})
-            continue
-
-        affected = is_version_affected(matched_version, matched_cpe_entries)
-
-        if affected is False:
-            vuln.cve_status = "false_positive"
-            false_positives.append({
-                "vuln_id": vuln.id,
-                "cve_id": vuln.cve_id,
-                "product": matched_product,
-                "version": matched_version,
-                "reason": f"{matched_product} {matched_version} is not in the affected version range",
-            })
-        elif affected is True:
-            confirmed.append({
-                "vuln_id": vuln.id,
-                "cve_id": vuln.cve_id,
-                "product": matched_product,
-                "version": matched_version,
-                "reason": f"{matched_product} {matched_version} is within the affected version range",
-            })
-        else:
-            skipped.append({"vuln_id": vuln.id, "cve_id": vuln.cve_id,
-                            "reason": "Version range indeterminate"})
-
-    db.session.flush()
-
-    # Recompute risk now that some CVEs may be false positives
-    score, level = _compute_host_risk(host)
-    host.risk_score = score
-    host.risk_level = level
-
+    result = _correlate_host_cves(host, os_version, services)
     db.session.commit()
-
-    return jsonify({
-        "saved": True,
-        "false_positives": false_positives,
-        "confirmed": confirmed,
-        "skipped": skipped,
-        "risk_score": host.risk_score,
-        "risk_level": host.risk_level,
-    })
+    return jsonify({"saved": True, **result})
 
 
 # ── Asset import (GLPI CSV / generic JSON) ───────────────────────────────────
@@ -832,6 +629,7 @@ def _correlate_host_cves(host, os_version: str, services: list) -> dict:
                         f"is not in the affected version range"
                     )
                 elif affected is True:
+                    vuln.cve_status = "active"
                     confirmed.append({
                         "vuln_id": vuln.id,
                         "cve_id":  vuln.cve_id,
@@ -884,6 +682,7 @@ def _correlate_host_cves(host, os_version: str, services: list) -> dict:
                 "reason":  f"{matched_product} {matched_version} is not in the affected version range",
             })
         elif affected is True:
+            vuln.cve_status = "active"
             confirmed.append({
                 "vuln_id": vuln.id,
                 "cve_id":  vuln.cve_id,
@@ -1064,10 +863,18 @@ def import_assets(audit_id):
 
     if not dry_run:
         db.session.commit()
-        # Run OS-level CVE correlation for each updated host
+        # Run CVE correlation for each updated host, reusing their existing
+        # stored services so Phase 2 (app-level version check) also fires.
+        import json as _cjson
         for _h, _os_ver in hosts_to_correlate:
             try:
-                _correlate_host_cves(_h, _os_ver, [])
+                stored_services = []
+                if _h.context and _h.context.service_versions:
+                    try:
+                        stored_services = _cjson.loads(_h.context.service_versions) or []
+                    except Exception:
+                        pass
+                _correlate_host_cves(_h, _os_ver, stored_services)
             except Exception:
                 pass
         if hosts_to_correlate:
