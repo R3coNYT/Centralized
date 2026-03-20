@@ -179,6 +179,9 @@ clone_or_update_repo() {
     fi
 
     chmod +x "$INSTALL_DIR/update.sh"
+    chmod +x "$INSTALL_DIR/rollback.sh"
+    chmod +x "$INSTALL_DIR/uninstall.sh"
+}
 }
 
 # ── Python virtual environment ─────────────────────────────────────────────────
