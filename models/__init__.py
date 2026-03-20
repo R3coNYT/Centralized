@@ -252,7 +252,8 @@ class HostContext(db.Model):
     __tablename__ = "host_contexts"
     id = db.Column(db.Integer, primary_key=True)
     host_id = db.Column(db.Integer, db.ForeignKey("hosts.id"), unique=True, nullable=False)
-    os_version = db.Column(db.String(200))          # e.g. "Ubuntu 22.04"
+    os_version = db.Column(db.String(200))          # e.g. "Microsoft Windows 11 Professionnel"
+    os_build = db.Column(db.String(50))             # e.g. "25H2" / "22H2" / "1809"
     service_versions = db.Column(db.Text)           # JSON: [{"name": "openssl", "version": "3.0.2"}]
     notes = db.Column(db.Text)
     updated_at = db.Column(db.DateTime, default=utcnow, onupdate=utcnow)

@@ -13,6 +13,9 @@
     <i class="bi bi-arrow-repeat me-1"></i>Re-process Files
   </button>
 </form>
+<button class="btn btn-sm btn-outline-success ms-2" data-bs-toggle="modal" data-bs-target="#importAssetsModal">
+  <i class="bi bi-filetype-csv me-1"></i>Import Asset List
+</button>
 <button class="btn btn-sm btn-outline-info ms-2" id="analyzeAuditBtn" onclick="analyzeAudit({{ audit.id }})">
   <i class="bi bi-cpu me-1"></i>Analyze Risk &amp; CVEs
 </button>
@@ -386,25 +389,34 @@
           Provide OS and service version details to automatically correlate CVEs and mark non&#8209;applicable findings as False Positives.
         </p>
         <div class="row g-3">
-          <div class="col-md-6">
-            <label for="ctx-os" class="form-label fw-semibold small">OS Version</label>
+          <div class="col-md-5">
+            <label for="ctx-os" class="form-label fw-semibold small">OS</label>
             <input type="text" id="ctx-os" class="form-control form-control-sm"
-              placeholder="e.g. Ubuntu 22.04" list="ctx-os-list" autocomplete="off">
+              placeholder="e.g. Microsoft Windows 11 Professionnel" list="ctx-os-list" autocomplete="off">
             <datalist id="ctx-os-list">
               <option value="Ubuntu 20.04"><option value="Ubuntu 22.04"><option value="Ubuntu 24.04">
               <option value="Debian 10"><option value="Debian 11"><option value="Debian 12">
-              <option value="Kali Linux 2024.1"><option value="CentOS 7"><option value="CentOS 8">
+              <option value="Kali Linux"><option value="CentOS 7"><option value="CentOS 8">
               <option value="Rocky Linux 8"><option value="Rocky Linux 9">
               <option value="AlmaLinux 8"><option value="AlmaLinux 9">
               <option value="RHEL 8"><option value="RHEL 9">
               <option value="Fedora 38"><option value="Fedora 39"><option value="Fedora 40">
-              <option value="Windows 10"><option value="Windows 11">
-              <option value="Windows Server 2016"><option value="Windows Server 2019"><option value="Windows Server 2022">
-              <option value="macOS 13 Ventura"><option value="macOS 14 Sonoma">
+              <option value="Windows 10">
+              <option value="Windows 11">
+              <option value="Windows Server 2016">
+              <option value="Windows Server 2019">
+              <option value="Windows Server 2022">
+              <option value="Windows Server 2025">
+              <option value="macOS 13"><option value="macOS 14">
               <option value="FreeBSD 13"><option value="FreeBSD 14">
             </datalist>
           </div>
-          <div class="col-md-6">
+          <div class="col-md-3">
+            <label for="ctx-os-build" class="form-label fw-semibold small">OS Version <span class="text-muted fw-normal">(build)</span></label>
+            <input type="text" id="ctx-os-build" class="form-control form-control-sm"
+              placeholder="e.g. 25H2 / 22H2 / 1809" autocomplete="off">
+          </div>
+          <div class="col-md-4">
             <label class="form-label fw-semibold small">Notes <span class="text-muted fw-normal">(optional)</span></label>
             <input type="text" id="ctx-notes" class="form-control form-control-sm" placeholder="Any extra context&#8230;">
           </div>
@@ -437,6 +449,66 @@
     </div>
   </div>
 </div>
+<!-- ── Import Asset List Modal (GLPI CSV / JSON) ──────────────────────────── -->
+<div class="modal fade" id="importAssetsModal" tabindex="-1" aria-labelledby="importAssetsModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-xl">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="importAssetsModalLabel">
+          <i class="bi bi-filetype-csv me-2 text-success"></i>Import Asset List
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <p class="text-muted small mb-3">
+          Upload a <strong>GLPI CSV</strong> export or a <strong>JSON</strong> asset list to automatically assign
+          hostnames and OS versions to matched hosts. Matching is done on the short hostname
+          (e.g. <code>ACCUEIL-1</code> matches a host whose hostname starts with <code>ACCUEIL-1</code>).
+        </p>
+        <div class="mb-3">
+          <label for="assetFile" class="form-label fw-semibold">File <span class="text-muted fw-normal">.csv or .json</span></label>
+          <input class="form-control" type="file" id="assetFile" accept=".csv,.json">
+        </div>
+        <div class="d-flex gap-2 mb-3">
+          <button type="button" class="btn btn-outline-primary" id="assetPreviewBtn" onclick="previewAssets()">
+            <i class="bi bi-search me-1"></i>Preview Matches
+          </button>
+          <button type="button" class="btn btn-success d-none" id="assetApplyBtn" onclick="applyAssets()">
+            <i class="bi bi-check2-all me-1"></i>Apply Changes
+          </button>
+          <span id="assetSpinner" class="d-none align-self-center">
+            <span class="spinner-border spinner-border-sm text-primary me-1"></span>
+            <span class="text-muted small">Processing…</span>
+          </span>
+        </div>
+        <div id="assetPreviewArea" class="d-none">
+          <div id="assetSummaryBadges" class="mb-2 d-flex gap-2 flex-wrap"></div>
+          <div class="table-responsive" style="max-height:380px;overflow-y:auto">
+            <table class="table table-sm table-hover align-middle mb-0" id="assetPreviewTable">
+              <thead class="table-header sticky-top">
+                <tr>
+                  <th>IP</th>
+                  <th>Current Hostname</th>
+                  <th>Current OS</th>
+                  <th></th>
+                  <th>New Hostname</th>
+                  <th>New OS</th>
+                  <th>Build</th>
+                  <th>Manufacturer / Model</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody id="assetPreviewBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
 <!-- ─────────────────────────────────────────────────────────────────────────── -->
 {% endblock %}
 
@@ -446,6 +518,109 @@ const sevMap = {{ sev_map | tojson }};
 const svcLabels = [{% for svc, cnt in port_svc %}'{{ svc }}',{% endfor %}];
 const svcValues = [{% for svc, cnt in port_svc %}{{ cnt }},{% endfor %}];
 initAuditCharts(sevMap, svcLabels, svcValues);
+
+// ── Import Asset List (GLPI CSV / JSON) ──────────────────────────────────
+const IMPORT_AUDIT_ID = {{ audit.id }};
+let _importDryRunResults = null;
+
+function _setAssetBusy(busy) {
+  document.getElementById('assetPreviewBtn').disabled = busy;
+  document.getElementById('assetSpinner').classList.toggle('d-none', !busy);
+}
+
+async function _callImportAssets(dryRun) {
+  const fileInput = document.getElementById('assetFile');
+  if (!fileInput.files.length) {
+    showToast('warning', 'Please select a CSV or JSON file first.');
+    return null;
+  }
+  const fd = new FormData();
+  fd.append('file', fileInput.files[0]);
+  fd.append('dry_run', dryRun ? 'true' : 'false');
+  fd.append('csrf_token', getCsrfToken());
+  const resp = await fetch(`/api/audits/${IMPORT_AUDIT_ID}/import-assets`, { method: 'POST', body: fd });
+  const data = await resp.json();
+  if (!resp.ok) { showToast('danger', data.error || 'Import failed'); return null; }
+  return data;
+}
+
+async function previewAssets() {
+  _setAssetBusy(true);
+  try {
+    const data = await _callImportAssets(true);
+    if (!data) return;
+    _importDryRunResults = data;
+    _renderAssetPreview(data, true);
+    document.getElementById('assetApplyBtn').classList.toggle('d-none', data.matched === 0);
+  } finally {
+    _setAssetBusy(false);
+  }
+}
+
+async function applyAssets() {
+  const applyBtn = document.getElementById('assetApplyBtn');
+  applyBtn.disabled = true;
+  applyBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Applying…';
+  try {
+    const data = await _callImportAssets(false);
+    if (!data) return;
+    _renderAssetPreview(data, false);
+    showToast('success', `Done — ${data.updated} host(s) updated. Reloading in 2 s…`);
+    setTimeout(() => location.reload(), 2000);
+  } finally {
+    applyBtn.disabled = false;
+    applyBtn.innerHTML = '<i class="bi bi-check2-all me-1"></i>Apply Changes';
+  }
+}
+
+function _renderAssetPreview(data, isDryRun) {
+  const area    = document.getElementById('assetPreviewArea');
+  const summary = document.getElementById('assetSummaryBadges');
+  const tbody   = document.getElementById('assetPreviewBody');
+
+  area.classList.remove('d-none');
+
+  const matchedPct = data.total_hosts ? Math.round(data.matched / data.total_hosts * 100) : 0;
+  summary.innerHTML =
+    `<span class="badge bg-info text-dark">Total hosts: ${data.total_hosts}</span>` +
+    `<span class="badge bg-success">Matched: ${data.matched} (${matchedPct}%)</span>` +
+    `<span class="badge bg-secondary">No match: ${data.total_hosts - data.matched}</span>` +
+    (isDryRun ? `<span class="badge bg-warning text-dark"><i class="bi bi-eye me-1"></i>Preview only – nothing saved yet</span>` :
+                `<span class="badge bg-success"><i class="bi bi-check2 me-1"></i>${data.updated} hosts updated</span>`);
+
+  tbody.innerHTML = '';
+  (data.results || []).forEach(r => {
+    const matched = r.status === 'match';
+    const tr = document.createElement('tr');
+    tr.className = matched ? 'table-success' : '';
+    const arrow = matched ? '<td class="text-center text-success"><i class="bi bi-arrow-right-circle-fill"></i></td>' : '<td></td>';
+    tr.innerHTML =
+      `<td class="font-monospace small">${escHtml(r.ip)}</td>` +
+      `<td class="small text-muted">${escHtml(r.current_hostname || '—')}</td>` +
+      `<td class="small text-muted">${escHtml(r.current_os || '—')}</td>` +
+      arrow +
+      `<td class="small fw-semibold">${matched ? escHtml(r.new_hostname) : '<span class="text-muted">—</span>'}</td>` +
+      `<td class="small">${matched ? escHtml(r.new_os) : '<span class="text-muted">—</span>'}</td>` +
+      `<td class="small text-muted">${matched && r.new_os_build ? `<span class="badge bg-secondary">${escHtml(r.new_os_build)}</span>` : ''}</td>` +
+      `<td class="small text-muted">${matched ? escHtml([r.manufacturer, r.model].filter(Boolean).join(' / ')) : ''}</td>` +
+      `<td>${matched
+          ? '<span class="badge bg-success"><i class="bi bi-check2 me-1"></i>Match</span>'
+          : '<span class="badge bg-secondary">No match</span>'}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+function escHtml(str) {
+  return (str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// Reset preview when a new file is selected
+document.getElementById('assetFile').addEventListener('change', function() {
+  document.getElementById('assetPreviewArea').classList.add('d-none');
+  document.getElementById('assetApplyBtn').classList.add('d-none');
+  _importDryRunResults = null;
+});
+// ─────────────────────────────────────────────────────────────────────────
 
 // ── Host tag ──────────────────────────────────────────────────────────────
 function resizeTagInput(input) {
@@ -588,8 +763,9 @@ async function loadContextData() {
   try {
     const resp = await fetch(`/api/hosts/${auditCtxHostId}/context`);
     const data = await resp.json();
-    document.getElementById('ctx-os').value = data.os_version || '';
-    document.getElementById('ctx-notes').value = data.notes || '';
+    document.getElementById('ctx-os').value       = data.os_version || '';
+    document.getElementById('ctx-os-build').value = data.os_build   || '';
+    document.getElementById('ctx-notes').value    = data.notes      || '';
     const list = document.getElementById('ctx-services-list');
     list.innerHTML = '';
     const added = new Set();
@@ -626,6 +802,7 @@ function escCtxHtml(str) {
 
 async function submitContext() {
   const osVersion = document.getElementById('ctx-os').value.trim();
+  const osBuild   = document.getElementById('ctx-os-build').value.trim();
   const notes = document.getElementById('ctx-notes').value.trim();
   const services = [];
   document.querySelectorAll('#ctx-services-list .input-group').forEach(row => {
@@ -641,7 +818,7 @@ async function submitContext() {
     const resp = await fetch(`/api/hosts/${auditCtxHostId}/context`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrfToken() },
-      body: JSON.stringify({ os_version: osVersion, services, notes, correlate: true }),
+      body: JSON.stringify({ os_version: osVersion, os_build: osBuild, services, notes, correlate: true }),
     });
     const data = await resp.json();
     if (!resp.ok) { showToast('danger', data.error || 'Failed to save context'); return; }
