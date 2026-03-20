@@ -265,6 +265,7 @@ th[data-sort][aria-sort="descending"]::after{content:' ↓';opacity:1}
       var av=a.cells[col]?a.cells[col].textContent.trim():'';
       var bv=b.cells[col]?b.cells[col].textContent.trim():'';
       if(type==='ip'){return asc?ipToInt(av)-ipToInt(bv):ipToInt(bv)-ipToInt(av);}
+      if(type==='target'){var am=av.match(/^(\d+\.\d+\.\d+\.\d+)/),bm=bv.match(/^(\d+\.\d+\.\d+\.\d+)/);var ai=am?{n:true,v:ipToInt(am[1])}:{n:false,v:av},bi=bm?{n:true,v:ipToInt(bm[1])}:{n:false,v:bv};if(ai.n&&bi.n)return asc?ai.v-bi.v:bi.v-ai.v;if(ai.n!==bi.n)return ai.n?(asc?-1:1):(asc?1:-1);return asc?av.localeCompare(bv,undefined,{sensitivity:'base'}):bv.localeCompare(av,undefined,{sensitivity:'base'});}
       if(type==='date'){var ad=Date.parse(av),bd=Date.parse(bv);if(!isNaN(ad)&&!isNaN(bd))return asc?ad-bd:bd-ad;if(isNaN(ad))return 1;if(isNaN(bd))return -1;}
       if(type==='risk'){var am=av.match(/CRITICAL|HIGH|MEDIUM|LOW|POTENTIAL|INFO/i),bm=bv.match(/CRITICAL|HIGH|MEDIUM|LOW|POTENTIAL|INFO/i);var ao=am?RISK_ORDER[am[0].toUpperCase()]:-1,bo=bm?RISK_ORDER[bm[0].toUpperCase()]:-1;return asc?ao-bo:bo-ao;}
       var an=parseFloat(av.replace(/[^0-9.\-]/g,'')),bn=parseFloat(bv.replace(/[^0-9.\-]/g,''));
