@@ -218,6 +218,16 @@ def settings():
     )
 
 
+@admin_bp.route("/github-token", methods=["GET"])
+@login_required
+def get_github_token():
+    """Return the stored GitHub token (admin only)."""
+    if current_user.role != "admin":
+        return jsonify({"error": "Access denied"}), 403
+    token = _get_github_token()
+    return jsonify({"token": token or "", "active": bool(token)})
+
+
 @admin_bp.route("/github-token", methods=["POST"])
 @login_required
 def save_github_token():

@@ -249,9 +249,12 @@ th[data-sort][aria-sort="descending"]::after{content:' ↓';opacity:1}
       th.addEventListener('click',function(){sortTable(th)});
     });
   });
+  var RISK_ORDER={INFO:0,LOW:1,POTENTIAL:1,MEDIUM:2,HIGH:3,CRITICAL:4};
+  function ipToInt(s){var m=s.match(/(\d+)\.(\d+)\.(\d+)\.(\d+)/);return m?(+m[1]<<24)+(+m[2]<<16)+(+m[3]<<8)+(+m[4]):0;}
   function sortTable(th){
     var tbl=th.closest('table');
     var col=+th.dataset.sort;
+    var type=th.dataset.sortType||'';
     var asc=th.getAttribute('aria-sort')!=='ascending';
     tbl.querySelectorAll('th[data-sort]').forEach(function(t){t.removeAttribute('aria-sort');});
     th.setAttribute('aria-sort',asc?'ascending':'descending');
@@ -261,6 +264,9 @@ th[data-sort][aria-sort="descending"]::after{content:' ↓';opacity:1}
     rows.sort(function(a,b){
       var av=a.cells[col]?a.cells[col].textContent.trim():'';
       var bv=b.cells[col]?b.cells[col].textContent.trim():'';
+      if(type==='ip'){return asc?ipToInt(av)-ipToInt(bv):ipToInt(bv)-ipToInt(av);}
+      if(type==='date'){var ad=Date.parse(av),bd=Date.parse(bv);if(!isNaN(ad)&&!isNaN(bd))return asc?ad-bd:bd-ad;if(isNaN(ad))return 1;if(isNaN(bd))return -1;}
+      if(type==='risk'){var am=av.match(/CRITICAL|HIGH|MEDIUM|LOW|POTENTIAL|INFO/i),bm=bv.match(/CRITICAL|HIGH|MEDIUM|LOW|POTENTIAL|INFO/i);var ao=am?RISK_ORDER[am[0].toUpperCase()]:-1,bo=bm?RISK_ORDER[bm[0].toUpperCase()]:-1;return asc?ao-bo:bo-ao;}
       var an=parseFloat(av.replace(/[^0-9.\-]/g,'')),bn=parseFloat(bv.replace(/[^0-9.\-]/g,''));
       if(!isNaN(an)&&!isNaN(bn))return asc?an-bn:bn-an;
       return asc?av.localeCompare(bv,undefined,{sensitivity:'base'}):bv.localeCompare(av,undefined,{sensitivity:'base'});
