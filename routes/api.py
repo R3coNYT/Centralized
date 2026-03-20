@@ -699,6 +699,217 @@ def _normalize_os_name(raw: str) -> str:
     return s
 
 
+# ---------------------------------------------------------------------------
+# OS → CPE product map (module-level so both set_host_context and
+# _correlate_host_cves can share it without redefining it each call)
+# ---------------------------------------------------------------------------
+
+_OS_PRODUCT_MAP = [
+    (r"windows\s*11",                "windows_11"),
+    (r"windows\s*10",                "windows_10"),
+    (r"windows\s*8\.1",              "windows_8.1"),
+    (r"windows\s*8\b",               "windows_8"),
+    (r"windows\s*7",                 "windows_7"),
+    (r"windows\s*vista",             "windows_vista"),
+    (r"windows\s*xp",                "windows_xp"),
+    (r"windows\s*2000",              "windows_2000"),
+    (r"windows\s*nt",                "windows_nt"),
+    (r"windows\s*server\s*2025",     "windows_server_2025"),
+    (r"windows\s*server\s*2022",     "windows_server_2022"),
+    (r"windows\s*server\s*2019",     "windows_server_2019"),
+    (r"windows\s*server\s*2016",     "windows_server_2016"),
+    (r"windows\s*server\s*2012\s*r2","windows_server_2012_r2"),
+    (r"windows\s*server\s*2012",     "windows_server_2012"),
+    (r"windows\s*server\s*2008\s*r2","windows_server_2008_r2"),
+    (r"windows\s*server\s*2008",     "windows_server_2008"),
+    (r"windows\s*server\s*2003",     "windows_server_2003"),
+    (r"ubuntu",                      "ubuntu_linux"),
+    (r"debian",                      "debian_linux"),
+    (r"centos",                      "centos"),
+    (r"red\s*hat|rhel",              "enterprise_linux"),
+    (r"fedora",                      "fedora"),
+    (r"kali",                        "kali_linux"),
+    (r"rocky",                       "rocky_linux"),
+    (r"alma",                        "almalinux"),
+    (r"mac\s*os|macos|os\s*x",       "mac_os_x"),
+    (r"freebsd",                     "freebsd"),
+    (r"android",                     "android"),
+    (r"alpine",                      "alpine_linux"),
+]
+
+
+def _correlate_host_cves(host, os_version: str, services: list) -> dict:
+    """Correlate a host's active CVEs against an OS/service context.
+
+    Flushes the session and recomputes host risk but does NOT commit —
+    the caller must call db.session.commit() after this returns.
+
+    Returns a dict with keys: false_positives, confirmed, skipped,
+                              risk_score, risk_level.
+    """
+    import re as _re
+    from services.cve_service import (
+        fetch_cve_configurations, cpe_match_for_product,
+        is_version_affected, has_os_cpe_entries,
+    )
+    from routes.uploads import _compute_host_risk
+
+    # Build service lookup: name (lower) → version
+    service_map: dict[str, str] = {}
+    for svc in services:
+        name = (svc.get("name") or "").strip().lower()
+        ver  = (svc.get("version") or "").strip()
+        if name and ver:
+            service_map[name] = ver
+
+    # Resolve OS string → CPE product hint
+    os_product_hint    = None
+    os_ver_for_compare = None
+    if os_version:
+        os_lower = os_version.lower()
+        for pattern, product in _OS_PRODUCT_MAP:
+            if _re.search(pattern, os_lower):
+                os_product_hint = product
+                m = _re.search(r"\d+(?:[.\d]+)?", os_version)
+                os_ver_for_compare = m.group(0) if m else None
+                break
+
+    false_positives = []
+    confirmed       = []
+    skipped         = []
+
+    if not service_map and not os_product_hint:
+        return {
+            "false_positives": [],
+            "confirmed":       [],
+            "skipped":         [],
+            "message":         "No versioned services or recognisable OS — nothing to correlate.",
+            "risk_score":      host.risk_score,
+            "risk_level":      host.risk_level,
+        }
+
+    active_cve_vulns = [
+        v for v in host.vulnerabilities
+        if v.cve_id and v.cve_status not in ("corrected", "false_positive")
+    ]
+
+    for vuln in active_cve_vulns:
+        try:
+            configs = fetch_cve_configurations(vuln.cve_id)
+        except Exception:
+            skipped.append({"vuln_id": vuln.id, "cve_id": vuln.cve_id, "reason": "NVD fetch error"})
+            continue
+
+        if not configs:
+            skipped.append({"vuln_id": vuln.id, "cve_id": vuln.cve_id, "reason": "No CPE data"})
+            continue
+
+        decided         = False
+        os_fp_candidate = False
+        os_fp_product   = None
+        os_fp_version   = None
+        os_fp_reason    = None
+
+        # ── Phase 1: OS-level check ──────────────────────────────────────────────
+        if os_product_hint and has_os_cpe_entries(configs):
+            os_cpe_entries = cpe_match_for_product(configs, os_product_hint)
+            if not os_cpe_entries:
+                os_fp_candidate = True
+                os_fp_product   = os_product_hint
+                os_fp_version   = os_ver_for_compare or "N/A"
+                os_fp_reason    = (
+                    f"CVE does not affect {os_product_hint} "
+                    f"(not listed in CPE configurations)"
+                )
+            elif os_ver_for_compare:
+                affected = is_version_affected(os_ver_for_compare, os_cpe_entries)
+                if affected is False:
+                    os_fp_candidate = True
+                    os_fp_product   = os_product_hint
+                    os_fp_version   = os_ver_for_compare
+                    os_fp_reason    = (
+                        f"{os_product_hint} {os_ver_for_compare} "
+                        f"is not in the affected version range"
+                    )
+                elif affected is True:
+                    confirmed.append({
+                        "vuln_id": vuln.id,
+                        "cve_id":  vuln.cve_id,
+                        "product": os_product_hint,
+                        "version": os_ver_for_compare,
+                        "reason":  f"{os_product_hint} {os_ver_for_compare} is within the affected version range",
+                    })
+                    decided = True
+
+        if decided:
+            continue
+
+        # ── Phase 2: Service / software version check ──────────────────────────
+        matched_product     = None
+        matched_version     = None
+        matched_cpe_entries = []
+
+        for name, ver in service_map.items():
+            cpe_entries = cpe_match_for_product(configs, name)
+            if cpe_entries:
+                matched_product     = name
+                matched_version     = ver
+                matched_cpe_entries = cpe_entries
+                break
+
+        if not matched_cpe_entries:
+            if os_fp_candidate:
+                vuln.cve_status = "false_positive"
+                false_positives.append({
+                    "vuln_id": vuln.id,
+                    "cve_id":  vuln.cve_id,
+                    "product": os_fp_product,
+                    "version": os_fp_version,
+                    "reason":  os_fp_reason,
+                })
+            else:
+                skipped.append({"vuln_id": vuln.id, "cve_id": vuln.cve_id,
+                                "reason": "No matching product in CVE CPE data"})
+            continue
+
+        affected = is_version_affected(matched_version, matched_cpe_entries)
+
+        if affected is False:
+            vuln.cve_status = "false_positive"
+            false_positives.append({
+                "vuln_id": vuln.id,
+                "cve_id":  vuln.cve_id,
+                "product": matched_product,
+                "version": matched_version,
+                "reason":  f"{matched_product} {matched_version} is not in the affected version range",
+            })
+        elif affected is True:
+            confirmed.append({
+                "vuln_id": vuln.id,
+                "cve_id":  vuln.cve_id,
+                "product": matched_product,
+                "version": matched_version,
+                "reason":  f"{matched_product} {matched_version} is within the affected version range",
+            })
+        else:
+            skipped.append({"vuln_id": vuln.id, "cve_id": vuln.cve_id,
+                            "reason": "Version range indeterminate"})
+
+    db.session.flush()
+
+    score, level = _compute_host_risk(host)
+    host.risk_score = score
+    host.risk_level = level
+
+    return {
+        "false_positives": false_positives,
+        "confirmed":       confirmed,
+        "skipped":         skipped,
+        "risk_score":      host.risk_score,
+        "risk_level":      host.risk_level,
+    }
+
+
 def _parse_glpi_csv(file_bytes):
     """Parse a GLPI CSV export (semicolon-delimited, UTF-8 with or without BOM)."""
     for enc in ("utf-8-sig", "utf-8", "latin-1"):
@@ -806,6 +1017,7 @@ def import_assets(audit_id):
     results = []
     matched_count = 0
     updated_count = 0
+    hosts_to_correlate = []   # (host, os_version) for post-apply CVE correlation
 
     for host in hosts:
         hn = (host.hostname or "").strip()
@@ -831,6 +1043,7 @@ def import_assets(audit_id):
                         db.session.add(ctx)
                     ctx.os_version = new_os or None
                     ctx.os_build   = build  or None
+                    hosts_to_correlate.append((host, new_os))
                 updated_count += 1
         else:
             new_hostname = ""
@@ -851,6 +1064,14 @@ def import_assets(audit_id):
 
     if not dry_run:
         db.session.commit()
+        # Run OS-level CVE correlation for each updated host
+        for _h, _os_ver in hosts_to_correlate:
+            try:
+                _correlate_host_cves(_h, _os_ver, [])
+            except Exception:
+                pass
+        if hosts_to_correlate:
+            db.session.commit()
 
     return jsonify({
         "dry_run":     dry_run,
