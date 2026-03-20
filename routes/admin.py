@@ -218,6 +218,16 @@ def settings():
     )
 
 
+@admin_bp.route("/github-token", methods=["GET"])
+@login_required
+def get_github_token():
+    """Return the stored GitHub token (admin only)."""
+    if current_user.role != "admin":
+        return jsonify({"error": "Access denied"}), 403
+    token = _get_github_token()
+    return jsonify({"token": token or "", "active": bool(token)})
+
+
 @admin_bp.route("/github-token", methods=["POST"])
 @login_required
 def save_github_token():
@@ -362,7 +372,6 @@ def run_update():
             "-NoProfile",
             "-ExecutionPolicy", "Bypass",
             "-File", script,
-            "-NoRestart",  # skip service stop/start; web UI handles the restart prompt
         ]
     else:
         script = os.path.join(BASE_DIR, "update.sh")
@@ -525,7 +534,6 @@ def run_rollback():
             "-ExecutionPolicy", "Bypass",
             "-File", script,
             "-Commit", commit,
-            "-NoRestart",
         ]
     else:
         script = os.path.join(BASE_DIR, "rollback.sh")

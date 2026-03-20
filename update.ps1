@@ -6,12 +6,7 @@
     Pulls the latest code from GitHub while preserving your database,
     uploaded files, and any local .env configuration.
     Creates a timestamped backup before updating.
-.PARAMETER NoRestart
-    Skip stopping/starting the Windows scheduled task (used when called from the web UI).
 #>
-param(
-    [switch]$NoRestart
-)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
@@ -326,12 +321,7 @@ function Print-Done {
     Write-Host "  Your clients, audits and uploaded files are intact."
     Write-Host ""
     if ($ServicePresent) {
-        if ($NoRestart) {
-            Write-Host "  Apply the update by restarting the task:" -ForegroundColor Yellow
-            Write-Host "    Stop-ScheduledTask -TaskName Centralized; Start-ScheduledTask -TaskName Centralized" -ForegroundColor Cyan
-        } else {
-            Write-Host "  Task restarted -> http://127.0.0.1:5000" -ForegroundColor Cyan
-        }
+        Write-Host "  Task restarted -> http://127.0.0.1:5000" -ForegroundColor Cyan
     } else {
         Write-Host "  Restart the app to apply changes:"
         Write-Host "    C:\Tools\Centralized\centralized.bat" -ForegroundColor Cyan
@@ -350,38 +340,17 @@ Write-Host ""
 $InstallDir = Find-InstallDir
 Write-Info "Install directory: $InstallDir"
 
-# Stop service before updating (gives the DB exclusive access for migrations)
-# Skip when called from the web UI (--NoRestart) to avoid killing the connection
-$ServicePresent = $false
-if (-not $NoRestart) {
-    $ServicePresent = Stop-CentralizedService
-} else {
-    # Web UI call (-NoRestart): don't stop the service, but still detect whether
-    # the scheduled task exists so we can schedule the post-update restart.
-    $ServicePresent = $null -ne (Get-ScheduledTask -TaskName "Centralized" -ErrorAction SilentlyContinue)
-}
+# Stop the scheduled task before updating (releases the DB lock on Windows)
+$ServicePresent = Stop-CentralizedService
 
-$BackupDir  = Backup-Data    -InstallDir $InstallDir
-$Commit     = Update-Git     -InstallDir $InstallDir
-Restore-Data               -InstallDir $InstallDir -BackupDir $BackupDir
+$BackupDir  = Backup-Data         -InstallDir $InstallDir
+$Commit     = Update-Git          -InstallDir $InstallDir
+Restore-Data                      -InstallDir $InstallDir -BackupDir $BackupDir
 $VenvPython = Update-Dependencies -InstallDir $InstallDir
 Apply-DbMigrations -VenvPython $VenvPython -InstallDir $InstallDir
 Prune-Backups      -InstallDir $InstallDir
-Print-Done         -InstallDir $InstallDir -BackupDir $BackupDir -Commit $Commit -ServicePresent $ServicePresent
 
-# Restart the service (CLI update only; web update skips to preserve the HTTP connection)
-if (-not $NoRestart -and $ServicePresent) {
-    Start-CentralizedService
-} elseif ($NoRestart -and $ServicePresent) {
-    # Called from web UI: spawn a detached powershell.exe process that restarts the
-    # task after a short delay.  Start-Process creates an independent process on Windows
-    # (not a child) so it survives when Stop-ScheduledTask kills the Centralized service.
-    Write-Log "Scheduling automatic task restart in ~8 seconds"
-    $TmpScript = Join-Path $env:TEMP "centralized_restart.ps1"
-    "Start-Sleep 8; Stop-ScheduledTask -TaskName 'Centralized' -ErrorAction SilentlyContinue; Start-Sleep 3; Start-ScheduledTask -TaskName 'Centralized'" |
-        Set-Content -Path $TmpScript -Encoding UTF8
-    Start-Process powershell.exe `
-        -ArgumentList @("-NonInteractive", "-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", $TmpScript) `
-        -WindowStyle Hidden
-    Write-Ok "Task will restart automatically in ~11 seconds"
-}
+# Restart the scheduled task (always, whether the update was triggered from CLI or web UI)
+Start-CentralizedService
+
+Print-Done -InstallDir $InstallDir -BackupDir $BackupDir -Commit $Commit -ServicePresent $ServicePresent

@@ -69,10 +69,18 @@ function getCsrfToken() {
   return m ? m.getAttribute('content') : '';
 }
 
-function toggleTokenVisibility() {
+async function toggleTokenVisibility() {
   const inp = document.getElementById('githubTokenInput');
   const ico = document.getElementById('tokenVisIcon');
   if (inp.type === 'password') {
+    // If currently showing placeholder bullets, fetch the real token first
+    if (inp.value.startsWith('\u2022')) {
+      try {
+        const resp = await fetch('/admin/github-token', { headers: { 'X-CSRFToken': getCsrfToken() } });
+        const d = await resp.json();
+        if (d.token) inp.value = d.token;
+      } catch (_) {}
+    }
     inp.type = 'text';
     ico.className = 'bi bi-eye-slash';
   } else {
