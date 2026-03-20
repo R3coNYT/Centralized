@@ -1,3 +1,6 @@
+import csv
+import io
+import json as _json
 from flask import Blueprint, jsonify, request
 from flask_login import login_required
 from models import Audit, Host, Vulnerability, Port, CVE_STATUS_VALUES
@@ -382,6 +385,7 @@ def get_host_context(host_id):
     ]
     return jsonify({
         "os_version": ctx.os_version if ctx else "",
+        "os_build":   ctx.os_build   if ctx else "",
         "services": services,
         "port_hints": port_hints,
         "notes": ctx.notes if ctx else "",
@@ -394,7 +398,8 @@ def set_host_context(host_id):
     """Save context and correlate it against CVEs for this host.
 
     Body JSON:
-        os_version  : str  — e.g. "Ubuntu 22.04"
+        os_version  : str  — e.g. "Microsoft Windows 11 Professionnel"
+        os_build    : str  — e.g. "25H2" / "22H2" / "1809"
         services    : list — [{"name": "openssl", "version": "3.0.2"}, ...]
         notes       : str  — optional free-text context
         correlate   : bool — default true; if false just saves without CVE check
@@ -405,6 +410,7 @@ def set_host_context(host_id):
 
     data = request.get_json(silent=True) or {}
     os_version = (data.get("os_version") or "").strip()
+    os_build   = (data.get("os_build")   or "").strip()
     services   = data.get("services") or []
     notes      = (data.get("notes") or "").strip()
     correlate  = data.get("correlate", True)
@@ -415,11 +421,13 @@ def set_host_context(host_id):
         ctx = HostContext(host_id=host_id)
         db.session.add(ctx)
     ctx.os_version = os_version or None
+    ctx.os_build   = os_build   or None
     ctx.service_versions = _json.dumps(services) if services else None
     ctx.notes = notes or None
     # Mirror analyst OS into the host's main OS field so it appears in the audit host list
     if os_version:
-        host.os_info = os_version
+        normalized = _normalize_os_name(os_version)
+        host.os_info = normalized + (f" {os_build}" if os_build else "")
     db.session.flush()
 
     if not correlate:
@@ -631,4 +639,215 @@ def set_host_context(host_id):
         "skipped": skipped,
         "risk_score": host.risk_score,
         "risk_level": host.risk_level,
+    })
+
+
+# ── Asset import (GLPI CSV / generic JSON) ───────────────────────────────────
+
+_OS_NORMALIZE = [
+    # Windows desktop
+    (r"windows\s*11",                  "Windows 11"),
+    (r"windows\s*10",                  "Windows 10"),
+    (r"windows\s*8\.1",               "Windows 8.1"),
+    (r"windows\s*8",                   "Windows 8"),
+    (r"windows\s*7",                   "Windows 7"),
+    # Windows Server
+    (r"windows\s*server\s*2025",       "Windows Server 2025"),
+    (r"windows\s*server\s*2022",       "Windows Server 2022"),
+    (r"windows\s*server\s*2019",       "Windows Server 2019"),
+    (r"windows\s*server\s*2016",       "Windows Server 2016"),
+    (r"windows\s*server\s*2012\s*r2",  "Windows Server 2012 R2"),
+    (r"windows\s*server\s*2012",       "Windows Server 2012"),
+    (r"windows\s*server\s*2008\s*r2",  "Windows Server 2008 R2"),
+    (r"windows\s*server\s*2008",       "Windows Server 2008"),
+    # Linux
+    (r"ubuntu\s*([\d.]+)",             r"Ubuntu \1"),
+    (r"debian\s*([\d.]+)",             r"Debian \1"),
+    (r"centos\s*([\d.]+)",             r"CentOS \1"),
+    (r"rocky\s*linux\s*([\d.]+)",      r"Rocky Linux \1"),
+    (r"almalinux\s*([\d.]+)",          r"AlmaLinux \1"),
+    (r"red\s*hat[^\d]*(\d[\d.]*)",   r"RHEL \1"),
+    (r"rhel\s*([\d.]+)",               r"RHEL \1"),
+    (r"fedora\s*([\d.]+)",             r"Fedora \1"),
+    (r"kali",                          "Kali Linux"),
+    # macOS
+    (r"macos\s*([\d.]+)",              r"macOS \1"),
+    (r"mac\s*os\s*x\s*([\d.]+)",       r"macOS \1"),
+]
+
+import re as _os_re
+
+def _normalize_os_name(raw: str) -> str:
+    """Normalize a verbose OS string to a short canonical form.
+    e.g. 'Microsoft Windows 11 Professionnel' -> 'Windows 11'
+    """
+    if not raw:
+        return raw
+    s = raw.strip()
+    sl = s.lower()
+    for pattern, replacement in _OS_NORMALIZE:
+        m = _os_re.search(pattern, sl)
+        if m:
+            if '\\' in replacement:
+                # Has back-references — substitute on the lowercased string,
+                # then capitalize the first letter of each word token
+                result = _os_re.sub(pattern, replacement, sl).strip()
+                # Capitalize known word boundaries cleanly
+                return ' '.join(w.capitalize() if w[0].isalpha() else w for w in result.split())
+            return replacement
+    # Fallback: return as-is
+    return s
+
+
+def _parse_glpi_csv(file_bytes):
+    """Parse a GLPI CSV export (semicolon-delimited, UTF-8 with or without BOM)."""
+    for enc in ("utf-8-sig", "utf-8", "latin-1"):
+        try:
+            content = file_bytes.decode(enc)
+            break
+        except UnicodeDecodeError:
+            continue
+    else:
+        return []
+
+    reader = csv.DictReader(io.StringIO(content), delimiter=";")
+    assets = []
+    for row in reader:
+        # Strip BOM / whitespace from keys produced by some GLPI versions
+        clean = {k.strip("\ufeff").strip(): v for k, v in row.items() if k}
+        name     = clean.get("Nom", "").strip()
+        os_name  = (
+            clean.get("Système d'exploitation - Nom")
+            or clean.get("Syst\u00e8me d'exploitation - Nom")
+            or ""
+        ).strip()
+        os_build = (
+            clean.get("Système d'exploitation - Version")
+            or clean.get("Syst\u00e8me d'exploitation - Version")
+            or ""
+        ).strip()
+        manufacturer = clean.get("Fabricant", "").strip()
+        model        = clean.get("Modèle", clean.get("Mod\u00e8le", "")).strip()
+        if name:
+            assets.append({
+                "name":         name,
+                "os":           _normalize_os_name(os_name),
+                "os_build":     os_build,
+                "manufacturer": manufacturer,
+                "model":        model,
+            })
+    return assets
+
+
+def _parse_assets_json(file_bytes):
+    """Parse a generic JSON asset list (array of objects)."""
+    try:
+        data = _json.loads(file_bytes.decode("utf-8"))
+    except Exception:
+        return []
+    if not isinstance(data, list):
+        return []
+    assets = []
+    for item in data:
+        name = (
+            item.get("name") or item.get("Nom") or item.get("hostname") or ""
+        ).strip()
+        os_name = (
+            item.get("os") or item.get("os_info")
+            or item.get("Système d'exploitation - Nom") or ""
+        ).strip()
+        if name:
+            assets.append({
+                "name":         name,
+                "os":           os_name,
+                "os_build":     (item.get("os_build") or item.get("Système d'exploitation - Version") or "").strip(),
+                "manufacturer": item.get("manufacturer", ""),
+                "model":        item.get("model", ""),
+            })
+    return assets
+
+
+@api_bp.route("/audits/<int:audit_id>/import-assets", methods=["POST"])
+@login_required
+def import_assets(audit_id):
+    """
+    Match an uploaded GLPI CSV (or generic JSON) against the audit's hosts and
+    update hostname / os_info where a match is found.
+
+    Query param  dry_run=true  (default) → preview only, no DB write.
+    Query param  dry_run=false           → apply changes.
+    """
+    audit = Audit.query.get_or_404(audit_id)
+
+    uploaded = request.files.get("file")
+    if not uploaded or not uploaded.filename:
+        return jsonify({"error": "No file provided."}), 400
+
+    ext = uploaded.filename.rsplit(".", 1)[-1].lower() if "." in uploaded.filename else ""
+    if ext not in ("csv", "json"):
+        return jsonify({"error": "Unsupported format. Upload a .csv or .json file."}), 400
+
+    file_bytes = uploaded.read()
+
+    if ext == "csv":
+        assets = _parse_glpi_csv(file_bytes)
+    else:
+        assets = _parse_assets_json(file_bytes)
+
+    if not assets:
+        return jsonify({"error": "No assets found in the file. Check the format."}), 400
+
+    dry_run = request.form.get("dry_run", "true").lower() != "false"
+
+    # Build lookup: short name (lowercase) → asset dict
+    asset_map = {a["name"].lower(): a for a in assets}
+
+    hosts = Host.query.filter_by(audit_id=audit_id).all()
+    results = []
+    matched_count = 0
+    updated_count = 0
+
+    for host in hosts:
+        hn = (host.hostname or "").strip()
+        # Try short name first (strip domain suffix), then full hostname
+        short = hn.split(".")[0].lower() if hn else ""
+        matched = asset_map.get(short) or (asset_map.get(hn.lower()) if hn else None)
+
+        if matched:
+            matched_count += 1
+            new_hostname = matched["name"]
+            new_os       = matched["os"]
+            if not dry_run:
+                if new_hostname:
+                    host.hostname = new_hostname
+                if new_os:
+                    build = matched.get("os_build", "") if matched else ""
+                    host.os_info = new_os + (f" {build}" if build else "")
+                updated_count += 1
+        else:
+            new_hostname = ""
+            new_os       = ""
+
+        results.append({
+            "host_id":          host.id,
+            "ip":               host.ip,
+            "current_hostname": host.hostname or "",
+            "current_os":       host.os_info  or "",
+            "new_hostname":     new_hostname,
+            "new_os":           new_os,
+            "new_os_build":     matched.get("os_build", "") if matched else "",
+            "manufacturer":     matched.get("manufacturer", "") if matched else "",
+            "model":            matched.get("model", "")        if matched else "",
+            "status":           "match" if matched else "no_match",
+        })
+
+    if not dry_run:
+        db.session.commit()
+
+    return jsonify({
+        "dry_run":     dry_run,
+        "total_hosts": len(hosts),
+        "matched":     matched_count,
+        "updated":     updated_count,
+        "results":     results,
     })
