@@ -214,11 +214,6 @@ prune_backups() {
 # ── Restart service ──────────────────────────────────────────────────────────
 
 restart_service() {
-    if [ "${NO_RESTART:-0}" = "1" ]; then
-        warn "Service restart skipped (--no-restart flag set)"
-        warn "Apply the update by restarting the service: sudo systemctl restart centralized"
-        return
-    fi
     if [ "$PLATFORM" != "linux" ]; then return; fi
     if ! command -v systemctl >/dev/null 2>&1; then return; fi
     if ! systemctl list-unit-files centralized.service >/dev/null 2>&1; then
@@ -270,15 +265,6 @@ main() {
     echo "   Centralized — Update Script"
     echo "========================================"
     echo
-
-    # Parse flags
-    NO_RESTART=0
-    for arg in "$@"; do
-        case "$arg" in
-            --no-restart) NO_RESTART=1 ;;
-        esac
-    done
-    export NO_RESTART
 
     detect_platform
     find_install_dir
