@@ -821,8 +821,16 @@ def import_assets(audit_id):
                 if new_hostname:
                     host.hostname = new_hostname
                 if new_os:
-                    build = matched.get("os_build", "") if matched else ""
+                    build = matched.get("os_build", "") or ""
                     host.os_info = new_os + (f" {build}" if build else "")
+                    # Also persist into HostContext so the Host Context panel reflects it
+                    from models import HostContext
+                    ctx = host.context
+                    if not ctx:
+                        ctx = HostContext(host_id=host.id)
+                        db.session.add(ctx)
+                    ctx.os_version = new_os or None
+                    ctx.os_build   = build  or None
                 updated_count += 1
         else:
             new_hostname = ""
