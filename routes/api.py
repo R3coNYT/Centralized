@@ -611,6 +611,7 @@ def _correlate_host_cves(host, os_version: str, services: list) -> dict:
         if os_product_hint and has_os_cpe_entries(configs):
             os_cpe_entries = cpe_match_for_product(configs, os_product_hint)
             if not os_cpe_entries:
+                # Our OS product is NOT listed in the CVE → FP candidate
                 os_fp_candidate = True
                 os_fp_product   = os_product_hint
                 os_fp_version   = os_ver_for_compare or "N/A"
@@ -618,9 +619,15 @@ def _correlate_host_cves(host, os_version: str, services: list) -> dict:
                     f"CVE does not affect {os_product_hint} "
                     f"(not listed in CPE configurations)"
                 )
-            elif os_ver_for_compare:
-                affected = is_version_affected(os_ver_for_compare, os_cpe_entries)
+            else:
+                # OS product IS listed — check version bounds if available
+                if os_ver_for_compare:
+                    affected = is_version_affected(os_ver_for_compare, os_cpe_entries)
+                else:
+                    affected = None  # no version to compare → treat as indeterminate
+
                 if affected is False:
+                    # Version is definitively outside the affected range → FP candidate
                     os_fp_candidate = True
                     os_fp_product   = os_product_hint
                     os_fp_version   = os_ver_for_compare
@@ -628,14 +635,21 @@ def _correlate_host_cves(host, os_version: str, services: list) -> dict:
                         f"{os_product_hint} {os_ver_for_compare} "
                         f"is not in the affected version range"
                     )
-                elif affected is True:
+                else:
+                    # affected is True OR None (indeterminate / no version bounds):
+                    # OS product matches and we can't disprove it → mark Active
+                    reason = (
+                        f"{os_product_hint} {os_ver_for_compare} is within the affected version range"
+                        if affected is True
+                        else f"{os_product_hint} is listed in CPE configurations (version range indeterminate)"
+                    )
                     vuln.cve_status = "active"
                     confirmed.append({
                         "vuln_id": vuln.id,
                         "cve_id":  vuln.cve_id,
                         "product": os_product_hint,
-                        "version": os_ver_for_compare,
-                        "reason":  f"{os_product_hint} {os_ver_for_compare} is within the affected version range",
+                        "version": os_ver_for_compare or "N/A",
+                        "reason":  reason,
                     })
                     decided = True
 
