@@ -670,18 +670,19 @@ def _correlate_host_cves(host, os_version: str, services: list) -> dict:
                 break
 
         if not matched_cpe_entries:
-            if os_fp_candidate:
-                vuln.cve_status = "false_positive"
-                false_positives.append({
-                    "vuln_id": vuln.id,
-                    "cve_id":  vuln.cve_id,
-                    "product": os_fp_product,
-                    "version": os_fp_version,
-                    "reason":  os_fp_reason,
-                })
-            else:
-                skipped.append({"vuln_id": vuln.id, "cve_id": vuln.cve_id,
-                                "reason": "No matching product in CVE CPE data"})
+            # We could not find the specific software product on this host in the CPE
+            # data.  Even if the OS context suggested a false-positive candidate, the
+            # absence of a service match is insufficient evidence to call it a FP —
+            # the service may simply not have a version recorded, or NVD may document
+            # the CVE against a limited OS set while the root vulnerability is
+            # cross-platform (e.g. protocol-level MySQL bugs listed only on Linux).
+            # → mark as skipped (indeterminate) in all cases.
+            skipped.append({"vuln_id": vuln.id, "cve_id": vuln.cve_id,
+                            "reason": (
+                                os_fp_reason
+                                if os_fp_candidate
+                                else "No matching product in CVE CPE data"
+                            )})
             continue
 
         affected = is_version_affected(matched_version, matched_cpe_entries)
