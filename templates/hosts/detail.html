@@ -497,6 +497,46 @@ function showToast(type, msg) {
 const HOST_ID = {{ host.id }};
 let ctxModal = null;
 
+// ── Auto-correlate CVEs on page load ──────────────────────────────────────
+async function autoCorrelate() {
+  try {
+    const ctxResp = await fetch(`/api/hosts/${HOST_ID}/context`);
+    if (!ctxResp.ok) return;
+    const ctx = await ctxResp.json();
+
+    const hasOs       = !!(ctx.os_version || '').trim();
+    const hasServices = (ctx.services || []).length > 0;
+    if (!hasOs && !hasServices) return;   // nothing to correlate
+
+    const resp = await fetch(`/api/hosts/${HOST_ID}/context`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrfToken() },
+      body: JSON.stringify({
+        os_version: ctx.os_version || '',
+        os_build:   ctx.os_build   || '',
+        services:   ctx.services   || [],
+        notes:      ctx.notes      || '',
+        correlate:  true,
+      }),
+    });
+    if (!resp.ok) return;
+    const data = await resp.json();
+
+    updateRiskBadge(data.risk_score, data.risk_level);
+    (data.false_positives || []).forEach(fp => markVulnFalsePositive(fp.vuln_id));
+
+    const fpCount = (data.false_positives || []).length;
+    if (fpCount > 0) {
+      showToast('info', `<i class="bi bi-stars me-1"></i>CVEs re-correlated — ${fpCount} false positive(s) updated.`);
+    }
+  } catch (e) {
+    // silent — do not block the page if correlation fails
+  }
+}
+
+document.addEventListener('DOMContentLoaded', autoCorrelate);
+// ─────────────────────────────────────────────────────────────────────────────
+
 function openContextModal() {
   if (!ctxModal) ctxModal = new bootstrap.Modal(document.getElementById('contextModal'));
   document.getElementById('ctx-results').classList.add('d-none');
