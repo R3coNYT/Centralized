@@ -1,0 +1,450 @@
+{% extends "base.html" %}
+{% block title %}CVE Remediation{% endblock %}
+{% block page_title %}CVE Remediation{% endblock %}
+
+{% block topbar_actions %}
+<a href="{{ url_for('cve.search_page') }}" class="btn btn-sm btn-outline-secondary">
+  <i class="bi bi-search me-1"></i>CVE Search
+</a>
+{% endblock %}
+
+{% block content %}
+
+{# ── Stats bar ─────────────────────────────────────────────────────────────── #}
+<div class="row g-3 mb-4">
+  {% set sev_cfg = [
+      ('CRITICAL', 'danger',  'bi-exclamation-octagon-fill'),
+      ('HIGH',     'warning', 'bi-exclamation-triangle-fill'),
+      ('MEDIUM',   'success', 'bi-shield-exclamation'),
+      ('LOW',      'secondary','bi-shield'),
+  ] %}
+  {% for sev, col, icon in sev_cfg %}
+  <div class="col-6 col-md-3 col-xl-2">
+    <div class="card text-center">
+      <div class="card-body py-3">
+        <div class="fs-3 fw-bold text-{{ col }}">{{ sev_counts.get(sev, 0) }}</div>
+        <div class="small text-muted mt-1">
+          <i class="bi {{ icon }} me-1 text-{{ col }}"></i>{{ sev | title }}
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+  <div class="col-6 col-md-3 col-xl-2">
+    <div class="card text-center">
+      <div class="card-body py-3">
+        <div class="fs-3 fw-bold">{{ cve_list | length }}</div>
+        <div class="small text-muted mt-1"><i class="bi bi-bug me-1"></i>Total CVEs</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3 col-xl-2">
+    <div class="card text-center">
+      <div class="card-body py-3">
+        <div class="fs-3 fw-bold">{{ total_affected }}</div>
+        <div class="small text-muted mt-1"><i class="bi bi-hdd-network me-1"></i>Host occurrences</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# ── Search / filter bar ───────────────────────────────────────────────────── #}
+<div class="card mb-3">
+  <div class="card-body py-2 d-flex gap-2 flex-wrap align-items-center">
+    <input id="cveSearch" type="search" class="form-control form-control-sm" style="max-width:320px"
+           placeholder="Filter by CVE ID, title, client or host…" autocomplete="off"
+           oninput="filterTable()">
+    <div class="d-flex gap-1 flex-wrap ms-auto" id="sevFilters">
+      <button class="btn btn-sm btn-outline-secondary active" onclick="setSevFilter('ALL',   this)">All</button>
+      <button class="btn btn-sm sev-btn-critical"             onclick="setSevFilter('CRITICAL', this)">Critical</button>
+      <button class="btn btn-sm sev-btn-high"                 onclick="setSevFilter('HIGH',     this)">High</button>
+      <button class="btn btn-sm sev-btn-medium"               onclick="setSevFilter('MEDIUM',   this)">Medium</button>
+      <button class="btn btn-sm sev-btn-low"                  onclick="setSevFilter('LOW',      this)">Low</button>
+    </div>
+  </div>
+</div>
+
+{# ── CVE table ─────────────────────────────────────────────────────────────── #}
+{% if cve_list %}
+<div class="card">
+  <div class="table-responsive">
+    <table class="table table-hover mb-0 align-middle" id="cveTable">
+      <thead class="table-dark sticky-top">
+        <tr>
+          <th style="width:160px">CVE / Title</th>
+          <th style="width:100px">Severity</th>
+          <th style="width:70px">CVSS</th>
+          <th>Description</th>
+          <th style="width:80px;text-align:center">Hosts</th>
+          <th style="width:90px;text-align:center">Detail</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for entry in cve_list %}
+        {# Build a searchable meta-string containing all host/audit/client names #}
+        {% set host_meta = entry.hosts | map(attribute='hostname') | join(' ') + ' '
+                         + entry.hosts | map(attribute='audit_name') | join(' ') + ' '
+                         + entry.hosts | map(attribute='client_name') | join(' ') %}
+        <tr class="cve-row"
+            data-sev="{{ entry.severity | upper }}"
+            data-search="{{ (entry.cve_id or entry.title or '') | lower }} {{ (entry.description or '') | truncate(120, True, '') | lower }} {{ host_meta | lower }}"
+            data-key="{{ entry.key | e }}"
+            style="cursor:pointer"
+            onclick="openDetail(this)">
+          <td class="font-monospace small fw-semibold">
+            {% if entry.is_cve_id %}
+              <a href="https://nvd.nist.gov/vuln/detail/{{ entry.cve_id }}" target="_blank"
+                 onclick="event.stopPropagation()" class="text-info text-decoration-none">
+                {{ entry.cve_id }}
+              </a>
+            {% else %}
+              <span class="text-truncate d-inline-block" style="max-width:150px" title="{{ entry.title }}">
+                {{ entry.title | truncate(28) }}
+              </span>
+            {% endif %}
+          </td>
+          <td>
+            {% set severity = entry.severity %}
+            {% include '_partials/sev_badge.html' %}
+          </td>
+          <td class="small fw-semibold">
+            {% if entry.cvss_score %}
+              <span class="{% if entry.cvss_score >= 9 %}text-danger{% elif entry.cvss_score >= 7 %}text-warning{% elif entry.cvss_score >= 4 %}text-success{% else %}text-muted{% endif %}">
+                {{ "%.1f"|format(entry.cvss_score) }}
+              </span>
+            {% else %}—{% endif %}
+          </td>
+          <td class="small text-muted" style="max-width:360px">
+            <span class="d-inline-block text-truncate" style="max-width:355px"
+                  title="{{ entry.description | striptags }}">
+              {{ (entry.description or "—") | striptags | truncate(120) }}
+            </span>
+          </td>
+          <td class="text-center">
+            <span class="badge bg-secondary">{{ entry.host_count }}</span>
+          </td>
+          <td class="text-center">
+            <button class="btn btn-sm btn-outline-primary" onclick="event.stopPropagation(); openDetail(this.closest('tr'))">
+              <i class="bi bi-arrow-right-circle"></i>
+            </button>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="card-footer text-muted small" id="tableFooter">
+    Showing {{ cve_list | length }} CVE{{ 's' if cve_list | length != 1 else '' }}
+  </div>
+</div>
+{% else %}
+<div class="alert alert-secondary d-flex align-items-center gap-2">
+  <i class="bi bi-info-circle fs-5"></i>
+  <span>No vulnerabilities found in any audit yet. Run an AutoRecon scan or import results first.</span>
+</div>
+{% endif %}
+
+{# ── Detail Offcanvas (wide) ───────────────────────────────────────────────── #}
+<div class="offcanvas offcanvas-end" tabindex="-1" id="remDetailCanvas"
+     data-bs-scroll="true" style="width:min(700px,95vw)">
+  <div class="offcanvas-header border-bottom">
+    <h5 class="offcanvas-title fw-semibold" id="remDetailTitle">
+      <i class="bi bi-shield-exclamation me-2 text-danger"></i>CVE Detail
+    </h5>
+    <button type="button" class="btn-close" data-bs-dismiss="offcanvas"></button>
+  </div>
+  <div class="offcanvas-body p-0" id="remDetailBody">
+    <div class="d-flex align-items-center justify-content-center h-100">
+      <div class="spinner-border text-primary" role="status"></div>
+    </div>
+  </div>
+</div>
+
+{# ── Styles for severity filter buttons ───────────────────────────────────── #}
+<style>
+.sev-btn-critical        { background: rgba(239,68,68,.15);  color:#ef4444; border:1px solid rgba(239,68,68,.4); }
+.sev-btn-critical.active { background: #ef4444; color:#fff; }
+.sev-btn-high            { background: rgba(245,158,11,.15); color:#f59e0b; border:1px solid rgba(245,158,11,.4); }
+.sev-btn-high.active     { background: #f59e0b; color:#fff; }
+.sev-btn-medium          { background: rgba(132,204,22,.15); color:#84cc16; border:1px solid rgba(132,204,22,.4); }
+.sev-btn-medium.active   { background: #84cc16; color:#fff; }
+.sev-btn-low             { background: rgba(100,116,139,.15);color:#94a3b8; border:1px solid rgba(100,116,139,.4);}
+.sev-btn-low.active      { background: #64748b; color:#fff; }
+.cve-row:hover td        { background: rgba(255,255,255,.04); }
+#remDetailBody .detail-section { padding: 1.25rem 1.5rem; border-bottom: 1px solid rgba(255,255,255,.07); }
+#remDetailBody .detail-section:last-child { border-bottom: none; }
+</style>
+
+{# ── JS ────────────────────────────────────────────────────────────────────── #}
+<script>
+var _sevFilter  = 'ALL';
+var _offcanvas  = null;
+
+document.addEventListener('DOMContentLoaded', function() {
+  _offcanvas = new bootstrap.Offcanvas(document.getElementById('remDetailCanvas'));
+});
+
+/* ── Severity filter ─────────────────────────────────────────────────────── */
+function setSevFilter(sev, btn) {
+  _sevFilter = sev;
+  document.querySelectorAll('#sevFilters .btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  filterTable();
+}
+
+/* ── Text + severity filter ──────────────────────────────────────────────── */
+function filterTable() {
+  var q     = document.getElementById('cveSearch').value.toLowerCase().trim();
+  var rows  = document.querySelectorAll('#cveTable tbody .cve-row');
+  var shown = 0;
+  rows.forEach(function(row) {
+    var sevMatch  = _sevFilter === 'ALL' || row.dataset.sev === _sevFilter;
+    var textMatch = !q || row.dataset.search.indexOf(q) >= 0;
+    var visible   = sevMatch && textMatch;
+    row.style.display = visible ? '' : 'none';
+    if (visible) shown++;
+  });
+  var total = rows.length;
+  document.getElementById('tableFooter').textContent =
+    shown === total
+      ? 'Showing ' + total + ' CVE' + (total !== 1 ? 's' : '')
+      : 'Showing ' + shown + ' of ' + total + ' CVEs';
+}
+
+/* ── Open detail panel ───────────────────────────────────────────────────── */
+function openDetail(row) {
+  var key = row.dataset.key;
+  if (!key) return;
+  document.getElementById('remDetailTitle').innerHTML =
+    '<i class="bi bi-shield-exclamation me-2 text-danger"></i>' + escHtml(key);
+  document.getElementById('remDetailBody').innerHTML =
+    '<div class="d-flex align-items-center justify-content-center" style="height:200px">' +
+    '<div class="spinner-border text-primary" role="status"></div></div>';
+  _offcanvas.show();
+
+  fetch('{{ url_for("cve_remediation.detail") }}?key=' + encodeURIComponent(key), {
+    headers: { 'X-CSRFToken': document.querySelector('meta[name=csrf-token]').content }
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(d) { renderDetail(d); })
+  .catch(function(e) {
+    document.getElementById('remDetailBody').innerHTML =
+      '<div class="alert alert-danger m-3">Failed to load CVE detail: ' + escHtml(String(e)) + '</div>';
+  });
+}
+
+/* ── Render detail HTML ──────────────────────────────────────────────────── */
+function severityClass(sev) {
+  return {CRITICAL:'danger', HIGH:'warning', MEDIUM:'success', LOW:'secondary', INFO:'info'}[sev] || 'secondary';
+}
+function cvssColor(s) {
+  if (!s) return 'text-muted';
+  return s >= 9 ? 'text-danger' : s >= 7 ? 'text-warning' : s >= 4 ? 'text-success' : 'text-muted';
+}
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function statusBadge(s) {
+  var map = {
+    active:'bg-danger', corrected:'bg-success', mitigated:'bg-info text-dark',
+    accepted:'bg-warning text-dark', false_positive:'bg-secondary'
+  };
+  return '<span class="badge ' + (map[s] || 'bg-secondary') + '">' + escHtml(s || 'active') + '</span>';
+}
+
+function parseCvssVector(vec) {
+  if (!vec || !vec.includes('/')) return '';
+  var labels = {
+    AV:  ['Attack Vector',       {N:'Network',L:'Local',A:'Adjacent',P:'Physical'}],
+    AC:  ['Attack Complexity',   {L:'Low',H:'High'}],
+    PR:  ['Privileges Required', {N:'None',L:'Low',H:'High'}],
+    UI:  ['User Interaction',    {N:'None',R:'Required'}],
+    S:   ['Scope',               {U:'Unchanged',C:'Changed'}],
+    C:   ['Confidentiality',     {N:'None',L:'Low',H:'High'}],
+    I:   ['Integrity',           {N:'None',L:'Low',H:'High'}],
+    A:   ['Availability',        {N:'None',L:'Low',H:'High'}],
+  };
+  var parts = vec.replace(/^CVSS:[^/]+\//,'').split('/');
+  var rows = '';
+  parts.forEach(function(p) {
+    var kv = p.split(':');
+    if (kv.length < 2) return;
+    var info = labels[kv[0]];
+    if (!info) return;
+    rows += '<tr><td class="text-muted small">' + escHtml(info[0]) + '</td>' +
+            '<td class="small fw-semibold">' + escHtml(info[1][kv[1]] || kv[1]) + '</td></tr>';
+  });
+  return rows ? '<table class="table table-sm mb-0">' + rows + '</table>' : '';
+}
+
+function renderDetail(d) {
+  if (d.error) {
+    document.getElementById('remDetailBody').innerHTML =
+      '<div class="alert alert-danger m-3">' + escHtml(d.error) + '</div>';
+    return;
+  }
+
+  var sevCls   = severityClass(d.severity);
+  var isCveId  = d.cve_id && /^CVE-\d{4}-\d+$/i.test(d.cve_id);
+  var nvdLink  = isCveId
+    ? '<a href="https://nvd.nist.gov/vuln/detail/' + d.cve_id + '" target="_blank" ' +
+      'class="btn btn-sm btn-outline-info ms-2"><i class="bi bi-box-arrow-up-right me-1"></i>NVD</a>'
+    : '';
+  var cvssVec  = parseCvssVector(d.cvss_vector);
+
+  /* ─ patch refs ─ */
+  var patchHtml = '';
+  if (d.patch_refs && d.patch_refs.length) {
+    patchHtml = '<ul class="list-unstyled mb-0">';
+    d.patch_refs.slice(0, 10).forEach(function(url) {
+      patchHtml += '<li><i class="bi bi-patch-check-fill text-success me-2"></i>' +
+        '<a href="' + escHtml(url) + '" target="_blank" class="text-info small text-break">' +
+        escHtml(url) + '</a></li>';
+    });
+    patchHtml += '</ul>';
+  } else {
+    patchHtml = '<span class="text-muted small">No specific patch references found in NVD.</span>';
+  }
+
+  /* ─ all references ─ */
+  var refs = [];
+  try { refs = JSON.parse(d.references || '[]'); } catch(e) {}
+  var refsHtml = '';
+  if (refs.length) {
+    refsHtml = '<ul class="list-unstyled mb-0 small">';
+    refs.slice(0, 12).forEach(function(url) {
+      refsHtml += '<li class="mb-1"><i class="bi bi-link-45deg text-muted me-1"></i>' +
+        '<a href="' + escHtml(url) + '" target="_blank" class="text-info text-break">' +
+        escHtml(url) + '</a></li>';
+    });
+    refsHtml += '</ul>';
+  }
+
+  /* ─ CISA remediation ─ */
+  var cisaHtml = '';
+  if (d.cisa_remediation) {
+    cisaHtml = '<div class="alert alert-danger py-2 mb-0 d-flex gap-2 align-items-start">' +
+      '<i class="bi bi-fire fs-5 flex-shrink-0 text-danger mt-1"></i>' +
+      '<div><div class="fw-semibold small mb-1">CISA Required Action (Known Exploited Vulnerability)</div>' +
+      '<div class="small">' + escHtml(d.cisa_remediation) + '</div></div></div>';
+  }
+  if (d.exploited_in_wild && !d.cisa_remediation) {
+    cisaHtml = '<div class="alert alert-danger py-2 mb-0"><i class="bi bi-fire me-2"></i>' +
+      'This vulnerability is listed in CISA KEV (actively exploited in the wild).</div>';
+  }
+
+  /* ─ Recommendation (DB field or guidance) ─ */
+  var recHtml = '';
+  if (d.recommendation) {
+    recHtml = '<div class="small" style="white-space:pre-wrap">' + escHtml(d.recommendation) + '</div>';
+  } else if (d.patch_refs && d.patch_refs.length) {
+    recHtml = '<div class="small text-muted">Apply the patches listed above from the vendor references.</div>';
+  } else {
+    recHtml = '<div class="small text-muted">No specific remediation stored. Check vendor advisories and apply the latest security patches.</div>';
+  }
+
+  /* ─ Affected hosts table ─ */
+  var hostsHtml = '';
+  if (d.hosts && d.hosts.length) {
+    hostsHtml = '<table class="table table-sm table-hover mb-0 small">' +
+      '<thead class="table-dark"><tr><th>Host</th><th>Audit</th><th>Client</th><th>Status</th></tr></thead><tbody>';
+    d.hosts.forEach(function(h) {
+      hostsHtml += '<tr>' +
+        '<td><a href="/hosts/' + h.host_id + '" class="text-info font-monospace text-decoration-none">' +
+          escHtml(h.hostname) + (h.hostname !== h.ip ? '<br><span class="text-muted">' + escHtml(h.ip) + '</span>' : '') +
+        '</a></td>' +
+        '<td><a href="/audits/' + h.audit_id + '" class="text-decoration-none">' + escHtml(h.audit_name) + '</a></td>' +
+        '<td>' + escHtml(h.client_name) + '</td>' +
+        '<td>' + statusBadge(h.cve_status) + '</td>' +
+        '</tr>';
+    });
+    hostsHtml += '</tbody></table>';
+  } else {
+    hostsHtml = '<div class="text-muted small">No affected hosts found.</div>';
+  }
+
+  /* ─ CWE badges ─ */
+  var cweHtml = '';
+  if (d.weaknesses && d.weaknesses.length) {
+    cweHtml = d.weaknesses.map(function(cwe) {
+      return '<a href="https://cwe.mitre.org/data/definitions/' + escHtml(cwe.replace('CWE-','')) +
+        '.html" target="_blank" class="badge bg-secondary text-decoration-none me-1">' + escHtml(cwe) + '</a>';
+    }).join('');
+  }
+
+  /* ─ Assemble ─ */
+  var html = '';
+
+  /* Header section */
+  html += '<div class="detail-section">' +
+    '<div class="d-flex align-items-start gap-3 flex-wrap">' +
+      '<div class="flex-grow-1">' +
+        '<div class="d-flex align-items-center gap-2 flex-wrap mb-2">' +
+          '<span class="badge bg-' + sevCls + ' fs-6">' + escHtml(d.severity || 'UNKNOWN') + '</span>' +
+          (d.cvss_score ? '<span class="badge bg-dark border fs-6 ' + cvssColor(d.cvss_score) + '">' +
+            'CVSS&nbsp;' + d.cvss_score.toFixed(1) + '</span>' : '') +
+          (d.patch_refs && d.patch_refs.length
+            ? '<span class="badge bg-success"><i class="bi bi-patch-check me-1"></i>Patch Available</span>'
+            : '<span class="badge bg-secondary">No Patch Ref</span>') +
+        '</div>' +
+        '<div class="d-flex align-items-center gap-2">' +
+          '<h6 class="mb-0 font-monospace fw-bold">' + escHtml(d.cve_id || d.title) + '</h6>' +
+          nvdLink +
+        '</div>' +
+        (d.published ? '<div class="small text-muted mt-1">Published: ' + escHtml(d.published.split('T')[0]) +
+          (d.last_modified ? ' — Last modified: ' + escHtml(d.last_modified.split('T')[0]) : '') + '</div>' : '') +
+        (cweHtml ? '<div class="mt-2">' + cweHtml + '</div>' : '') +
+      '</div>' +
+    '</div>' +
+    (cisaHtml ? '<div class="mt-3">' + cisaHtml + '</div>' : '') +
+  '</div>';
+
+  /* Description section */
+  html += '<div class="detail-section">' +
+    '<div class="fw-semibold small text-muted mb-2"><i class="bi bi-card-text me-2"></i>Description</div>' +
+    '<p class="small mb-0">' + escHtml(d.description || '—') + '</p>' +
+  '</div>';
+
+  /* CVSS Vector breakdown */
+  if (d.cvss_vector && cvssVec) {
+    html += '<div class="detail-section">' +
+      '<div class="fw-semibold small text-muted mb-2"><i class="bi bi-sliders me-2"></i>CVSS Vector — ' +
+      '<code class="small">' + escHtml(d.cvss_vector) + '</code></div>' +
+      cvssVec +
+    '</div>';
+  }
+
+  /* Remediation section */
+  html += '<div class="detail-section">' +
+    '<div class="fw-semibold small text-muted mb-2"><i class="bi bi-wrench-adjustable me-2"></i>How to fix this vulnerability</div>' +
+    recHtml +
+  '</div>';
+
+  /* Patch references */
+  html += '<div class="detail-section">' +
+    '<div class="fw-semibold small text-muted mb-2"><i class="bi bi-patch-check me-2"></i>Patch / Vendor References</div>' +
+    patchHtml +
+  '</div>';
+
+  /* All references */
+  if (refsHtml) {
+    html += '<div class="detail-section">' +
+      '<div class="fw-semibold small text-muted mb-2"><i class="bi bi-link-45deg me-2"></i>All References</div>' +
+      refsHtml +
+    '</div>';
+  }
+
+  /* Affected hosts */
+  html += '<div class="detail-section">' +
+    '<div class="fw-semibold small text-muted mb-2">' +
+      '<i class="bi bi-hdd-network me-2"></i>Affected Hosts (' + (d.hosts ? d.hosts.length : 0) + ')' +
+    '</div>' +
+    '<div class="table-responsive">' + hostsHtml + '</div>' +
+  '</div>';
+
+  document.getElementById('remDetailTitle').innerHTML =
+    '<i class="bi bi-shield-exclamation me-2 text-' + sevCls + '"></i>' + escHtml(d.cve_id || d.title);
+  document.getElementById('remDetailBody').innerHTML = html;
+}
+</script>
+{% endblock %}
