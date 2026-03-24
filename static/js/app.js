@@ -266,10 +266,13 @@ function lookupCve(cveId) {
       } catch (_) {}
 
       body.innerHTML = `
-        <div class="d-flex gap-3 mb-3 flex-wrap">
+        <div class="d-flex gap-2 mb-3 flex-wrap align-items-center">
           <span class="badge bg-${sevClass} fs-6">${sev}</span>
           ${data.cvss_score ? `<span class="badge bg-secondary fs-6">CVSS ${data.cvss_score}</span>` : ''}
           ${data.cvss_vector ? `<code class="small">${escHtml(data.cvss_vector)}</code>` : ''}
+          <a href="/cve-remediation/?open=${encodeURIComponent(cveId)}" class="btn btn-sm btn-outline-warning ms-auto" title="View step-by-step remediation">
+            <i class="bi bi-wrench-adjustable me-1"></i>Remediation
+          </a>
         </div>
         <p class="mb-3">${escHtml(data.description || 'No description available.')}</p>
         ${refs ? `<div class="border-top pt-3"><div class="small fw-semibold mb-1 text-muted">References</div>${refs}</div>` : ''}
