@@ -2,7 +2,7 @@ import re
 from collections import defaultdict
 from flask import Blueprint, render_template, jsonify, request
 from flask_login import login_required
-from models import Vulnerability, Host, Audit, Client
+from models import Vulnerability, Host, Audit, Client, Port
 from extensions import db
 
 cve_remediation_bp = Blueprint("cve_remediation", __name__, url_prefix="/cve-remediation")
@@ -204,10 +204,31 @@ def detail():
 
     result["hosts"] = list(hosts_seen.values())
 
+    # Collect product/version from Port records for richer remediation commands
+    affected_products: list[dict] = []
+    products_seen: set[tuple] = set()
+    for vuln, host, audit, client in rows:
+        if vuln.port_id:
+            port = db.session.get(Port, vuln.port_id)
+            if port and (port.product or port.cpe):
+                pk = (port.product, port.version)
+                if pk not in products_seen:
+                    products_seen.add(pk)
+                    affected_products.append({
+                        "product": port.product,
+                        "version": port.version,
+                        "cpe":     port.cpe,
+                        "service": port.service,
+                        "port":    port.port,
+                        "os_info": host.os_info,
+                    })
+
     # Build step-by-step remediation guide
     try:
         from services.cve_service import build_remediation_steps
-        result["remediation_steps"] = build_remediation_steps(result)
+        result["remediation_steps"] = build_remediation_steps(
+            result, affected_products=affected_products or None
+        )
     except Exception:
         result["remediation_steps"] = []
 

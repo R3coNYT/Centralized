@@ -184,6 +184,7 @@ def _extract_cve(cve: dict) -> dict | None:
         "published": cve.get("published", ""),
         "last_modified": cve.get("lastModified", ""),
         "vuln_status": cve.get("vulnStatus", ""),
+        "configurations": cve.get("configurations", []),
         "source": "nvd",
     }
 
@@ -346,523 +347,551 @@ def is_version_affected(user_version: str, cpe_matches: list) -> bool | None:
         return None
     return False  # user's version was outside all defined ranges
 
+
 # ---------------------------------------------------------------------------
 # Step-by-step remediation builder
 # ---------------------------------------------------------------------------
 
-# CWE → list of (title, description, bootstrap-icon) tuples
-_CWE_STEPS: dict[str, list[tuple[str, str, str]]] = {
-    "CWE-79": [
-        (
-            "Encode all user-supplied output",
-            "Apply HTML entity encoding on every piece of data rendered in the browser. "
-            "Use context-aware escaping: HTML context, JavaScript context, CSS context and URL context "
-            "each require different encoding schemes. Never inject raw user input into the DOM.",
-            "bi-code-slash",
-        ),
-        (
-            "Implement a strict Content Security Policy (CSP)",
-            "Add a Content-Security-Policy HTTP response header that:\n"
-            "  • Disallows inline scripts (no 'unsafe-inline')\n"
-            "  • Restricts script sources to your own domain and explicitly trusted CDNs\n"
-            "  • Uses 'nonce-{random}' or 'hash-{...}' for any legitimate inline code\n"
-            "Test with the CSP Evaluator tool before deploying.",
-            "bi-shield-lock",
-        ),
-        (
-            "Enable auto-escaping in your templating engine",
-            "Configure your templating engine (Jinja2, Twig, Handlebars, React JSX…) with "
-            "auto-escaping enabled by default so every variable interpolation is safely encoded. "
-            "Explicitly mark trusted HTML with a dedicated helper (e.g. Markup() in Jinja2) "
-            "only when absolutely required.",
-            "bi-file-code",
-        ),
-    ],
-    "CWE-89": [
-        (
-            "Replace string-concatenated queries with parameterized statements",
-            "Never build SQL queries by concatenating user-supplied strings. Use your framework's "
-            "ORM (SQLAlchemy, Hibernate, ActiveRecord) or the database driver's parameterized query "
-            "API (e.g. cursor.execute(sql, (param,))). This eliminates the injection vector entirely.",
-            "bi-database-lock",
-        ),
-        (
-            "Apply strict input validation and allowlisting",
-            "Before data reaches the data layer, validate each field:\n"
-            "  • Reject inputs that don't match expected type, length and format\n"
-            "  • Use an allowlist of accepted characters for free-text fields\n"
-            "  • Return a clear validation error rather than silently truncating",
-            "bi-funnel",
-        ),
-        (
-            "Enforce least privilege on the database account",
-            "The application's DB user must only hold the minimum permissions it needs "
-            "(SELECT/INSERT/UPDATE on specific tables). Remove CREATE, DROP, ALTER, EXECUTE, "
-            "FILE and any DBA-level grants. Use a separate read-only account for reporting queries.",
-            "bi-person-lock",
-        ),
-    ],
-    "CWE-78": [
-        (
-            "Eliminate OS shell calls wherever possible",
-            "Refactor the vulnerable code to use a native library instead of a shell command. "
-            "If you must invoke an external process, use an API that accepts an argument list "
-            "(e.g. Python subprocess with a list and shell=False) so the shell is never involved "
-            "in argument parsing.",
-            "bi-terminal",
-        ),
-        (
-            "Validate and allowlist all OS-bound inputs",
-            "Define a strict allowlist of permitted characters (alphanumeric + limited punctuation) "
-            "for every value passed to external commands. Reject — never sanitize by escaping — "
-            "any input containing shell metacharacters (;, &&, |, $, `, \\, <, >).",
-            "bi-sliders",
-        ),
-        (
-            "Run the process with minimal OS privileges",
-            "The service account should own only the filesystem paths and network sockets it strictly needs. "
-            "Use Linux namespaces, seccomp profiles or Windows restricted tokens to confine what the "
-            "process can do even if command injection is achieved.",
-            "bi-shield",
-        ),
-    ],
-    "CWE-22": [
-        (
-            "Canonicalize and jail all file paths",
-            "Before opening any file, resolve the path to its real absolute form "
-            "(os.path.realpath() / Path.resolve()) and assert the result starts with the "
-            "expected base directory. Raise an error and abort if the canonical path escapes "
-            "the allowed prefix.",
-            "bi-folder-lock",
-        ),
-        (
-            "Run the file-serving component in a restricted sandbox",
-            "Use chroot, a container, or a virtual filesystem mount so the process's "
-            "root is the document root. Even a successful traversal cannot read files outside "
-            "the sandbox.",
-            "bi-box-seam",
-        ),
-    ],
-    "CWE-287": [
-        (
-            "Enforce multi-factor authentication (MFA)",
-            "Add a second factor (TOTP app, hardware key, push notification) so a stolen "
-            "password alone is insufficient for access. Prioritize privileged and admin accounts first.",
-            "bi-shield-lock",
-        ),
-        (
-            "Harden session management",
-            "Session tokens must be:\n"
-            "  • Generated with a CSPRNG (≥128 bits of entropy)\n"
-            "  • Short-lived (expire after inactivity)\n"
-            "  • Invalidated on logout and on privilege change\n"
-            "  • Transmitted only over TLS with HttpOnly + Secure + SameSite=Strict flags",
-            "bi-key",
-        ),
-        (
-            "Implement brute-force protection",
-            "After a configurable number of failed login attempts (e.g. 5), apply an "
-            "exponential back-off or temporary lockout. Log all authentication failures to "
-            "your SIEM. Deploy a CAPTCHA or device fingerprinting challenge after repeated failures.",
-            "bi-journal-check",
-        ),
-    ],
-    "CWE-798": [
-        (
-            "Remove hardcoded credentials and rotate them immediately",
-            "Delete the hardcoded secret from source code now and trigger an emergency rotation. "
-            "Replace it with a runtime secret injection mechanism:\n"
-            "  • Environment variables for simple deployments\n"
-            "  • A secrets manager (HashiCorp Vault, AWS Secrets Manager, Azure Key Vault) for production\n"
-            "Never store secrets in config files committed to version control.",
-            "bi-key",
-        ),
-        (
-            "Audit version history for leaked secrets",
-            "A secret that was ever committed — even if later deleted — remains in git history. "
-            "Use tools such as truffleHog, git-secrets or GitHub Secret Scanning to scan the "
-            "entire repository history. Rotate every discovered secret regardless of age.",
-            "bi-search",
-        ),
-    ],
-    "CWE-611": [
-        (
-            "Disable external entity and DTD processing in the XML parser",
-            "Configure the XML parser to reject DTDs and external entities:\n"
-            "  • Python lxml: resolve_entities=False, no_network=True\n"
-            "  • Java: set XMLConstants.FEATURE_SECURE_PROCESSING = true, "
-            "disable FEATURE_EXTERNAL_GENERAL_ENTITIES and FEATURE_EXTERNAL_PARAMETER_ENTITIES\n"
-            "  • PHP: libxml_disable_entity_loader(true) (PHP < 8.0)",
-            "bi-file-earmark-x",
-        ),
-        (
-            "Switch to JSON or validate with a strict schema",
-            "If the application does not specifically require XML, migrate to JSON, which "
-            "has no entity expansion mechanism. If XML is required, validate all documents "
-            "against a strict XSD schema before parsing.",
-            "bi-file-earmark-code",
-        ),
-    ],
-    "CWE-502": [
-        (
-            "Never deserialize untrusted data with native object serializers",
-            "Remove all usage of pickle (Python), Java ObjectInputStream, PHP unserialize() "
-            "or equivalent native formats on data received over the network or from untrusted "
-            "storage. Replace with JSON + schema validation, Protocol Buffers, or Avro.",
-            "bi-shield-x",
-        ),
-        (
-            "Apply a class allowlist if deserialization cannot be removed",
-            "If native deserialization is unavoidable, configure a strict allowlist of "
-            "permitted classes/types and reject anything outside it before processing. "
-            "Use libraries like NotSoSerial (Java) or RestrictedUnpickler (Python) to enforce this.",
-            "bi-funnel",
-        ),
-    ],
-    "CWE-20": [
-        (
-            "Implement strict server-side input validation",
-            "Define and enforce an allowlist of accepted values for every external input:\n"
-            "  • Data type check (integer, email, UUID…)\n"
-            "  • Length bounds\n"
-            "  • Format / regex pattern\n"
-            "  • Value range for numeric fields\n"
-            "Reject — do not silently strip — anything outside the allowlist.",
-            "bi-check-square",
-        ),
-        (
-            "Apply output encoding appropriate to each context",
-            "Even after validation, encode data before injecting it into HTML, SQL, "
-            "OS commands, LDAP queries or any other interpreted context. Validation reduces "
-            "attack surface; output encoding prevents injection even when validation is incomplete.",
-            "bi-code-slash",
-        ),
-    ],
-    "CWE-434": [
-        (
-            "Validate file type by inspecting file content (magic bytes), not extension",
-            "Read the first bytes of the uploaded file and check them against known magic byte "
-            "signatures. Never trust the client-supplied filename or Content-Type header. "
-            "Use a library such as python-magic or Apache Tika for reliable MIME detection.",
-            "bi-file-earmark-lock",
-        ),
-        (
-            "Store uploaded files outside the web root and serve through a controller",
-            "Save uploads to a directory that the web server does not serve directly. "
-            "Serve files through a controller that:\n"
-            "  • Re-validates the file before delivery\n"
-            "  • Enforces access control (authentication + authorization)\n"
-            "  • Sets Content-Disposition: attachment to prevent browser execution",
-            "bi-folder-lock",
-        ),
-        (
-            "Scan uploaded files for malware before storage",
-            "Integrate an antivirus / YARA scanner into the upload pipeline. "
-            "Quarantine suspicious files rather than immediately rejecting them to enable forensic review.",
-            "bi-shield-check",
-        ),
-    ],
-    "CWE-352": [
-        (
-            "Add CSRF tokens to all state-changing forms and AJAX requests",
-            "Generate a cryptographically random, per-session (or per-request) CSRF token. "
-            "Include it as a hidden field in every HTML form and as a custom header in every "
-            "state-changing AJAX call. Validate the token server-side before processing.",
-            "bi-shield-lock",
-        ),
-        (
-            "Set the SameSite cookie attribute",
-            "Add SameSite=Strict (preferred) or SameSite=Lax to all session and authentication "
-            "cookies. This prevents cross-site requests from automatically carrying the session cookie.",
-            "bi-shield",
-        ),
-    ],
-    "CWE-862": [
-        (
-            "Add server-side authorization checks to every sensitive endpoint",
-            "Never rely on hiding UI elements to restrict access. Every API endpoint and server "
-            "action that accesses sensitive data or performs state changes must verify the caller's "
-            "role and permissions server-side, regardless of how the request arrived.",
-            "bi-person-lock",
-        ),
-        (
-            "Apply the principle of least privilege",
-            "Users and service accounts should be granted only the minimum permissions "
-            "required for their function. Conduct a permission audit and remove any "
-            "over-privileged grants.",
-            "bi-lock",
-        ),
-    ],
-    "CWE-306": [
-        (
-            "Add authentication middleware to all sensitive routes",
-            "Apply an authentication check (login_required decorator, JWT validation middleware, "
-            "etc.) to every endpoint that exposes sensitive data or performs actions. "
-            "Write an integration test that accesses each route without credentials and "
-            "asserts a 401/403 response to prevent regression.",
-            "bi-shield-lock",
-        ),
-    ],
-    "CWE-400": [
-        (
-            "Implement rate limiting on resource-intensive endpoints",
-            "Add rate limiting (e.g. Flask-Limiter, nginx limit_req, AWS WAF rate rules) "
-            "to prevent a single client from exhausting server resources. Define limits "
-            "per IP, per account and globally.",
-            "bi-speedometer2",
-        ),
-        (
-            "Apply timeouts and queue size caps",
-            "Set maximum timeouts on all external service calls (HTTP, DB, cache). "
-            "Cap the size of internal thread pools, task queues and connection pools. "
-            "This prevents a slow upstream from causing cascading resource exhaustion.",
-            "bi-hourglass-split",
-        ),
-    ],
-    "CWE-295": [
-        (
-            "Enable and enforce proper TLS certificate validation",
-            "Ensure the TLS client verifies:\n"
-            "  • Certificate chain up to a trusted CA\n"
-            "  • Hostname matches the presented certificate (SNI)\n"
-            "  • Certificate is within its validity period and not revoked\n"
-            "Never disable certificate verification (verify=False, "
-            "InsecureRequestWarning, CURLOPT_SSL_VERIFYPEER=false) in production.",
-            "bi-lock",
-        ),
-    ],
-    "CWE-119": [
-        (
-            "Apply the vendor security patch (memory corruption fix required)",
-            "Buffer overflow vulnerabilities require a code-level fix. The only reliable "
-            "remediation is to apply the vendor's security patch. Update the affected library "
-            "or application to the patched version.",
-            "bi-arrow-up-circle",
-        ),
-        (
-            "Enable OS and compiler memory protection features",
-            "Verify the following mitigations are active on all affected hosts:\n"
-            "  • ASLR (Address Space Layout Randomization) — sysctl kernel.randomize_va_space=2\n"
-            "  • DEP/NX (Data Execution Prevention / No-Execute) — enabled in BIOS and OS\n"
-            "  • Stack canaries — compile with -fstack-protector-strong",
-            "bi-cpu",
-        ),
-    ],
-    "CWE-125": [
-        (
-            "Update to the patched version (out-of-bounds read fix required)",
-            "Out-of-bounds read vulnerabilities are memory safety bugs that must be fixed "
-            "at the source. Apply the vendor security patch to close the vulnerability.",
-            "bi-arrow-up-circle",
-        ),
-        (
-            "Enable memory protection mitigations",
-            "Ensure ASLR, DEP/NX and stack canaries are active on all affected systems "
-            "to reduce the exploitability of residual memory safety issues.",
-            "bi-cpu",
-        ),
-    ],
-    "CWE-787": [
-        (
-            "Apply the vendor patch immediately (potential RCE — out-of-bounds write)",
-            "Out-of-bounds write vulnerabilities are frequently exploitable for remote code "
-            "execution. This is a high-urgency patch. Apply the vendor's security update to "
-            "all affected systems as soon as possible.",
-            "bi-arrow-up-circle",
-        ),
-        (
-            "Enable compiler and OS memory hardening",
-            "Build with -fstack-protector-strong, enable ASLR and DEP/NX, and consider "
-            "deploying a memory-safe allocator (jemalloc, hardened_malloc) to reduce "
-            "exploitation reliability.",
-            "bi-cpu",
-        ),
-    ],
-    "CWE-416": [
-        (
-            "Update the affected library or application (use-after-free fix required)",
-            "Use-after-free is a memory corruption class that must be fixed at the source. "
-            "Apply the vendor patch to all affected systems.",
-            "bi-arrow-up-circle",
-        ),
-        (
-            "Enable heap hardening",
-            "Deploy a hardened memory allocator (e.g. glibc MALLOC_CHECK_=3, jemalloc, "
-            "or libhardened_malloc) to detect and mitigate UAF exploitation at runtime.",
-            "bi-cpu",
-        ),
-    ],
-}
+# ── CPE product → package manager commands ──────────────────────────────────
+# List of (vendor_substr, product_substr, info_dict) — first match wins.
+# info_dict keys: apt, yum, apk, pip, npm, gem, choco, winget,
+#                 restart, verify, note
+_CPE_PKG_MAP: list[tuple[str, str, dict]] = [
+    # ─── Web / HTTP servers ──────────────────────────────────────────────────
+    ("apache", "http_server", {
+        "apt": "apache2", "yum": "httpd", "apk": "apache2", "choco": "apache-httpd",
+        "restart": "sudo systemctl restart apache2   # Debian/Ubuntu\nsudo systemctl restart httpd      # RHEL/CentOS",
+        "verify": "apache2 -v 2>/dev/null || httpd -v",
+    }),
+    ("nginx", "nginx", {
+        "apt": "nginx", "yum": "nginx", "apk": "nginx", "choco": "nginx",
+        "restart": "sudo systemctl restart nginx",
+        "verify": "nginx -v",
+    }),
+    ("lighttpd", "lighttpd", {
+        "apt": "lighttpd", "yum": "lighttpd",
+        "restart": "sudo systemctl restart lighttpd",
+        "verify": "lighttpd -v",
+    }),
+    # ─── Java application servers ────────────────────────────────────────────
+    ("apache", "tomcat", {
+        "apt": "tomcat9 tomcat10", "yum": "tomcat",
+        "restart": "sudo systemctl restart tomcat",
+        "verify": "catalina.sh version 2>/dev/null || /usr/share/tomcat/bin/version.sh",
+    }),
+    ("eclipse", "jetty", {
+        "apt": "jetty9",
+        "restart": "sudo systemctl restart jetty",
+        "note": "If running standalone Jetty, download the patched JARs from https://www.eclipse.org/jetty/",
+    }),
+    # ─── SSL / TLS ───────────────────────────────────────────────────────────
+    ("openssl", "openssl", {
+        "apt": "openssl libssl-dev", "yum": "openssl openssl-devel", "apk": "openssl",
+        "choco": "openssl",
+        "verify": "openssl version",
+    }),
+    ("gnutls", "gnutls", {
+        "apt": "libgnutls30 gnutls-bin", "yum": "gnutls",
+        "verify": "gnutls-cli --version",
+    }),
+    ("mozilla", "nss", {
+        "apt": "libnss3 libnss3-dev", "yum": "nss",
+        "verify": "python3 -c \"import ssl; print(ssl.OPENSSL_VERSION)\"",
+    }),
+    # ─── SSH ─────────────────────────────────────────────────────────────────
+    ("openssh", "openssh", {
+        "apt": "openssh-server openssh-client", "yum": "openssh-server openssh-clients",
+        "apk": "openssh",
+        "restart": "sudo systemctl restart sshd",
+        "verify": "sshd -V 2>&1 | head -1 || ssh -V",
+    }),
+    # ─── Languages / Runtimes ────────────────────────────────────────────────
+    ("python", "python", {
+        "apt": "python3 python3-dev", "yum": "python3", "apk": "python3",
+        "choco": "python3",
+        "verify": "python3 --version",
+    }),
+    ("php", "php", {
+        "apt": "php php-common", "yum": "php", "apk": "php",
+        "restart": "sudo systemctl restart php-fpm || sudo systemctl restart apache2",
+        "verify": "php -v | head -1",
+    }),
+    ("perl",  "perl",  {"apt": "perl",       "yum": "perl",  "apk": "perl",   "verify": "perl --version | head -2"}),
+    ("ruby",  "ruby",  {"apt": "ruby ruby-dev","yum": "ruby", "apk": "ruby",  "verify": "ruby --version"}),
+    ("node",  "node",  {
+        "apt": "nodejs npm", "yum": "nodejs npm", "apk": "nodejs npm",
+        "choco": "nodejs-lts",
+        "verify": "node --version && npm --version",
+    }),
+    ("java",  "jdk",   {"apt": "default-jdk",     "yum": "java-17-openjdk-devel", "choco": "temurin17",    "verify": "java -version 2>&1 | head -1"}),
+    ("java",  "jre",   {"apt": "default-jre",     "yum": "java-17-openjdk",       "choco": "temurin17jre", "verify": "java -version 2>&1 | head -1"}),
+    # ─── Databases ───────────────────────────────────────────────────────────
+    ("mysql",       "mysql",       {"apt": "mysql-server mysql-client",         "yum": "mysql-server mysql",         "restart": "sudo systemctl restart mysql",       "verify": "mysql --version"}),
+    ("oracle",      "mysql",       {"apt": "mysql-server mysql-client",         "yum": "mysql-server mysql",         "restart": "sudo systemctl restart mysql",       "verify": "mysql --version"}),
+    ("mariadb",     "mariadb",     {"apt": "mariadb-server mariadb-client",     "yum": "mariadb-server mariadb",     "restart": "sudo systemctl restart mariadb",     "verify": "mysql --version"}),
+    ("postgresql",  "postgresql",  {"apt": "postgresql postgresql-client",      "yum": "postgresql-server postgresql","apk": "postgresql", "restart": "sudo systemctl restart postgresql", "verify": "psql --version"}),
+    ("redis",       "redis",       {"apt": "redis-server",                      "yum": "redis",                      "apk": "redis",       "restart": "sudo systemctl restart redis",       "verify": "redis-server --version"}),
+    ("mongodb",     "mongodb",     {"apt": "mongodb-org",                       "yum": "mongodb-org",                "restart": "sudo systemctl restart mongod",      "verify": "mongod --version",
+                                    "note": "MongoDB requires its own repo. See: https://www.mongodb.com/docs/manual/administration/install-on-linux/"}),
+    ("elastic",     "elasticsearch", {
+        "apt": "elasticsearch", "yum": "elasticsearch",
+        "restart": "sudo systemctl restart elasticsearch",
+        "verify": "curl -s http://localhost:9200 | python3 -m json.tool | grep number",
+        "note": "Elasticsearch requires its own APT/YUM repo. See: https://www.elastic.co/guide/en/elasticsearch/reference/current/install-elasticsearch.html",
+    }),
+    # ─── DNS / Mail / Directory ──────────────────────────────────────────────
+    ("isc",       "bind",     {"apt": "bind9 bind9utils",                  "yum": "bind",            "apk": "bind",      "restart": "sudo systemctl restart named || sudo systemctl restart bind9", "verify": "named -v"}),
+    ("postfix",   "postfix",  {"apt": "postfix",                           "yum": "postfix",                             "restart": "sudo systemctl restart postfix",      "verify": "postconf mail_version"}),
+    ("dovecot",   "dovecot",  {"apt": "dovecot-core dovecot-imapd dovecot-pop3d", "yum": "dovecot",                      "restart": "sudo systemctl restart dovecot",      "verify": "dovecot --version"}),
+    ("exim",      "exim",     {"apt": "exim4",                             "yum": "exim",                                "restart": "sudo systemctl restart exim4",        "verify": "exim --version 2>&1 | head -1"}),
+    ("samba",     "samba",    {"apt": "samba",                             "yum": "samba",                               "restart": "sudo systemctl restart smbd nmbd",    "verify": "smbd --version"}),
+    ("openldap",  "openldap", {"apt": "slapd ldap-utils",                  "yum": "openldap-servers openldap-clients",   "restart": "sudo systemctl restart slapd",        "verify": "slapd -VV 2>&1 | head -1"}),
+    # ─── VPN / Proxy ─────────────────────────────────────────────────────────
+    ("openvpn",   "openvpn",  {"apt": "openvpn",  "yum": "openvpn",  "restart": "sudo systemctl restart openvpn", "verify": "openvpn --version | head -1"}),
+    ("wireguard", "wireguard",{"apt": "wireguard", "yum": "wireguard-tools",                                         "verify": "wg --version"}),
+    ("squid",     "squid",    {"apt": "squid",     "yum": "squid",     "restart": "sudo systemctl restart squid",   "verify": "squid -v | head -1"}),
+    # ─── CMS ─────────────────────────────────────────────────────────────────
+    ("wordpress", "wordpress",{"note": "Update via WordPress admin (Dashboard → Updates) or using WP-CLI:",  "verify": "wp core version"}),
+    ("drupal",    "drupal",   {"note": "Update via Drupal admin (Reports → Available updates) or Composer:", "verify": "drush status | grep 'Drupal version'"}),
+    ("joomla",    "joomla",   {"note": "Update via Joomla! admin panel (Components → Joomla! Update):"}),
+    # ─── System utilities ────────────────────────────────────────────────────
+    ("gnu",      "bash",        {"apt": "bash",                  "yum": "bash",     "apk": "bash",        "verify": "bash --version | head -1"}),
+    ("gnu",      "glibc",       {"apt": "libc6 libc-bin",        "yum": "glibc",                          "verify": "ldd --version | head -1",     "note": "After updating glibc, reboot the host."}),
+    ("haxx",     "curl",        {"apt": "curl libcurl4",         "yum": "curl",     "apk": "curl",   "choco": "curl",   "verify": "curl --version | head -1"}),
+    ("gnu",      "wget",        {"apt": "wget",                  "yum": "wget",                           "verify": "wget --version | head -1"}),
+    ("linux",    "linux_kernel",{"apt": "linux-image-generic linux-headers-generic", "yum": "kernel",     "verify": "uname -r",                    "note": "After updating the kernel, reboot:\n  sudo reboot"}),
+    ("sudo",     "sudo",        {"apt": "sudo",                  "yum": "sudo",                           "verify": "sudo --version | head -1"}),
+    ("polkit",   "polkit",      {"apt": "policykit-1 polkitd",   "yum": "polkit",                         "verify": "pkaction --version 2>&1"}),
+    ("systemd",  "systemd",     {"apt": "systemd",               "yum": "systemd",                        "verify": "systemctl --version | head -1","note": "Reboot after updating systemd."}),
+    ("gnu_project","tar",       {"apt": "tar",                   "yum": "tar",                            "verify": "tar --version | head -1"}),
+    # ─── Python packages ─────────────────────────────────────────────────────
+    ("pallets",      "flask",        {"pip": "flask",        "verify": "python3 -c \"import flask; print(flask.__version__)\""}),
+    ("django",       "django",       {"pip": "django",       "verify": "python3 -c \"import django; print(django.__version__)\""}),
+    ("cryptography", "cryptography", {"pip": "cryptography", "verify": "python3 -c \"import cryptography; print(cryptography.__version__)\""}),
+    ("pyjwt",        "pyjwt",        {"pip": "PyJWT",        "verify": "python3 -c \"import jwt; print(jwt.__version__)\""}),
+    ("urllib3",      "urllib3",      {"pip": "urllib3",      "verify": "python3 -c \"import urllib3; print(urllib3.__version__)\""}),
+    ("psf",          "requests",     {"pip": "requests",     "verify": "python3 -c \"import requests; print(requests.__version__)\""}),
+    ("pillow",       "pillow",       {"pip": "pillow",       "verify": "python3 -c \"from PIL import Image; print(Image.__version__)\""}),
+    ("sqlalchemy",   "sqlalchemy",   {"pip": "sqlalchemy",   "verify": "python3 -c \"import sqlalchemy; print(sqlalchemy.__version__)\""}),
+    ("paramiko",     "paramiko",     {"pip": "paramiko",     "verify": "python3 -c \"import paramiko; print(paramiko.__version__)\""}),
+    ("werkzeug",     "werkzeug",     {"pip": "werkzeug",     "verify": "python3 -c \"import werkzeug; print(werkzeug.__version__)\""}),
+    ("jinja2",       "jinja2",       {"pip": "jinja2",       "verify": "python3 -c \"import jinja2; print(jinja2.__version__)\""}),
+    # ─── Node.js packages ────────────────────────────────────────────────────
+    ("expressjs", "express", {"npm": "express", "verify": "node -e \"console.log(require('express/package.json').version)\""}),
+    ("lodash",    "lodash",  {"npm": "lodash",  "verify": "node -e \"console.log(require('lodash/package.json').version)\""}),
+    ("axios",     "axios",   {"npm": "axios",   "verify": "node -e \"console.log(require('axios/package.json').version)\""}),
+]
 
-# CVSS vector component → (title, description, icon)
-_CVSS_STEPS: dict[str, tuple[str, str, str]] = {
-    "AV:N": (
-        "Restrict network exposure with firewall rules",
-        "This vulnerability is exploitable over the network. Until the patch is applied:\n"
-        "  • Block access to the affected port/service at the perimeter firewall\n"
-        "  • Limit source IPs to only those that legitimately need access\n"
-        "  • Consider temporarily taking the service offline if it is not business-critical",
-        "bi-router",
+
+def _match_cpe_pkg(vendor: str, product: str) -> dict | None:
+    """Return first matching package info from _CPE_PKG_MAP."""
+    v = vendor.lower().replace("-", "_").replace(" ", "_")
+    p = product.lower().replace("-", "_").replace(" ", "_")
+    for vm, pm, info in _CPE_PKG_MAP:
+        if vm.replace("-", "_") in v and pm.replace("-", "_") in p:
+            return info
+    return None
+
+
+def _extract_cpe_targets(configurations: list) -> list[tuple[str, str, str | None]]:
+    """
+    From NVD CPE configurations, extract unique (vendor, product, fixed_ver) tuples.
+    fixed_ver is versionEndExcluding (the first non-vulnerable version).
+    """
+    seen: set[tuple[str, str]] = set()
+    targets: list[tuple[str, str, str | None]] = []
+    for node_group in configurations:
+        for node in (node_group.get("nodes") or []):
+            for cm in (node.get("cpeMatch") or []):
+                if not cm.get("vulnerable", False):
+                    continue
+                cpe = cm.get("criteria", "")
+                parts = cpe.split(":")          # cpe:2.3:a:vendor:product:ver:...
+                vendor  = parts[3] if len(parts) > 3 else ""
+                product = parts[4] if len(parts) > 4 else ""
+                if not vendor or not product:
+                    continue
+                key = (vendor, product)
+                if key in seen:
+                    continue
+                seen.add(key)
+                fixed_ver = cm.get("versionEndExcluding") or cm.get("versionEndIncluding") or None
+                targets.append((vendor, product, fixed_ver))
+                if len(targets) >= 5:
+                    return targets
+    return targets
+
+
+def _build_update_commands(pkg: dict, fixed_ver: str | None,
+                           product_label: str, current_ver: str | None) -> list[dict]:
+    """Build a list of {label, code} command blocks for a detected package."""
+    cmds: list[dict] = []
+    cv_note = f"  # currently {current_ver}" if current_ver else ""
+    fv_note  = f"\n\n# Target: update to {fixed_ver} or later" if fixed_ver else ""
+
+    if pkg.get("apt"):
+        cmds.append({"label": "Debian / Ubuntu", "code": (
+            f"# 1. Update package lists\nsudo apt-get update\n\n"
+            f"# 2. Upgrade the package{cv_note}\nsudo apt-get install --only-upgrade {pkg['apt']}{fv_note}"
+        )})
+
+    if pkg.get("yum"):
+        cmds.append({"label": "RHEL / CentOS / Fedora", "code": (
+            f"# CentOS / RHEL 7 (yum)\nsudo yum update {pkg['yum']}{cv_note}\n\n"
+            f"# RHEL 8+ / Fedora / CentOS Stream (dnf)\nsudo dnf update {pkg['yum']}{fv_note}"
+        )})
+
+    if pkg.get("apk"):
+        cmds.append({"label": "Alpine Linux", "code": (
+            f"sudo apk update\nsudo apk upgrade {pkg['apk']}{cv_note}"
+        )})
+
+    if pkg.get("choco"):
+        ver_flag = f" --version {fixed_ver}" if fixed_ver else ""
+        cmds.append({"label": "Windows (Chocolatey)", "code": (
+            f"choco upgrade {pkg['choco']}{ver_flag}{cv_note}"
+        )})
+
+    if pkg.get("winget"):
+        cmds.append({"label": "Windows (winget)", "code": (
+            f"winget upgrade {pkg['winget']}{cv_note}"
+        )})
+
+    if pkg.get("pip"):
+        ver_pin = f">={fixed_ver}" if fixed_ver else ""
+        cmds.append({"label": "Python (pip)", "code": (
+            f"pip install --upgrade \"{pkg['pip']}{ver_pin}\"\n\n"
+            f"# Pin in requirements.txt:\n{pkg['pip']}>={fixed_ver or 'PATCHED_VERSION'}"
+        )})
+
+    if pkg.get("npm"):
+        ver_pin = f"@{fixed_ver}" if fixed_ver else "@latest"
+        cmds.append({"label": "Node.js (npm)", "code": (
+            f"# In your project directory:\nnpm install {pkg['npm']}{ver_pin}\n\n"
+            f"# Or globally:\nnpm install -g {pkg['npm']}{ver_pin}"
+        )})
+
+    if pkg.get("gem"):
+        ver_pin = f' -v ">={fixed_ver}"' if fixed_ver else ""
+        cmds.append({"label": "Ruby (gem)", "code": f"gem update {pkg['gem']}{ver_pin}"})
+
+    if pkg.get("restart"):
+        cmds.append({"label": "Restart service", "code": pkg["restart"]})
+
+    if pkg.get("verify"):
+        cmds.append({"label": "Verify version", "code": f"# Confirm the installed version\n{pkg['verify']}"})
+
+    return cmds
+
+
+# CWE IDs that require a code-level fix (not a package update)
+_CODE_FIX_CWES: dict[str, tuple[str, str, str]] = {
+    "CWE-79": (
+        "Fix Cross-Site Scripting (XSS) — output encoding + CSP",
+        (
+            "# 1. Enable auto-escaping in the templating engine\n"
+            "# Jinja2:\nenv = Environment(autoescape=True)\n\n"
+            "# React — always use JSX instead of dangerouslySetInnerHTML\n\n"
+            "# PHP:\necho htmlspecialchars($output, ENT_QUOTES, 'UTF-8');\n\n"
+            "# 2. Add a Content Security Policy response header\n"
+            "Content-Security-Policy: default-src 'self'; script-src 'self' 'nonce-{RANDOM}'; object-src 'none';\n\n"
+            "# 3. Harden session cookies\nSet-Cookie: session=...; HttpOnly; Secure; SameSite=Strict"
+        ),
+        "bi-code-slash",
     ),
-    "AV:A": (
-        "Segment the adjacent network",
-        "The attack requires adjacent network access. Isolate the vulnerable service in a "
-        "dedicated VLAN and ensure only explicitly authorized hosts can reach it. "
-        "Review switch ACLs and wireless SSIDs that share the same broadcast domain.",
-        "bi-diagram-3",
-    ),
-    "PR:N": (
-        "Treat as high-priority — no authentication required to exploit",
-        "Pre-authentication vulnerabilities have the widest attack surface because any "
-        "unauthenticated user or automated scanner can trigger them. Apply network "
-        "restrictions and the patch as emergency changes, not scheduled maintenance.",
-        "bi-exclamation-triangle",
-    ),
-    "UI:N": (
-        "Assume automated or worm-like exploitation is possible",
-        "No user interaction is required, meaning exploitation can be scripted, "
-        "automated or even worm-like. Do not assume attackers will wait — "
-        "treat active exploitation as a baseline assumption and expedite patching.",
-        "bi-bug",
-    ),
-    "S:C": (
-        "Isolate the service to limit blast radius (scope change possible)",
-        "A scope-changed vulnerability lets an attacker pivot from the vulnerable component "
-        "to other systems (e.g. container escape, hypervisor breakout, cross-tenant access). "
-        "Place the service in a dedicated container/VM with tightly restricted outbound network "
-        "access and minimal filesystem permissions.",
-        "bi-box-seam",
-    ),
-    "C:H": (
-        "Protect and audit access to sensitive data",
-        "This vulnerability can fully expose confidential data. Take the following steps:\n"
-        "  • Audit what data the affected service can access and reduce it to the minimum\n"
-        "  • Ensure data is encrypted at rest (AES-256) and in transit (TLS 1.2+)\n"
-        "  • Review access logs for signs of prior exfiltration\n"
-        "  • Notify your data protection officer if personal data may have been exposed",
+    "CWE-89": (
+        "Fix SQL Injection — use parameterised queries",
+        (
+            "# BAD — never concatenate user input into SQL:\nquery = 'SELECT * FROM users WHERE name = ' + user_input\n\n"
+            "# GOOD — Python DB-API parameterized:\ncursor.execute('SELECT * FROM users WHERE name = %s', (user_input,))\n\n"
+            "# GOOD — SQLAlchemy ORM:\nUser.query.filter_by(name=user_input).first()\n\n"
+            "# GOOD — Django ORM:\nUser.objects.filter(name=user_input).first()\n\n"
+            "# Also: restrict the DB account — remove DROP/CREATE/ALTER privileges:\n"
+            "REVOKE ALL ON *.* FROM 'app_user'@'localhost';\nGRANT SELECT, INSERT, UPDATE, DELETE ON app_db.* TO 'app_user'@'localhost';"
+        ),
         "bi-database-lock",
     ),
-    "I:H": (
-        "Deploy data-integrity controls",
-        "This vulnerability allows full integrity compromise. Apply:\n"
-        "  • File-integrity monitoring (FIM) on critical binaries and configs (AIDE, Wazuh)\n"
-        "  • Cryptographic checksums or digital signatures on critical data at rest\n"
-        "  • Immutable infrastructure patterns (rebuild from trusted images rather than patching in-place)",
-        "bi-lock",
+    "CWE-78": (
+        "Fix OS Command Injection — avoid shell=True",
+        (
+            "# BAD — never build shell commands from user input:\nos.system('ping ' + user_input)\nsubprocess.run('ls ' + path, shell=True)\n\n"
+            "# GOOD — use a list (shell=False, the default):\nimport subprocess\nsubprocess.run(['ping', '-c', '4', user_input], shell=False)\n\n"
+            "# If shell execution is unavoidable, enforce a strict allowlist:\nimport re\n"
+            "if not re.fullmatch(r'[a-zA-Z0-9._-]+', user_input):\n    raise ValueError('Invalid input — rejected')"
+        ),
+        "bi-terminal",
     ),
-    "A:H": (
-        "Protect service availability with redundancy and DoS mitigations",
-        "This vulnerability can fully disable the service. Mitigations:\n"
-        "  • Deploy a WAF or DDoS protection layer (Cloudflare, AWS Shield) in front of the service\n"
-        "  • Add circuit breakers and health-check auto-restart policies\n"
-        "  • Ensure a tested runbook exists for rapid service restoration\n"
-        "  • Configure alerting to detect abnormal traffic patterns before an outage",
-        "bi-cloud-arrow-up",
+    "CWE-22": (
+        "Fix Path Traversal — canonicalize and jail file paths",
+        (
+            "import os\nBASE_DIR = '/var/app/uploads'\n\n"
+            "# Resolve the real absolute path\nreal_path = os.path.realpath(os.path.join(BASE_DIR, user_filename))\n\n"
+            "# Reject anything that escapes the base directory\nif not real_path.startswith(BASE_DIR + os.sep):\n"
+            "    raise ValueError('Path traversal attempt detected')\n\n"
+            "with open(real_path, 'rb') as f:\n    data = f.read()"
+        ),
+        "bi-folder-lock",
+    ),
+    "CWE-287": (
+        "Fix weak authentication",
+        (
+            "# 1. Use strong password hashing (Argon2 recommended):\nfrom argon2 import PasswordHasher\n"
+            "ph = PasswordHasher()\nhashed = ph.hash(plain_password)\nph.verify(hashed, plain_password)  # on login\n\n"
+            "# 2. Rate-limit the login endpoint (Flask-Limiter):\nfrom flask_limiter import Limiter\n@limiter.limit('5 per minute')\ndef login(): ...\n\n"
+            "# 3. Enforce MFA for privileged accounts (TOTP example with pyotp):\nimport pyotp\ntotp = pyotp.TOTP(user_secret)\nif not totp.verify(user_token):\n    abort(403)"
+        ),
+        "bi-key",
+    ),
+    "CWE-352": (
+        "Fix CSRF — add tokens to all state-changing endpoints",
+        (
+            "# Flask-WTF handles this automatically. Manual approach:\nimport secrets\n\n"
+            "# On session start, generate a token:\nsession['csrf_token'] = secrets.token_hex(32)\n\n"
+            "# In every HTML form:\n<input type=\"hidden\" name=\"csrf_token\" value=\"{{ session.csrf_token }}\">\n\n"
+            "# Validate on every POST/PUT/DELETE:\nif request.form.get('csrf_token') != session.get('csrf_token'):\n    abort(403)\n\n"
+            "# Also set SameSite=Strict on session cookies:\nresponse.set_cookie('session', value, samesite='Strict', secure=True)"
+        ),
+        "bi-shield-lock",
+    ),
+    "CWE-434": (
+        "Fix unrestricted file upload",
+        (
+            "import magic, uuid, os\n\n"
+            "ALLOWED_MIME = {'image/jpeg', 'image/png', 'application/pdf'}\nMAX_SIZE = 5 * 1024 * 1024  # 5 MB\n\n"
+            "data = file.read(2048); file.seek(0)\n"
+            "if magic.from_buffer(data, mime=True) not in ALLOWED_MIME:\n    abort(400, 'File type not allowed')\nif file.seek(0, 2) > MAX_SIZE:\n    abort(400, 'File too large')\nfile.seek(0)\n\n"
+            "# Store with a UUID name outside the web root:\nsave_path = os.path.join('/var/uploads', str(uuid.uuid4()))\nfile.save(save_path)\n\n"
+            "# Serve with Content-Disposition: attachment to prevent browser execution"
+        ),
+        "bi-file-earmark-lock",
+    ),
+    "CWE-502": (
+        "Fix unsafe deserialization — replace pickle with JSON",
+        (
+            "# SAFE alternative — JSON does not execute code:\nimport json\ndata = json.loads(user_input)\n\n"
+            "# If pickle is unavoidable, use an allowlist unpickler:\nimport pickle\n\n"
+            "class SafeUnpickler(pickle.Unpickler):\n"
+            "    ALLOWED = {('builtins', 'dict'), ('myapp.models', 'Report')}\n"
+            "    def find_class(self, module, name):\n"
+            "        if (module, name) not in self.ALLOWED:\n"
+            "            raise pickle.UnpicklingError(f'Forbidden: {module}.{name}')\n"
+            "        return super().find_class(module, name)\n\n"
+            "data = SafeUnpickler(io.BytesIO(user_bytes)).load()"
+        ),
+        "bi-shield-x",
+    ),
+    "CWE-798": (
+        "Remove hardcoded credentials and rotate them immediately",
+        (
+            "# 1. Remove the secret from source code right now.\n"
+            "# 2. Rotate the credential — assume it is already compromised.\n\n"
+            "# 3. Inject via environment variable:\nimport os\ndb_password = os.environ['DB_PASSWORD']\n\n"
+            "# 4. Or use a secrets manager:\n# AWS Secrets Manager:\naws secretsmanager get-secret-value --secret-id prod/db/password\n\n"
+            "# HashiCorp Vault:\nvault kv get secret/db/password\n\n"
+            "# 5. Scan all git history for other leaked secrets:\npip install trufflehog\ntrufflehog git file://. --since-commit HEAD~200"
+        ),
+        "bi-key",
+    ),
+    "CWE-611": (
+        "Disable XML External Entity processing (XXE fix)",
+        (
+            "# Python (lxml):\nfrom lxml import etree\nparser = etree.XMLParser(resolve_entities=False, no_network=True)\ntree = etree.parse(source, parser)\n\n"
+            "# Java (DocumentBuilderFactory):\nfactory.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true);\nfactory.setFeature(\"http://apache.org/xml/features/disallow-doctype-decl\", true);\n\n"
+            "# PHP:\nlibxml_disable_entity_loader(true);  // PHP < 8.0\n// PHP 8.0+: disabled by default\n\n"
+            "# .NET (XmlReader):\nvar settings = new XmlReaderSettings { DtdProcessing = DtdProcessing.Prohibit };"
+        ),
+        "bi-file-earmark-x",
     ),
 }
 
 
-def build_remediation_steps(cve_data: dict) -> list[dict]:
+def build_remediation_steps(cve_data: dict,
+                            affected_products: list[dict] | None = None) -> list[dict]:
     """
-    Generate a structured, step-by-step remediation guide for a CVE.
+    Generate specific, actionable step-by-step remediation for a CVE.
 
-    Combines intelligence from:
-      - CISA KEV status (exploited_in_wild, cisa_remediation)
-      - Patch availability (patch_refs)
-      - CWE weakness categories (_CWE_STEPS knowledge base)
-      - CVSS vector components (_CVSS_STEPS hardening advice)
+    Uses NVD CPE configurations to identify the exact affected software and
+    produces package-manager-specific update commands (apt / yum / pip / npm …).
 
-    Returns a list of dicts: {step, title, description, icon, priority}
-    where priority is one of "critical" | "high" | "normal".
+    Args:
+        cve_data:          Merged dict from lookup_cve() + DB (must include 'configurations').
+        affected_products: Optional [{product, version, cpe, os_info}] from Port records.
+
+    Returns a list of step dicts:
+        {step, title, description, icon, priority, commands}
+        where commands is a list of {label, code} blocks.
     """
     steps: list[dict] = []
     seen_titles: set[str] = set()
 
     def add(title: str, description: str, icon: str = "bi-check-circle",
-            priority: str = "normal") -> None:
+            priority: str = "normal", commands: list | None = None) -> None:
         if title not in seen_titles:
             seen_titles.add(title)
             steps.append({
-                "step": 0,       # renumbered at the end
+                "step": 0,
                 "title": title,
                 "description": description,
                 "icon": icon,
                 "priority": priority,
+                "commands": commands or [],
             })
 
-    # ── 1. CISA KEV / actively exploited ─────────────────────────────────────
+    # ── 1. CISA KEV urgency ────────────────────────────────────────────────────
     if cve_data.get("exploited_in_wild"):
         cisa_action = cve_data.get("cisa_remediation") or ""
         add(
-            "IMMEDIATE: vulnerability is actively exploited in the wild",
+            "URGENT — actively exploited in the wild (CISA KEV)",
             ("CISA Required Action: " + cisa_action) if cisa_action else (
-                "CISA has catalogued this CVE as a Known Exploited Vulnerability (KEV). "
-                "Active exploitation means real attackers are using this right now. "
-                "Apply the patch or the mitigations below immediately — "
-                "do not wait for a scheduled maintenance window."
+                "This CVE is in the CISA KEV catalogue — it is being actively used by attackers. "
+                "Apply the fix below immediately, do not wait for a maintenance window."
             ),
-            "bi-fire",
-            "critical",
+            "bi-fire", "critical",
         )
 
-    # ── 2. Patch / no-patch step ──────────────────────────────────────────────
-    patch_refs = cve_data.get("patch_refs") or []
-    score = cve_data.get("cvss_score") or 0
-    if patch_refs:
-        n = len(patch_refs)
-        add(
-            "Apply the official vendor security patch",
-            f"The NVD lists {n} patch/advisory reference{'s' if n != 1 else ''} for this CVE "
-            f"(see the Patch References section). Steps:\n"
-            "  1. Identify the exact version of the affected component on each impacted host\n"
-            "  2. Download the patch from the vendor link below\n"
-            "  3. Test in a staging environment if a maintenance window allows\n"
-            "  4. Deploy to all affected production systems\n"
-            "  5. Verify the installed version matches the patched release",
-            "bi-patch-check-fill",
-            "critical" if score >= 7 else "high",
-        )
+    # ── 2. CPE-driven product update commands ─────────────────────────────────
+    configurations = cve_data.get("configurations", [])
+    cpe_targets    = _extract_cpe_targets(configurations)
+    detected       = affected_products or []
+
+    if cpe_targets:
+        for vendor, product, fixed_ver in cpe_targets:
+            pkg = _match_cpe_pkg(vendor, product)
+            pl  = f"{vendor.replace('_', ' ').title()} {product.replace('_', ' ').title()}"
+
+            # Match against detected product/version from host Port scan
+            current_ver: str | None = None
+            for d in detected:
+                dp = (d.get("product") or "").lower()
+                if vendor.lower() in dp or product.lower() in dp:
+                    current_ver = d.get("version")
+                    break
+
+            if pkg:
+                note = pkg.get("note", "")
+                desc = (
+                    f"Affected software: **{pl}**"
+                    + (f" — detected version: **{current_ver}**" if current_ver else "")
+                    + (f" — upgrade to: **{fixed_ver}** or later" if fixed_ver else "")
+                    + (f"\n\n{note}" if note else "")
+                )
+                cmds = _build_update_commands(pkg, fixed_ver, pl, current_ver)
+
+                # CMS with no standard pkg manager → generate specific CLI steps
+                if not cmds and "wordpress" in product.lower():
+                    cmds = [
+                        {"label": "WP-CLI", "code": (
+                            "# Update WordPress core\nwp core update\n\n"
+                            "# Update all plugins (vulnerabilities are often in plugins)\nwp plugin update --all\n\n"
+                            "# Update all themes\nwp theme update --all"
+                        )},
+                        {"label": "Verify", "code": "wp core version"},
+                    ]
+                elif not cmds and "drupal" in product.lower():
+                    cmds = [
+                        {"label": "Composer", "code": "composer require drupal/core-recommended:^10\ncomposer update drupal/core --with-dependencies"},
+                        {"label": "Drush",    "code": "drush pm-update drupal\ndrush cr"},
+                    ]
+                elif not cmds and "joomla" in product.lower():
+                    cmds = [{"label": "CLI", "code": "php cli/joomla.php core:update"}]
+
+                add(f"Update {pl}", desc, "bi-arrow-up-circle-fill", "critical", cmds)
+
+            else:
+                patch_refs = cve_data.get("patch_refs") or []
+                ref_block  = "\n".join(patch_refs[:6]) if patch_refs else "# (check NVD references for the vendor advisory)"
+                add(
+                    f"Apply vendor patch for {pl}",
+                    (
+                        f"No automated package entry found for **{pl}**. "
+                        f"Download and install the fixed release from the vendor."
+                        + (f"\n\nFixed version: {fixed_ver}" if fixed_ver else "")
+                    ),
+                    "bi-download", "critical",
+                    [{"label": "Vendor / patch references", "code": f"# Download the patched release from:\n{ref_block}"}],
+                )
     else:
+        # No CPE data in NVD → generic fallback
+        patch_refs = cve_data.get("patch_refs") or []
+        if patch_refs:
+            add(
+                "Apply the official vendor security patch",
+                "NVD did not include CPE configuration data for this CVE. "
+                "Apply the patched version referenced by the vendor advisories below.",
+                "bi-patch-check-fill",
+                "critical" if (cve_data.get("cvss_score") or 0) >= 7 else "high",
+                [{"label": "Vendor references", "code": "\n".join(patch_refs[:8])}],
+            )
+        elif detected:
+            for d in detected:
+                add(
+                    f"Update {d.get('product') or 'affected service'}",
+                    f"Detected version: {d.get('version') or 'unknown'}. Check the vendor advisory for the patched release.",
+                    "bi-arrow-up-circle", "high",
+                )
+
+    # ── 3. CWE-specific code fixes ─────────────────────────────────────────────
+    for cwe in (cve_data.get("weaknesses") or []):
+        entry = _CODE_FIX_CWES.get(cwe.upper())
+        if entry:
+            title, code_text, icon = entry
+            add(title, "", icon, "high", [{"label": "Code fix", "code": code_text}])
+
+    # ── 4. Network hardening (network-reachable + no auth required) ────────────
+    vec      = cve_data.get("cvss_vector") or ""
+    raw_vec  = re.sub(r"^CVSS:[^/]+/", "", vec)
+    vec_parts = set(raw_vec.split("/")) if raw_vec else set()
+
+    if "AV:N" in vec_parts and "PR:N" in vec_parts:
         add(
-            "Monitor vendor channels and apply the fix when available",
-            "No official patch reference appears in NVD at this time. "
-            "Until a patch is released:\n"
-            "  • Subscribe to the CVE's vendor security advisory feed\n"
-            "  • Apply the network and configuration mitigations described in the steps below\n"
-            "  • Re-check this CVE page weekly for status updates",
-            "bi-bell",
-            "high" if score >= 7 else "normal",
+            "Restrict network access until the patch is deployed",
+            "AV:N (network-reachable) + PR:N (no authentication) = widest possible attack surface. "
+            "Block external access at the firewall while you prepare the patch.",
+            "bi-router", "high",
+            [
+                {"label": "iptables", "code": (
+                    "# Replace 8080 with the actual vulnerable service port\n"
+                    "sudo iptables -I INPUT -p tcp --dport 8080 -s TRUSTED_CIDR -j ACCEPT\n"
+                    "sudo iptables -I INPUT -p tcp --dport 8080 -j DROP\n\n"
+                    "# Make persistent:\nsudo iptables-save | sudo tee /etc/iptables/rules.v4"
+                )},
+                {"label": "firewalld", "code": (
+                    "sudo firewall-cmd --zone=public --remove-port=8080/tcp --permanent\n"
+                    "sudo firewall-cmd --reload"
+                )},
+                {"label": "nftables", "code": "sudo nft add rule ip filter INPUT tcp dport 8080 drop"},
+            ],
+        )
+    elif "AV:N" in vec_parts:
+        add(
+            "Limit network access to the vulnerable service",
+            "The vulnerability is network-reachable. Until patched, restrict access with firewall rules.",
+            "bi-router", "high",
+            [{"label": "iptables", "code": (
+                "# Allow only trusted source IPs — replace PORT and TRUSTED_CIDR\n"
+                "sudo iptables -I INPUT -p tcp --dport PORT -s TRUSTED_CIDR -j ACCEPT\n"
+                "sudo iptables -I INPUT -p tcp --dport PORT -j DROP"
+            )}],
         )
 
-    # ── 3. CWE-specific technical steps ──────────────────────────────────────
-    for cwe in (cve_data.get("weaknesses") or []):
-        for title, desc, icon in _CWE_STEPS.get(cwe.upper(), []):
-            add(title, desc, icon, "high")
-
-    # ── 4. CVSS vector-based hardening ────────────────────────────────────────
-    vec = cve_data.get("cvss_vector") or ""
-    # Strip the version prefix (CVSS:3.1/, CVSS:2.0/, …) and split components
-    raw_vec = re.sub(r"^CVSS:[^/]+/", "", vec)
-    vec_parts = set(raw_vec.split("/")) if raw_vec else set()
-    for component, (title, desc, icon) in _CVSS_STEPS.items():
-        if component in vec_parts:
-            add(title, desc, icon, "high")
-
-    # ── 5. Always: validate + monitor ─────────────────────────────────────────
+    # ── 5. Validate the fix ────────────────────────────────────────────────────
     add(
-        "Validate the fix and set up monitoring for exploitation attempts",
-        "After applying the patch or mitigation:\n"
-        "  • Re-run a vulnerability scan (AutoRecon / Nuclei / OpenVAS) and confirm the "
-        "CVE no longer appears on the affected hosts\n"
-        "  • Review service logs for signs of prior exploitation "
-        "(anomalous inputs, error spikes, unusual outbound connections)\n"
-        "  • Configure a SIEM alert rule for future exploitation attempts targeting this vulnerability",
-        "bi-clipboard-check",
-        "normal",
+        "Validate the fix and update the audit record",
+        "After patching: re-scan the host to confirm the CVE no longer fires, "
+        "review logs for signs of prior exploitation, then mark this finding as 'corrected'.",
+        "bi-clipboard-check", "normal",
+        [
+            {"label": "Re-scan with Nuclei", "code": (
+                "# Re-scan the affected host\nnuclei -u http://TARGET_HOST -tags cve -severity critical,high,medium"
+            )},
+            {"label": "Check service logs", "code": (
+                "# Look for exploitation evidence in the last 7 days\n"
+                "journalctl -u SERVICE_NAME --since '7 days ago' | grep -iE 'error|exploit|attack|injection'"
+            )},
+        ],
     )
 
-    # Renumber sequentially
     for i, step in enumerate(steps):
         step["step"] = i + 1
-
     return steps
+
