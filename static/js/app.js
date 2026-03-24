@@ -236,17 +236,42 @@ function initAuditCharts(sevMap, svcLabels, svcValues) {
 
 /* ── CVE Modal lookup ───────────────────────────────────── */
 
+function _buildSourcePicker(cveId, sourceLinks) {
+  // Build a Bootstrap dropdown of CVE source links
+  if (!sourceLinks || sourceLinks.length === 0) {
+    // Fallback: single NVD link
+    return `<a href="https://nvd.nist.gov/vuln/detail/${encodeURIComponent(cveId)}" target="_blank" rel="noopener noreferrer" class="text-decoration-none text-reset">${escHtml(cveId)} <i class="bi bi-box-arrow-up-right small"></i></a>`;
+  }
+  if (sourceLinks.length === 1) {
+    const s = sourceLinks[0];
+    return `<a href="${escHtml(s.url)}" target="_blank" rel="noopener noreferrer" class="text-decoration-none text-reset">${escHtml(cveId)} <i class="bi bi-box-arrow-up-right small"></i></a>`;
+  }
+  const items = sourceLinks.map(s =>
+    `<li><a class="dropdown-item small" href="${escHtml(s.url)}" target="_blank" rel="noopener noreferrer">${escHtml(s.label)}</a></li>`
+  ).join('');
+  return `${escHtml(cveId)} <div class="dropdown d-inline-block ms-1">` +
+    `<button class="btn btn-sm btn-outline-secondary py-0 px-1 dropdown-toggle" data-bs-toggle="dropdown" title="Open in…">` +
+    `<i class="bi bi-box-arrow-up-right small"></i></button>` +
+    `<ul class="dropdown-menu dropdown-menu-dark">${items}</ul></div>`;
+}
+
 function lookupCve(cveId) {
   const modal = new bootstrap.Modal(document.getElementById('cveModal'));
   const body = document.getElementById('cveModalBody');
   document.getElementById('cveModalLabel').innerHTML =
-    `<i class="bi bi-shield-exclamation me-2"></i><a href="https://nvd.nist.gov/vuln/detail/${encodeURIComponent(cveId)}" target="_blank" rel="noopener noreferrer" class="text-decoration-none text-reset">${escHtml(cveId)} <i class="bi bi-box-arrow-up-right small"></i></a>`;
+    `<i class="bi bi-shield-exclamation me-2"></i>${escHtml(cveId)} <span class="spinner-border spinner-border-sm text-secondary ms-2" id="cve-header-spinner"></span>`;
   body.innerHTML = '<div class="text-center py-4"><div class="spinner-border text-primary" role="status"></div></div>';
   modal.show();
 
   fetch(`/api/cve/lookup?id=${encodeURIComponent(cveId)}`)
     .then(r => r.json())
     .then(data => {
+      // Update header with source picker now that we have source_links
+      const headerSpinner = document.getElementById('cve-header-spinner');
+      if (headerSpinner) headerSpinner.remove();
+      document.getElementById('cveModalLabel').innerHTML =
+        `<i class="bi bi-shield-exclamation me-2"></i>${_buildSourcePicker(cveId, data.source_links)}`;
+
       if (data.error) {
         body.innerHTML = `<div class="alert alert-danger">${data.error}</div>`;
         return;
@@ -257,25 +282,42 @@ function lookupCve(cveId) {
         LOW: 'info', INFO: 'secondary',
       }[sev] || 'secondary';
 
+      // Build attributed references list from references_meta (url -> [source_label, ...])
       let refs = '';
       try {
-        const refList = JSON.parse(data.references || '[]');
-        refs = refList.slice(0, 5).map(u =>
-          `<a href="${escHtml(u)}" target="_blank" rel="noopener noreferrer" class="d-block small text-truncate">${escHtml(u)}</a>`
-        ).join('');
+        const refsMeta = data.references_meta || {};
+        const refList  = Object.keys(refsMeta).length > 0
+          ? Object.keys(refsMeta)
+          : JSON.parse(data.references || '[]');
+        const refItems = refList.slice(0, 8).map(u => {
+          const srcs = (refsMeta[u] || []);
+          const srcBadges = srcs.map(s =>
+            `<span class="badge bg-dark text-secondary border border-secondary ms-1" style="font-size:.65rem">${escHtml(s)}</span>`
+          ).join('');
+          return `<div class="d-flex align-items-start gap-1 mb-1">` +
+            `<a href="${escHtml(u)}" target="_blank" rel="noopener noreferrer" class="small text-info text-truncate flex-grow-1" style="min-width:0">${escHtml(u)}</a>` +
+            `<span class="flex-shrink-0">${srcBadges}</span></div>`;
+        });
+        if (refItems.length) refs = refItems.join('');
       } catch (_) {}
+
+      // EPSS badge
+      const epssHtml = (data.epss_score != null)
+        ? `<span class="badge bg-secondary fs-6" title="FIRST EPSS exploitation probability">EPSS ${(data.epss_score * 100).toFixed(1)}%</span>`
+        : '';
 
       body.innerHTML = `
         <div class="d-flex gap-2 mb-3 flex-wrap align-items-center">
           <span class="badge bg-${sevClass} fs-6">${sev}</span>
           ${data.cvss_score ? `<span class="badge bg-secondary fs-6">CVSS ${data.cvss_score}</span>` : ''}
+          ${epssHtml}
           ${data.cvss_vector ? `<code class="small">${escHtml(data.cvss_vector)}</code>` : ''}
           <a href="/cve-remediation/?open=${encodeURIComponent(cveId)}" class="btn btn-sm btn-outline-warning ms-auto" title="View step-by-step remediation">
             <i class="bi bi-wrench-adjustable me-1"></i>Remediation
           </a>
         </div>
         <p class="mb-3">${escHtml(data.description || 'No description available.')}</p>
-        ${refs ? `<div class="border-top pt-3"><div class="small fw-semibold mb-1 text-muted">References</div>${refs}</div>` : ''}
+        ${refs ? `<div class="border-top pt-3"><div class="small fw-semibold mb-1 text-muted">References <span class="text-muted fw-normal small">(all sources)</span></div>${refs}</div>` : ''}
         <div id="cve-affected-wrap" class="border-top pt-3 mt-3">
           <div class="small fw-semibold mb-2 text-muted">
             <i class="bi bi-cpu me-1"></i>Affected Software
@@ -308,11 +350,15 @@ function lookupCve(cveId) {
                 v === '*' ? '<span class="text-muted">all versions</span>'
                           : `<code class="small">${escHtml(v)}</code>`
               ).join(' <span class="text-muted mx-1">/</span> ');
+              const srcBadges = (a.sources || []).map(s =>
+                `<span class="badge bg-dark text-secondary border border-secondary" style="font-size:.6rem">${escHtml(s)}</span>`
+              ).join(' ');
               return `<tr>
                 <td class="py-1"><span class="badge bg-${TYPE_CLASS[a.type] || 'secondary'}${a.type === 'OS' ? ' text-dark' : ''}">${escHtml(a.type)}</span></td>
                 <td class="py-1 small font-monospace">${escHtml(a.vendor)}</td>
                 <td class="py-1 small fw-semibold">${escHtml(a.product)}</td>
                 <td class="py-1 small">${vList}</td>
+                <td class="py-1">${srcBadges}</td>
               </tr>`;
             }).join('');
           }
@@ -332,6 +378,7 @@ function lookupCve(cveId) {
                   <th class="fw-normal py-1">Vendor</th>
                   <th class="fw-normal py-1">Product</th>
                   <th class="fw-normal py-1">Affected Versions</th>
+                  <th class="fw-normal py-1">Sources</th>
                 </tr></thead>
                 <tbody id="cve-aff-shown">${renderRows(shown)}</tbody>
                 ${hidden.length ? `<tbody id="cve-aff-hidden" class="d-none">${renderRows(hidden)}</tbody>` : ''}

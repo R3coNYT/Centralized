@@ -11,6 +11,56 @@ _CVE_RE = re.compile(r"^CVE-\d{4}-\d{4,7}$", re.IGNORECASE)
 
 _SEV_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "INFO": 4}
 
+# Human-facing URL template per driver (same as in cve_service, duplicated here for Jinja)
+_DRIVER_URL_TEMPLATES: dict[str, str] = {
+    "nvd":        "https://nvd.nist.gov/vuln/detail/{id}",
+    "circl":      "https://vulnerability.circl.lu/vuln/{id}",
+    "mitre":      "https://cve.org/CVERecord?id={id}",
+    "osv":        "https://osv.dev/vulnerability/{id}",
+    "euvd":       "https://euvd.enisa.europa.eu/vuln/{id}",
+    "cvedetails": "https://www.cvedetails.com/cve/{id}/",
+    "tenable":    "https://www.tenable.com/cve/{id}",
+    "wiz":        "https://www.wiz.io/vulnerability-database/{id}",
+    "vuldb":      "https://vuldb.com/?cve.id={id}",
+    "cvefind":    "https://www.cvefind.com/cve/{id}",
+}
+
+_DRIVER_LABELS: dict[str, str] = {
+    "nvd":        "NVD — National Vulnerability Database",
+    "circl":      "CIRCL CVE Search",
+    "mitre":      "MITRE CVE Program",
+    "epss":       "FIRST EPSS",
+    "osv":        "OSV",
+    "euvd":       "ENISA EUVD",
+    "cvedetails": "CVE Details",
+    "tenable":    "Tenable Research",
+    "wiz":        "Wiz",
+    "vuldb":      "VulDB",
+    "cvefind":    "CVEFind",
+}
+
+
+def _get_source_links() -> list[dict]:
+    """Return [{label, url_template, driver}] for all enabled CveSources with human-facing URLs."""
+    try:
+        from models import CveSource
+        sources = CveSource.query.filter(
+            CveSource.enabled == True,
+        ).order_by(CveSource.is_builtin.desc(), CveSource.id).all()
+        result = []
+        for src in sources:
+            driver = src.driver or "generic"
+            tmpl = _DRIVER_URL_TEMPLATES.get(driver, "")
+            if not tmpl or driver == "epss":
+                continue
+            label = _DRIVER_LABELS.get(driver, src.label or driver)
+            result.append({"label": label, "url_template": tmpl, "driver": driver})
+        return result
+    except Exception:
+        return [{"label": "NVD — National Vulnerability Database",
+                 "url_template": "https://nvd.nist.gov/vuln/detail/{id}",
+                 "driver": "nvd"}]
+
 
 # ─── helpers ───────────────────────────────────────────────────────────────────
 
@@ -101,6 +151,7 @@ def index():
         cve_list=cve_list,
         sev_counts=dict(sev_counts),
         total_affected=sum(e["host_count"] for e in cve_list),
+        cve_sources=_get_source_links(),
     )
 
 
@@ -170,20 +221,25 @@ def detail():
             nvd = lookup_cve(cve_id_upper)
             if nvd:
                 result.update({
-                    "description":      nvd.get("description")    or result["description"],
-                    "severity":         nvd.get("severity")       or result["severity"],
-                    "cvss_score":       nvd.get("cvss_score")     or result["cvss_score"],
-                    "cvss_vector":      nvd.get("cvss_vector")    or result["cvss_vector"],
-                    "references":       nvd.get("references", "[]"),
-                    "patch_refs":       nvd.get("patch_refs", []),
-                    "patch_available":  nvd.get("patch_available", False),
-                    "weaknesses":       nvd.get("weaknesses", []),
-                    "exploited_in_wild": nvd.get("exploited_in_wild", False),
-                    "cisa_remediation": nvd.get("cisa_remediation"),
-                    "published":        nvd.get("published"),
-                    "last_modified":    nvd.get("last_modified"),
-                    "vuln_status":      nvd.get("vuln_status"),
-                    "configurations":   nvd.get("configurations", []),
+                    "description":        nvd.get("description")    or result["description"],
+                    "severity":           nvd.get("severity")       or result["severity"],
+                    "cvss_score":         nvd.get("cvss_score")     or result["cvss_score"],
+                    "cvss_vector":        nvd.get("cvss_vector")    or result["cvss_vector"],
+                    "references":         nvd.get("references", "[]"),
+                    "references_meta":    nvd.get("references_meta", {}),
+                    "source_links":       nvd.get("source_links", []),
+                    "patch_refs":         nvd.get("patch_refs", []),
+                    "patch_available":    nvd.get("patch_available", False),
+                    "weaknesses":         nvd.get("weaknesses", []),
+                    "exploited_in_wild":  nvd.get("exploited_in_wild", False),
+                    "cisa_remediation":   nvd.get("cisa_remediation"),
+                    "published":          nvd.get("published"),
+                    "last_modified":      nvd.get("last_modified"),
+                    "vuln_status":        nvd.get("vuln_status"),
+                    "configurations":     nvd.get("configurations", []),
+                    "affected_packages":  nvd.get("affected_packages", []),
+                    "epss_score":         nvd.get("epss_score"),
+                    "epss_percentile":    nvd.get("epss_percentile"),
                 })
         except Exception:
             pass  # Fallback to DB data silently
