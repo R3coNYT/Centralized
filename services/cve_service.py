@@ -85,12 +85,24 @@ def lookup_cve(cve_id: str) -> dict | None:
 # ---------------------------------------------------------------------------
 
 def _load_from_cache(cve_id: str) -> dict | None:
-    """Return cached CVE dict if a fresh entry exists, else None."""
+    """Return cached CVE dict if a fresh entry exists, else None.
+
+    A cache entry is also treated as a miss when it has NVD configuration data
+    (CPE nodes) but no affected_packages — this detects entries that were stored
+    before the fix that populates affected_packages from CPE data, so they are
+    automatically re-fetched and overwritten the next time they are requested.
+    """
     try:
         from models import CveCache
         from datetime import datetime
         row = CveCache.query.filter_by(cve_id=cve_id).first()
         if row and row.expires_at > datetime.utcnow():
+            # Stale schema check: configurations present but affected_packages empty
+            # → cached before affected_packages extraction was implemented; force re-fetch
+            configs_empty  = not row.configurations or row.configurations in ("[]", "", None)
+            affected_empty = not row.affected_packages or row.affected_packages in ("[]", "", None)
+            if not configs_empty and affected_empty:
+                return None  # force re-fetch + overwrite
             return row.to_dict()
     except Exception:
         pass
