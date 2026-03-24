@@ -270,7 +270,6 @@ _KNOWN_DRIVERS = {
     "vuldb.com":              ("vuldb",       "VulDB"),
     "cvefind.com":            ("cvefind",     "CVEFind"),
 }
-}
 
 
 def _auto_detect_source(url: str) -> tuple[str, str]:
