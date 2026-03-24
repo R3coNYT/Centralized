@@ -207,15 +207,30 @@ def toggle_glassmorphic():
 
 
 def _ensure_nvd_source():
-    """Make sure the built-in NVD source row exists."""
+    """Make sure the built-in NVD source row exists, and re-detect drivers for generic rows."""
     if not CveSource.query.filter_by(is_builtin=True).first():
         db.session.add(CveSource(
             url="https://nvd.nist.gov",
-            label="NVD — National Vulnerability Database",
+            label="NVD \u2014 National Vulnerability Database",
             driver="nvd",
             enabled=True,
             is_builtin=True,
         ))
+        db.session.commit()
+
+    # Re-classify any row whose driver is still "generic" now that more drivers are known
+    import urllib.parse as _up
+    changed = False
+    for src in CveSource.query.filter_by(driver="generic").all():
+        host = _up.urlparse(src.url if "://" in src.url else "https://" + src.url).hostname or ""
+        for pattern, (driver, label) in _KNOWN_DRIVERS.items():
+            if pattern in host and driver != "generic":
+                src.driver = driver
+                if not src.label or src.label == host:
+                    src.label = label
+                changed = True
+                break
+    if changed:
         db.session.commit()
 
 
@@ -237,18 +252,24 @@ def settings():
 # ── CVE Sources CRUD ────────────────────────────────────────────────────────
 
 _KNOWN_DRIVERS = {
-    "nvd.nist.gov":     ("nvd",    "NVD — National Vulnerability Database"),
-    "cve.circl.lu":     ("circl",  "CIRCL CVE Search"),
-    "circl.lu":         ("circl",  "CIRCL CVE Search"),
-    "cve.org":          ("mitre",  "MITRE CVE Program"),
-    "cveawg.mitre.org": ("mitre",  "MITRE CVE Program"),
-    "api.first.org":    ("epss",   "FIRST EPSS"),
-    "first.org":        ("epss",   "FIRST EPSS"),
-    "osv.dev":          ("osv",    "OSV — Open Source Vulnerabilities"),
-    "api.osv.dev":      ("osv",    "OSV — Open Source Vulnerabilities"),
-    "cvedetails.com":   ("generic","CVE Details"),
-    "vuldb.com":        ("generic","VulDB"),
-    "exploit-db.com":   ("generic","Exploit-DB"),
+    "nvd.nist.gov":           ("nvd",        "NVD \u2014 National Vulnerability Database"),
+    "cve.circl.lu":           ("circl",       "CIRCL CVE Search"),
+    "vulnerability.circl.lu": ("circl",       "CIRCL CVE Search"),
+    "circl.lu":               ("circl",       "CIRCL CVE Search"),
+    "cve.org":                ("mitre",       "MITRE CVE Program"),
+    "cveawg.mitre.org":       ("mitre",       "MITRE CVE Program"),
+    "api.first.org":          ("epss",        "FIRST EPSS"),
+    "first.org":              ("epss",        "FIRST EPSS"),
+    "osv.dev":                ("osv",         "OSV \u2014 Open Source Vulnerabilities"),
+    "api.osv.dev":            ("osv",         "OSV \u2014 Open Source Vulnerabilities"),
+    "euvd.enisa.europa.eu":   ("euvd",        "ENISA EUVD \u2014 European Vulnerability Database"),
+    "enisa.europa.eu":        ("euvd",        "ENISA EUVD \u2014 European Vulnerability Database"),
+    "cvedetails.com":         ("cvedetails",  "CVE Details"),
+    "tenable.com":            ("tenable",     "Tenable Research"),
+    "wiz.io":                 ("wiz",         "Wiz Vulnerability Database"),
+    "vuldb.com":              ("vuldb",       "VulDB"),
+    "cvefind.com":            ("cvefind",     "CVEFind"),
+}
 }
 
 
