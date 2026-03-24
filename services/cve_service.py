@@ -117,15 +117,23 @@ def enrich_vulnerabilities(port_product: str, port_version: str | None) -> list[
 # ---------------------------------------------------------------------------
 
 _SOURCE_DRIVERS: dict = {
-    "nvd.nist.gov":     "nvd",
-    "cve.circl.lu":     "circl",
-    "circl.lu":         "circl",
-    "cve.org":          "mitre",
-    "cveawg.mitre.org": "mitre",
-    "api.first.org":    "epss",
-    "first.org":        "epss",
-    "osv.dev":          "osv",
-    "api.osv.dev":      "osv",
+    "nvd.nist.gov":           "nvd",
+    "cve.circl.lu":           "circl",
+    "vulnerability.circl.lu": "circl",
+    "circl.lu":               "circl",
+    "cve.org":                "mitre",
+    "cveawg.mitre.org":       "mitre",
+    "api.first.org":          "epss",
+    "first.org":              "epss",
+    "osv.dev":                "osv",
+    "api.osv.dev":            "osv",
+    "euvd.enisa.europa.eu":   "euvd",
+    "enisa.europa.eu":        "euvd",
+    "cvedetails.com":         "cvedetails",
+    "tenable.com":            "tenable",
+    "wiz.io":                 "wiz",
+    "vuldb.com":              "vuldb",
+    "cvefind.com":            "cvefind",
 }
 
 
@@ -242,11 +250,92 @@ def _fetch_osv(cve_id: str) -> dict | None:
         return None
 
 
+def _fetch_euvd(cve_id: str) -> dict | None:
+    """ENISA EUVD — https://euvd.enisa.europa.eu (public REST API)"""
+    page_url = f"https://euvd.enisa.europa.eu/vuln/{cve_id}"
+    try:
+        resp = requests.get(
+            "https://euvd.enisa.europa.eu/api/v1/vuln",
+            params={"enisaId": cve_id},
+            headers={"User-Agent": "Centralized-PentestTool/1.0", "Accept": "application/json"},
+            timeout=12,
+        )
+        if resp.status_code != 200:
+            return {"references": [page_url]}
+        raw = resp.json()
+        if not raw:
+            return {"references": [page_url]}
+        # Response may be a list or wrapped dict
+        item = (raw[0] if isinstance(raw, list) else
+                raw.get("items", [raw])[0] if not isinstance(raw.get("items"), type(None)) else raw)
+        refs = [page_url]
+        for r in (item.get("references") or []):
+            url = r if isinstance(r, str) else r.get("url", "")
+            if url and url not in refs:
+                refs.append(url)
+        score = None
+        for key in ("baseScore", "cvssScore", "cvss3Score", "cvssV3Score"):
+            try:
+                score = float(item.get(key) or 0) or None
+                if score:
+                    break
+            except (ValueError, TypeError):
+                pass
+        cwes = []
+        for cwe in (item.get("cwes") or item.get("cwe") or []):
+            val = cwe if isinstance(cwe, str) else cwe.get("id", "")
+            if val and not val.startswith("NVD-") and val not in cwes:
+                cwes.append(val)
+        return {
+            "description": item.get("description") or item.get("summary") or "",
+            "references":  list(dict.fromkeys(refs)),
+            "cvss_score":  score,
+            "weaknesses":  cwes,
+        }
+    except Exception:
+        return {"references": [page_url]}
+
+
+# ── Link-only enrichment sources ────────────────────────────────────────────
+# No public machine-readable API — adds a direct CVE page URL as a reference
+# so users can click through from the "All References" panel.
+
+def _fetch_cvedetails(cve_id: str) -> dict | None:
+    """CVE Details — https://www.cvedetails.com"""
+    return {"references": [f"https://www.cvedetails.com/cve/{cve_id}/"]}
+
+
+def _fetch_tenable(cve_id: str) -> dict | None:
+    """Tenable Research — https://www.tenable.com/cve"""
+    return {"references": [f"https://www.tenable.com/cve/{cve_id}"]}
+
+
+def _fetch_wiz(cve_id: str) -> dict | None:
+    """Wiz Vulnerability Database — https://www.wiz.io"""
+    return {"references": [f"https://www.wiz.io/vulnerability-database/{cve_id}"]}
+
+
+def _fetch_vuldb(cve_id: str) -> dict | None:
+    """VulDB — https://vuldb.com"""
+    return {"references": [f"https://vuldb.com/?cve.id={cve_id}"]}
+
+
+def _fetch_cvefind(cve_id: str) -> dict | None:
+    """CVEFind — https://www.cvefind.com"""
+    return {"references": [f"https://www.cvefind.com/cve/{cve_id}"]}
+
+
 _DRIVER_FETCHERS: dict = {
-    "circl": _fetch_circl,
-    "mitre": _fetch_mitre,
-    "epss":  _fetch_epss,
-    "osv":   _fetch_osv,
+    "circl":      _fetch_circl,
+    "mitre":      _fetch_mitre,
+    "epss":       _fetch_epss,
+    "osv":        _fetch_osv,
+    "euvd":       _fetch_euvd,
+    "cvedetails": _fetch_cvedetails,
+    "tenable":    _fetch_tenable,
+    "wiz":        _fetch_wiz,
+    "vuldb":      _fetch_vuldb,
+    "cvefind":    _fetch_cvefind,
 }
 
 
@@ -275,7 +364,7 @@ def _enrich_from_extra_sources(cve_id: str, base: dict) -> dict:
     weaknesses = list(base.get("weaknesses", []))
 
     for src in sources:
-        driver  = src.driver or _detect_driver(src.url)
+        driver  = src.driver if src.driver and src.driver not in ("generic", "") else _detect_driver(src.url)
         fetcher = _DRIVER_FETCHERS.get(driver)
         if fetcher is None:
             continue
