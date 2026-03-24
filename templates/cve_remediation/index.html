@@ -109,7 +109,7 @@
           </td>
           <td class="small fw-semibold">
             {% if entry.cvss_score %}
-              <span class="{% if entry.cvss_score >= 9 %}text-danger{% elif entry.cvss_score >= 7 %}text-warning{% elif entry.cvss_score >= 4 %}text-success{% else %}text-muted{% endif %}">
+              <span class="{% if entry.severity == 'CRITICAL' %}text-danger{% elif entry.severity == 'HIGH' %}text-warning{% elif entry.severity == 'MEDIUM' %}text-success{% else %}text-secondary{% endif %}">
                 {{ "%.1f"|format(entry.cvss_score) }}
               </span>
             {% else %}—{% endif %}
@@ -182,6 +182,29 @@ var _offcanvas  = null;
 
 document.addEventListener('DOMContentLoaded', function() {
   _offcanvas = new bootstrap.Offcanvas(document.getElementById('remDetailCanvas'));
+
+  // Auto-open a specific CVE when linked from another page (?open=CVE-XXXX)
+  var params = new URLSearchParams(window.location.search);
+  var autoKey = params.get('open');
+  if (autoKey) {
+    autoKey = autoKey.toUpperCase();
+    var targetRow = document.querySelector('#cveTable tbody .cve-row[data-key="' + autoKey + '"]');
+    if (targetRow) {
+      targetRow.scrollIntoView({ block: 'center' });
+      openDetail(targetRow);
+    } else {
+      // CVE might not be in the DB yet — open the panel directly via the detail API
+      document.getElementById('remDetailTitle').innerHTML =
+        '<i class="bi bi-shield-exclamation me-2 text-danger"></i>' + autoKey;
+      document.getElementById('remDetailBody').innerHTML =
+        '<div class="d-flex align-items-center justify-content-center" style="height:200px">' +
+        '<div class="spinner-border text-primary" role="status"></div></div>';
+      _offcanvas.show();
+      fetch('{{ url_for("cve_remediation.detail") }}?key=' + encodeURIComponent(autoKey), {
+        headers: { 'X-CSRFToken': document.querySelector('meta[name=csrf-token]').content }
+      }).then(function(r) { return r.json(); }).then(function(d) { renderDetail(d); }).catch(function() {});
+    }
+  }
 });
 
 /* ── Severity filter ─────────────────────────────────────────────────────── */
@@ -461,7 +484,7 @@ function renderDetail(d) {
       '<div class="flex-grow-1">' +
         '<div class="d-flex align-items-center gap-2 flex-wrap mb-2">' +
           '<span class="badge bg-' + sevCls + ' fs-6">' + escHtml(d.severity || 'UNKNOWN') + '</span>' +
-          (d.cvss_score ? '<span class="badge bg-dark border fs-6 ' + cvssColor(d.cvss_score) + '">' +
+          (d.cvss_score ? '<span class="badge bg-dark border fs-6 text-' + sevCls + '">' +
             'CVSS&nbsp;' + d.cvss_score.toFixed(1) + '</span>' : '') +
           (d.patch_refs && d.patch_refs.length
             ? '<span class="badge bg-success"><i class="bi bi-patch-check me-1"></i>Patch Available</span>'
