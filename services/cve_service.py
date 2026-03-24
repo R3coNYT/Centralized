@@ -811,24 +811,43 @@ def build_remediation_steps(cve_data: dict,
                     [{"label": "Vendor / patch references", "code": f"# Download the patched release from:\n{ref_block}"}],
                 )
     else:
-        # No CPE data in NVD → generic fallback
+        # No CPE config in NVD — try to match detected port-scan products first
         patch_refs = cve_data.get("patch_refs") or []
-        if patch_refs:
+        matched_any = False
+
+        for d in detected:
+            raw = (d.get("product") or "").lower().replace(" ", "_").replace("-", "_")
+            if not raw:
+                continue
+            # Loose single-field match against the CPE map
+            pkg = None
+            for vm, pm, info in _CPE_PKG_MAP:
+                if vm in raw or pm in raw:
+                    pkg = info
+                    break
+            if pkg:
+                pl          = d.get("product") or pm
+                current_ver = d.get("version")
+                cmds        = _build_update_commands(pkg, None, pl, current_ver)
+                note        = pkg.get("note", "")
+                desc = (
+                    f"Affected software: **{pl}**"
+                    + (f" — detected version: **{current_ver}**" if current_ver else "")
+                    + "\n\nNVD does not list a fixed version — update to the latest stable release."
+                    + (f"\n\n{note}" if note else "")
+                )
+                add(f"Update {pl}", desc, "bi-arrow-up-circle-fill", "critical", cmds)
+                matched_any = True
+
+        if not matched_any:
+            # Truly generic fallback — patch refs are already shown in the section below
             add(
                 "Apply the official vendor security patch",
                 "NVD did not include CPE configuration data for this CVE. "
-                "Apply the patched version referenced by the vendor advisories below.",
+                "Consult the vendor / patch references below and apply the latest fixed release.",
                 "bi-patch-check-fill",
                 "critical" if (cve_data.get("cvss_score") or 0) >= 7 else "high",
-                [{"label": "Vendor references", "code": "\n".join(patch_refs[:8])}],
             )
-        elif detected:
-            for d in detected:
-                add(
-                    f"Update {d.get('product') or 'affected service'}",
-                    f"Detected version: {d.get('version') or 'unknown'}. Check the vendor advisory for the patched release.",
-                    "bi-arrow-up-circle", "high",
-                )
 
     # ── 3. CWE-specific code fixes ─────────────────────────────────────────────
     for cwe in (cve_data.get("weaknesses") or []):
