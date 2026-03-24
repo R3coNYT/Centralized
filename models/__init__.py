@@ -259,3 +259,29 @@ class HostContext(db.Model):
     updated_at = db.Column(db.DateTime, default=utcnow, onupdate=utcnow)
 
     host = db.relationship("Host", backref=db.backref("context", uselist=False))
+
+
+# ---------------------------------------------------------------------------
+# CVE Sources (admin-configurable external CVE databases)
+# ---------------------------------------------------------------------------
+
+class CveSource(db.Model):
+    __tablename__ = "cve_sources"
+    id         = db.Column(db.Integer, primary_key=True)
+    url        = db.Column(db.String(512), nullable=False, unique=True)
+    label      = db.Column(db.String(128), nullable=True)
+    # driver: nvd | circl | mitre | epss | osv | generic
+    driver     = db.Column(db.String(32), default="generic")
+    enabled    = db.Column(db.Boolean, default=True)
+    is_builtin = db.Column(db.Boolean, default=False)   # NVD is builtin — cannot be deleted
+    created_at = db.Column(db.DateTime, default=utcnow)
+
+    def to_dict(self):
+        return {
+            "id":         self.id,
+            "url":        self.url,
+            "label":      self.label or self.url,
+            "driver":     self.driver,
+            "enabled":    self.enabled,
+            "is_builtin": self.is_builtin,
+        }

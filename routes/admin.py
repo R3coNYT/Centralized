@@ -9,7 +9,7 @@ from flask import Blueprint, jsonify, redirect, render_template, request, url_fo
 from flask_login import current_user, login_required
 
 from extensions import db
-from models import SiteSettings
+from models import SiteSettings, CveSource
 
 admin_bp = Blueprint("admin", __name__, url_prefix="/admin")
 
@@ -206,16 +206,127 @@ def toggle_glassmorphic():
     return jsonify({"enabled": new_val == "1"})
 
 
+def _ensure_nvd_source():
+    """Make sure the built-in NVD source row exists."""
+    if not CveSource.query.filter_by(is_builtin=True).first():
+        db.session.add(CveSource(
+            url="https://nvd.nist.gov",
+            label="NVD — National Vulnerability Database",
+            driver="nvd",
+            enabled=True,
+            is_builtin=True,
+        ))
+        db.session.commit()
+
+
 @admin_bp.route("/settings", methods=["GET"])
 @login_required
 def settings():
     if current_user.role != "admin":
         flash("Access denied.", "danger")
         return redirect(url_for("dashboard.index"))
+    _ensure_nvd_source()
+    cve_sources = CveSource.query.order_by(CveSource.is_builtin.desc(), CveSource.id).all()
     return render_template(
         "admin/settings.html",
         github_token_active=bool(_get_github_token()),
+        cve_sources=cve_sources,
     )
+
+
+# ── CVE Sources CRUD ────────────────────────────────────────────────────────
+
+_KNOWN_DRIVERS = {
+    "nvd.nist.gov":     ("nvd",    "NVD — National Vulnerability Database"),
+    "cve.circl.lu":     ("circl",  "CIRCL CVE Search"),
+    "circl.lu":         ("circl",  "CIRCL CVE Search"),
+    "cve.org":          ("mitre",  "MITRE CVE Program"),
+    "cveawg.mitre.org": ("mitre",  "MITRE CVE Program"),
+    "api.first.org":    ("epss",   "FIRST EPSS"),
+    "first.org":        ("epss",   "FIRST EPSS"),
+    "osv.dev":          ("osv",    "OSV — Open Source Vulnerabilities"),
+    "api.osv.dev":      ("osv",    "OSV — Open Source Vulnerabilities"),
+    "cvedetails.com":   ("generic","CVE Details"),
+    "vuldb.com":        ("generic","VulDB"),
+    "exploit-db.com":   ("generic","Exploit-DB"),
+}
+
+
+def _auto_detect_source(url: str) -> tuple[str, str]:
+    """Return (driver, label) guessed from URL."""
+    import urllib.parse
+    host = urllib.parse.urlparse(url if "://" in url else "https://" + url).hostname or ""
+    for pattern, (driver, label) in _KNOWN_DRIVERS.items():
+        if pattern in host:
+            return driver, label
+    return "generic", host
+
+
+@admin_bp.route("/cve-sources", methods=["GET"])
+@login_required
+def list_cve_sources():
+    if current_user.role != "admin":
+        return jsonify({"error": "Access denied"}), 403
+    _ensure_nvd_source()
+    sources = CveSource.query.order_by(CveSource.is_builtin.desc(), CveSource.id).all()
+    return jsonify([s.to_dict() for s in sources])
+
+
+@admin_bp.route("/cve-sources", methods=["POST"])
+@login_required
+def add_cve_source():
+    if current_user.role != "admin":
+        return jsonify({"error": "Access denied"}), 403
+    data = request.get_json(silent=True) or {}
+    url = (data.get("url") or "").strip().rstrip("/")
+    if not url:
+        return jsonify({"error": "URL is required"}), 400
+    if not url.startswith(("http://", "https://")):
+        url = "https://" + url
+    if CveSource.query.filter_by(url=url).first():
+        return jsonify({"error": "This source already exists"}), 409
+    driver, label = _auto_detect_source(url)
+    custom_label = (data.get("label") or "").strip()
+    src = CveSource(
+        url=url,
+        label=custom_label or label,
+        driver=driver,
+        enabled=True,
+        is_builtin=False,
+    )
+    db.session.add(src)
+    db.session.commit()
+    return jsonify(src.to_dict()), 201
+
+
+@admin_bp.route("/cve-sources/<int:source_id>", methods=["PATCH"])
+@login_required
+def toggle_cve_source(source_id):
+    if current_user.role != "admin":
+        return jsonify({"error": "Access denied"}), 403
+    src = db.session.get(CveSource, source_id)
+    if not src:
+        return jsonify({"error": "Not found"}), 404
+    if src.is_builtin:
+        return jsonify({"error": "Built-in source cannot be disabled"}), 400
+    src.enabled = not src.enabled
+    db.session.commit()
+    return jsonify(src.to_dict())
+
+
+@admin_bp.route("/cve-sources/<int:source_id>", methods=["DELETE"])
+@login_required
+def delete_cve_source(source_id):
+    if current_user.role != "admin":
+        return jsonify({"error": "Access denied"}), 403
+    src = db.session.get(CveSource, source_id)
+    if not src:
+        return jsonify({"error": "Not found"}), 404
+    if src.is_builtin:
+        return jsonify({"error": "Built-in source cannot be deleted"}), 400
+    db.session.delete(src)
+    db.session.commit()
+    return jsonify({"ok": True})
 
 
 @admin_bp.route("/github-token", methods=["GET"])

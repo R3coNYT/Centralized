@@ -61,7 +61,10 @@ def lookup_cve(cve_id: str) -> dict | None:
     if not vulns:
         return None
 
-    return _extract_cve(vulns[0].get("cve", {}))
+    result = _extract_cve(vulns[0].get("cve", {}))
+    if result is None:
+        return None
+    return _enrich_from_extra_sources(cve_id, result)
 
 
 def search_cves_by_keyword(keyword: str, max_results: int = 10) -> list[dict]:
@@ -110,8 +113,196 @@ def enrich_vulnerabilities(port_product: str, port_version: str | None) -> list[
 
 
 # ---------------------------------------------------------------------------
-# Internal helpers
+# Multi-source CVE enrichment
 # ---------------------------------------------------------------------------
+
+_SOURCE_DRIVERS: dict = {
+    "nvd.nist.gov":     "nvd",
+    "cve.circl.lu":     "circl",
+    "circl.lu":         "circl",
+    "cve.org":          "mitre",
+    "cveawg.mitre.org": "mitre",
+    "api.first.org":    "epss",
+    "first.org":        "epss",
+    "osv.dev":          "osv",
+    "api.osv.dev":      "osv",
+}
+
+
+def _detect_driver(url: str) -> str:
+    from urllib.parse import urlparse
+    host = urlparse(url if "://" in url else "https://" + url).hostname or ""
+    for pattern, driver in _SOURCE_DRIVERS.items():
+        if pattern in host:
+            return driver
+    return "generic"
+
+
+def _fetch_circl(cve_id: str) -> dict | None:
+    """CIRCL CVE Search — https://cve.circl.lu/api/cve/{id}"""
+    try:
+        resp = requests.get(
+            f"https://cve.circl.lu/api/cve/{cve_id}",
+            headers={"User-Agent": "Centralized-PentestTool/1.0"},
+            timeout=10,
+        )
+        if resp.status_code != 200:
+            return None
+        d = resp.json()
+        if not d:
+            return None
+        refs = [r for r in (d.get("references") or []) if r]
+        score = None
+        for key in ("cvss3", "cvss"):
+            try:
+                score = float(d[key]); break
+            except (KeyError, ValueError, TypeError):
+                pass
+        cwe = d.get("cwe", "")
+        weaknesses = [cwe] if cwe and not cwe.startswith("NVD-") else []
+        return {
+            "description": d.get("summary", ""),
+            "references":  list(dict.fromkeys(refs)),
+            "cvss_score":  score,
+            "weaknesses":  weaknesses,
+        }
+    except Exception:
+        return None
+
+
+def _fetch_mitre(cve_id: str) -> dict | None:
+    """MITRE CVE Program API — https://cveawg.mitre.org/api/cve/{id}"""
+    try:
+        resp = requests.get(
+            f"https://cveawg.mitre.org/api/cve/{cve_id}",
+            headers={"User-Agent": "Centralized-PentestTool/1.0"},
+            timeout=10,
+        )
+        if resp.status_code != 200:
+            return None
+        d = resp.json()
+        if not d:
+            return None
+        cna  = d.get("containers", {}).get("cna", {})
+        desc = next(
+            (item["value"] for item in cna.get("descriptions", [])
+             if item.get("lang") in ("en", "en-US")),
+            "",
+        )
+        refs = [r.get("url", "") for r in cna.get("references", []) if r.get("url")]
+        return {
+            "description": desc,
+            "references":  list(dict.fromkeys(r for r in refs if r)),
+        }
+    except Exception:
+        return None
+
+
+def _fetch_epss(cve_id: str) -> dict | None:
+    """FIRST EPSS score — https://api.first.org/data/v1/epss?cve={id}"""
+    try:
+        resp = requests.get(
+            f"https://api.first.org/data/v1/epss?cve={cve_id}",
+            headers={"User-Agent": "Centralized-PentestTool/1.0"},
+            timeout=10,
+        )
+        if resp.status_code != 200:
+            return None
+        entries = resp.json().get("data", [])
+        if not entries:
+            return None
+        e = entries[0]
+        return {
+            "epss_score":      float(e.get("epss", 0)),
+            "epss_percentile": float(e.get("percentile", 0)),
+        }
+    except Exception:
+        return None
+
+
+def _fetch_osv(cve_id: str) -> dict | None:
+    """OSV — https://api.osv.dev/v1/vulns/{id}"""
+    try:
+        resp = requests.get(
+            f"https://api.osv.dev/v1/vulns/{cve_id}",
+            headers={"User-Agent": "Centralized-PentestTool/1.0"},
+            timeout=10,
+        )
+        if resp.status_code != 200:
+            return None
+        d = resp.json()
+        if not d:
+            return None
+        refs = [r.get("url", "") for r in d.get("references", []) if r.get("url")]
+        return {
+            "description": d.get("summary", "") or d.get("details", ""),
+            "references":  list(dict.fromkeys(r for r in refs if r)),
+        }
+    except Exception:
+        return None
+
+
+_DRIVER_FETCHERS: dict = {
+    "circl": _fetch_circl,
+    "mitre": _fetch_mitre,
+    "epss":  _fetch_epss,
+    "osv":   _fetch_osv,
+}
+
+
+def _enrich_from_extra_sources(cve_id: str, base: dict) -> dict:
+    """
+    Fan-out to all enabled non-NVD CveSource records and merge results into base.
+    Supplements: references, patch_refs, weaknesses, description (fallback), EPSS score.
+    """
+    import json as _json
+    try:
+        from models import CveSource
+        sources = CveSource.query.filter_by(enabled=True, is_builtin=False).all()
+    except Exception:
+        return base
+
+    if not sources:
+        return base
+
+    try:
+        existing_refs = _json.loads(base.get("references", "[]"))
+    except Exception:
+        existing_refs = []
+
+    all_refs   = list(existing_refs)
+    patch_refs = list(base.get("patch_refs", []))
+    weaknesses = list(base.get("weaknesses", []))
+
+    for src in sources:
+        driver  = src.driver or _detect_driver(src.url)
+        fetcher = _DRIVER_FETCHERS.get(driver)
+        if fetcher is None:
+            continue
+        try:
+            extra = fetcher(cve_id)
+            if not extra:
+                continue
+            if not base.get("description") and extra.get("description"):
+                base["description"] = extra["description"]
+            for ref in extra.get("references", []):
+                if ref and ref not in all_refs:
+                    all_refs.append(ref)
+            for cwe in extra.get("weaknesses", []):
+                if cwe and cwe not in weaknesses:
+                    weaknesses.append(cwe)
+            if extra.get("epss_score") is not None:
+                base["epss_score"]      = extra["epss_score"]
+                base["epss_percentile"] = extra.get("epss_percentile", 0.0)
+            if base.get("cvss_score") is None and extra.get("cvss_score"):
+                base["cvss_score"] = extra["cvss_score"]
+        except Exception:
+            pass
+
+    base["references"] = _json.dumps(all_refs[:15])
+    if weaknesses:
+        base["weaknesses"] = weaknesses
+    return base
 
 def _extract_cve(cve: dict) -> dict | None:
     if not cve:
