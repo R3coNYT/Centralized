@@ -203,4 +203,12 @@ def detail():
             }
 
     result["hosts"] = list(hosts_seen.values())
+
+    # Build step-by-step remediation guide
+    try:
+        from services.cve_service import build_remediation_steps
+        result["remediation_steps"] = build_remediation_steps(result)
+    except Exception:
+        result["remediation_steps"] = []
+
     return jsonify(result)
