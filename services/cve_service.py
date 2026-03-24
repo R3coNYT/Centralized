@@ -628,6 +628,48 @@ def _extract_cve(cve: dict) -> dict | None:
     import json as _json
     # Initialise references_meta so NVD refs are already attributed before enrichment
     refs_meta_init: dict[str, list[str]] = {url: ["NVD"] for url in all_ref_urls[:10]}
+
+    # Extract affected software from NVD CPE configurations right away so that
+    # even without OSV the cve_cache.affected_packages column is populated.
+    configurations = cve.get("configurations", [])
+    nvd_affected: list[dict] = []
+    _seen_nvd_keys: set = set()
+    for _cg in configurations:
+        for _node in _cg.get("nodes", []):
+            for _cm in _node.get("cpeMatch", []):
+                if not _cm.get("vulnerable", False):
+                    continue
+                _cpe   = _cm.get("criteria", "")
+                _parts = _cpe.split(":")
+                if len(_parts) < 5:
+                    continue
+                _vendor  = _parts[3]
+                _product = _parts[4]
+                _cpe_ver = _parts[5] if len(_parts) > 5 else "*"
+                if not _vendor or not _product or _vendor == "*":
+                    continue
+                _si = _cm.get("versionStartIncluding")
+                _se = _cm.get("versionStartExcluding")
+                _ei = _cm.get("versionEndIncluding")
+                _ee = _cm.get("versionEndExcluding")
+                _rp: list[str] = []
+                if _si:  _rp.append(f">= {_si}")
+                elif _se: _rp.append(f"> {_se}")
+                if _ei:  _rp.append(f"<= {_ei}")
+                elif _ee: _rp.append(f"< {_ee}")
+                elif _cpe_ver not in ("*", "-", ""):
+                    _rp.append(f"= {_cpe_ver}")
+                _key = (_vendor.lower(), _product.lower())
+                if _key not in _seen_nvd_keys:
+                    _seen_nvd_keys.add(_key)
+                    nvd_affected.append({
+                        "ecosystem": "NVD — CPE",
+                        "vendor":    _vendor.replace("_", " "),
+                        "package":   _product.replace("_", " "),
+                        "ranges":    ", ".join(_rp) if _rp else "all versions",
+                        "source":    "NVD",
+                    })
+
     return {
         "cve_id": cve_id,
         "title": cve_id,
@@ -645,8 +687,8 @@ def _extract_cve(cve: dict) -> dict | None:
         "published": cve.get("published", ""),
         "last_modified": cve.get("lastModified", ""),
         "vuln_status": cve.get("vulnStatus", ""),
-        "configurations": cve.get("configurations", []),
-        "affected_packages": [],
+        "configurations": configurations,
+        "affected_packages": nvd_affected,
         "source_links": [],
         "source": "nvd",
     }

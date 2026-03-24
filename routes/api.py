@@ -221,7 +221,31 @@ def cve_affected_software(cve_id):
     if not _re.match(r"^CVE-\d{4}-\d{4,7}$", cve_id):
         return jsonify({"error": "Invalid CVE ID"}), 400
 
-    configurations = fetch_cve_configurations(cve_id)
+    # ── Try DB cache first ────────────────────────────────────────────────
+    import json as _json
+    from datetime import datetime
+    from models import CveCache
+    _cached_osv_pkgs: list[dict] = []
+    configurations: list = []
+    _cache_row = CveCache.query.filter_by(cve_id=cve_id).first()
+    _cache_hit = _cache_row and _cache_row.expires_at > datetime.utcnow()
+    if _cache_hit:
+        try:
+            configurations = _json.loads(_cache_row.configurations or "[]")
+        except Exception:
+            configurations = []
+        try:
+            # OSV packages are already merged in cve_cache.affected_packages;
+            # extract only the ones sourced from OSV to merge below.
+            _cached_osv_pkgs = [
+                p for p in (_json.loads(_cache_row.affected_packages or "[]"))
+                if p.get("source") == "OSV"
+            ]
+        except Exception:
+            _cached_osv_pkgs = []
+    else:
+        configurations = fetch_cve_configurations(cve_id)
+
     groups = OrderedDict()
 
     for node_group in configurations:
@@ -272,8 +296,11 @@ def cve_affected_software(cve_id):
 
     # Supplement with OSV package data (different structure: ecosystem + package)
     try:
-        osv = _fetch_osv(cve_id) or {}
-        for pkg in (osv.get("affected_packages") or []):
+        if _cache_hit:
+            osv_pkgs = _cached_osv_pkgs
+        else:
+            osv_pkgs = (_fetch_osv(cve_id) or {}).get("affected_packages") or []
+        for pkg in osv_pkgs:
             eco  = pkg.get("ecosystem", "")
             name = pkg.get("package", "")
             rng  = pkg.get("ranges", "")
