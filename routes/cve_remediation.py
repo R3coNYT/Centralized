@@ -183,6 +183,7 @@ def detail():
                     "published":        nvd.get("published"),
                     "last_modified":    nvd.get("last_modified"),
                     "vuln_status":      nvd.get("vuln_status"),
+                    "configurations":   nvd.get("configurations", []),
                 })
         except Exception:
             pass  # Fallback to DB data silently
