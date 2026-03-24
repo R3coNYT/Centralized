@@ -285,3 +285,98 @@ class CveSource(db.Model):
             "enabled":    self.enabled,
             "is_builtin": self.is_builtin,
         }
+
+
+# ---------------------------------------------------------------------------
+# CVE Cache (persist enriched CVE data to avoid repeated API calls)
+# ---------------------------------------------------------------------------
+
+class CveCache(db.Model):
+    __tablename__ = "cve_cache"
+    id                = db.Column(db.Integer, primary_key=True)
+    cve_id            = db.Column(db.String(20), unique=True, nullable=False, index=True)
+    title             = db.Column(db.String(200))
+    description       = db.Column(db.Text)
+    severity          = db.Column(db.String(20))
+    cvss_score        = db.Column(db.Float, nullable=True)
+    cvss_vector       = db.Column(db.String(200), nullable=True)
+    epss_score        = db.Column(db.Float, nullable=True)
+    epss_percentile   = db.Column(db.Float, nullable=True)
+    patch_available   = db.Column(db.Boolean, default=False)
+    exploited_in_wild = db.Column(db.Boolean, default=False)
+    cisa_remediation  = db.Column(db.Text, nullable=True)
+    published         = db.Column(db.String(30), nullable=True)
+    last_modified     = db.Column(db.String(30), nullable=True)
+    vuln_status       = db.Column(db.String(50), nullable=True)
+    # JSON-serialised fields
+    patch_refs        = db.Column(db.Text, default="[]")   # list[str]
+    references        = db.Column(db.Text, default="[]")   # list[str]
+    references_meta   = db.Column(db.Text, default="{}")   # {url: [labels]}
+    source_links      = db.Column(db.Text, default="[]")   # [{label,url,driver}]
+    affected_packages = db.Column(db.Text, default="[]")   # [{ecosystem,package,ranges,source}]
+    configurations    = db.Column(db.Text, default="[]")   # NVD CPE configurations
+    weaknesses        = db.Column(db.Text, default="[]")   # list[str]
+    cached_at         = db.Column(db.DateTime, default=utcnow)
+    expires_at        = db.Column(db.DateTime, nullable=False)
+
+    def to_dict(self) -> dict:
+        import json as _j
+
+        def _load(val, default):
+            try:
+                return _j.loads(val) if val else default
+            except Exception:
+                return default
+
+        return {
+            "cve_id":            self.cve_id,
+            "title":             self.title or self.cve_id,
+            "description":       self.description or "",
+            "severity":          self.severity or "UNKNOWN",
+            "cvss_score":        self.cvss_score,
+            "cvss_vector":       self.cvss_vector,
+            "epss_score":        self.epss_score,
+            "epss_percentile":   self.epss_percentile,
+            "patch_available":   bool(self.patch_available),
+            "exploited_in_wild": bool(self.exploited_in_wild),
+            "cisa_remediation":  self.cisa_remediation,
+            "published":         self.published,
+            "last_modified":     self.last_modified,
+            "vuln_status":       self.vuln_status,
+            "patch_refs":        _load(self.patch_refs, []),
+            "references":        self.references or "[]",
+            "references_meta":   _load(self.references_meta, {}),
+            "source_links":      _load(self.source_links, []),
+            "affected_packages": _load(self.affected_packages, []),
+            "configurations":    _load(self.configurations, []),
+            "weaknesses":        _load(self.weaknesses, []),
+            "source":            "nvd",
+        }
+
+    def __repr__(self):
+        return f"<CveCache {self.cve_id} expires={self.expires_at}>"
+
+
+# ---------------------------------------------------------------------------
+# CVE Remediation Cache (persist computed remediation steps per CVE)
+# ---------------------------------------------------------------------------
+
+class CveRemediationCache(db.Model):
+    __tablename__ = "cve_remediation_cache"
+    id           = db.Column(db.Integer, primary_key=True)
+    cve_id       = db.Column(db.String(20), unique=True, nullable=False, index=True)
+    steps        = db.Column(db.Text, default="[]")   # JSON list of step dicts
+    # SHA-256 of the inputs (cve_data + affected_products) used to detect stale entries
+    input_hash   = db.Column(db.String(64))
+    cached_at    = db.Column(db.DateTime, default=utcnow)
+    expires_at   = db.Column(db.DateTime, nullable=False)
+
+    def steps_list(self) -> list:
+        import json as _j
+        try:
+            return _j.loads(self.steps) if self.steps else []
+        except Exception:
+            return []
+
+    def __repr__(self):
+        return f"<CveRemediationCache {self.cve_id} expires={self.expires_at}>"

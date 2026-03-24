@@ -20,6 +20,9 @@ class Config:
     NVD_API_BASE = "https://services.nvd.nist.gov/rest/json/cves/2.0"
     NVD_RATE_LIMIT_DELAY = 0.7  # seconds between NVD requests (without key: ~6 req/30s)
 
+    # Number of days enriched CVE data is kept in the local DB cache before re-fetching
+    CVE_CACHE_TTL_DAYS = int(os.environ.get("CVE_CACHE_TTL_DAYS", "7"))
+
     # Session
     PERMANENT_SESSION_LIFETIME = timedelta(hours=8)
     SESSION_COOKIE_HTTPONLY = True

@@ -37,11 +37,20 @@ def lookup_cve(cve_id: str) -> dict | None:
     Fetch full CVE details from NVD by CVE ID.
     Returns a dict with: id, description, severity, cvss_score, cvss_vector, references
     or None on failure.
+
+    Results are cached in the ``cve_cache`` DB table (TTL = CVE_CACHE_TTL_DAYS days) to
+    avoid repeating expensive multi-source API calls for the same CVE.
     """
     cve_id = cve_id.upper().strip()
     if not re.match(r"^CVE-\d{4}-\d{4,7}$", cve_id):
         return None
 
+    # ── 1. Try local DB cache ──────────────────────────────────────────────
+    cached = _load_from_cache(cve_id)
+    if cached is not None:
+        return cached
+
+    # ── 2. Fetch from NVD ─────────────────────────────────────────────────
     url = current_app.config["NVD_API_BASE"]
     try:
         _throttle()
@@ -64,7 +73,80 @@ def lookup_cve(cve_id: str) -> dict | None:
     result = _extract_cve(vulns[0].get("cve", {}))
     if result is None:
         return None
-    return _enrich_from_extra_sources(cve_id, result)
+    result = _enrich_from_extra_sources(cve_id, result)
+
+    # ── 3. Persist to cache ────────────────────────────────────────────────
+    _save_to_cache(result)
+    return result
+
+
+# ---------------------------------------------------------------------------
+# CVE DB cache helpers
+# ---------------------------------------------------------------------------
+
+def _load_from_cache(cve_id: str) -> dict | None:
+    """Return cached CVE dict if a fresh entry exists, else None."""
+    try:
+        from models import CveCache
+        from datetime import datetime
+        row = CveCache.query.filter_by(cve_id=cve_id).first()
+        if row and row.expires_at > datetime.utcnow():
+            return row.to_dict()
+    except Exception:
+        pass
+    return None
+
+
+def _save_to_cache(data: dict) -> None:
+    """Upsert enriched CVE data into the cve_cache table."""
+    import json as _json
+    cve_id = (data.get("cve_id") or "").upper()
+    if not cve_id:
+        return
+    try:
+        from models import CveCache
+        from extensions import db as _db
+        from datetime import datetime, timedelta
+        ttl  = int(current_app.config.get("CVE_CACHE_TTL_DAYS", 7))
+        now  = datetime.utcnow()
+        exp  = now + timedelta(days=ttl)
+        row  = CveCache.query.filter_by(cve_id=cve_id).first()
+        if row is None:
+            row = CveCache(cve_id=cve_id)
+            _db.session.add(row)
+        row.title             = data.get("title") or cve_id
+        row.description       = data.get("description") or ""
+        row.severity          = data.get("severity") or "UNKNOWN"
+        row.cvss_score        = data.get("cvss_score")
+        row.cvss_vector       = data.get("cvss_vector")
+        row.epss_score        = data.get("epss_score")
+        row.epss_percentile   = data.get("epss_percentile")
+        row.patch_available   = bool(data.get("patch_available"))
+        row.exploited_in_wild = bool(data.get("exploited_in_wild"))
+        row.cisa_remediation  = data.get("cisa_remediation")
+        row.published         = data.get("published")
+        row.last_modified     = data.get("last_modified")
+        row.vuln_status       = data.get("vuln_status")
+        row.patch_refs        = _json.dumps(data.get("patch_refs") or [])
+        row.references        = data.get("references") or "[]"
+        row.references_meta   = _json.dumps(data.get("references_meta") or {})
+        row.source_links      = _json.dumps(data.get("source_links") or [])
+        row.affected_packages = _json.dumps(data.get("affected_packages") or [])
+        row.configurations    = _json.dumps(data.get("configurations") or [])
+        row.weaknesses        = _json.dumps(data.get("weaknesses") or [])
+        row.cached_at         = now
+        row.expires_at        = exp
+        _db.session.commit()
+    except Exception as exc:
+        try:
+            from extensions import db as _db
+            _db.session.rollback()
+        except Exception:
+            pass
+        try:
+            current_app.logger.warning(f"CVE cache save failed for {cve_id}: {exc}")
+        except Exception:
+            pass
 
 
 def search_cves_by_keyword(keyword: str, max_results: int = 10) -> list[dict]:

@@ -1,6 +1,6 @@
 import re
 from collections import defaultdict
-from flask import Blueprint, render_template, jsonify, request
+from flask import Blueprint, render_template, jsonify, request, current_app
 from flask_login import login_required
 from models import Vulnerability, Host, Audit, Client, Port
 from extensions import db
@@ -280,12 +280,53 @@ def detail():
                         "os_info": host.os_info,
                     })
 
-    # Build step-by-step remediation guide
+    # Build step-by-step remediation guide (with DB cache)
     try:
+        import json as _json
+        import hashlib
+        from datetime import datetime, timedelta
         from services.cve_service import build_remediation_steps
-        result["remediation_steps"] = build_remediation_steps(
-            result, affected_products=affected_products or None
-        )
+        from models import CveRemediationCache
+
+        # Hash of the inputs so we detect when CVE data or host context changes
+        _h_input = _json.dumps([
+            result.get("configurations", []),
+            result.get("affected_packages", []),
+            result.get("weaknesses", []),
+            result.get("cvss_vector"),
+            result.get("exploited_in_wild"),
+            sorted(str(p) for p in (affected_products or [])),
+        ], sort_keys=True, default=str)
+        input_hash = hashlib.sha256(_h_input.encode()).hexdigest()
+
+        cached_steps = None
+        if is_cve_id:
+            _row = CveRemediationCache.query.filter_by(cve_id=cve_id_upper).first()
+            if (_row
+                    and _row.expires_at > datetime.utcnow()
+                    and _row.input_hash == input_hash):
+                cached_steps = _row.steps_list()
+
+        if cached_steps is not None:
+            result["remediation_steps"] = cached_steps
+        else:
+            steps = build_remediation_steps(result, affected_products=affected_products or None)
+            result["remediation_steps"] = steps
+            if is_cve_id:
+                ttl = int(current_app.config.get("CVE_CACHE_TTL_DAYS", 7))
+                exp = datetime.utcnow() + timedelta(days=ttl)
+                _row = CveRemediationCache.query.filter_by(cve_id=cve_id_upper).first()
+                if _row is None:
+                    _row = CveRemediationCache(cve_id=cve_id_upper)
+                    db.session.add(_row)
+                _row.steps      = _json.dumps(steps)
+                _row.input_hash = input_hash
+                _row.cached_at  = datetime.utcnow()
+                _row.expires_at = exp
+                try:
+                    db.session.commit()
+                except Exception:
+                    db.session.rollback()
     except Exception:
         result["remediation_steps"] = []
 
