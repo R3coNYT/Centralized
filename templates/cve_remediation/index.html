@@ -93,10 +93,31 @@
             onclick="openDetail(this)">
           <td class="font-monospace small fw-semibold">
             {% if entry.is_cve_id %}
-              <a href="https://nvd.nist.gov/vuln/detail/{{ entry.cve_id }}" target="_blank"
-                 onclick="event.stopPropagation()" class="text-info text-decoration-none">
-                {{ entry.cve_id }}
-              </a>
+              {% if cve_sources | length > 1 %}
+                <span class="text-info">{{ entry.cve_id }}</span>
+                <div class="dropdown d-inline-block ms-1">
+                  <button class="btn btn-sm btn-link p-0 text-secondary dropdown-toggle dropdown-toggle-no-caret"
+                          data-bs-toggle="dropdown" onclick="event.stopPropagation()" title="Open in…"
+                          style="font-size:.7rem;vertical-align:middle">
+                    <i class="bi bi-box-arrow-up-right"></i>
+                  </button>
+                  <ul class="dropdown-menu dropdown-menu-dark small">
+                    {% for src in cve_sources %}
+                    <li>
+                      <a class="dropdown-item small" href="{{ src.url_template | replace('{id}', entry.cve_id) }}"
+                         target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()">
+                        {{ src.label }}
+                      </a>
+                    </li>
+                    {% endfor %}
+                  </ul>
+                </div>
+              {% else %}
+                <a href="https://nvd.nist.gov/vuln/detail/{{ entry.cve_id }}" target="_blank"
+                   onclick="event.stopPropagation()" class="text-info text-decoration-none">
+                  {{ entry.cve_id }}
+                </a>
+              {% endif %}
             {% else %}
               <span class="text-truncate d-inline-block" style="max-width:150px" title="{{ entry.title }}">
                 {{ entry.title | truncate(28) }}
@@ -275,6 +296,26 @@ function statusBadge(s) {
   return '<span class="badge ' + (map[s] || 'bg-secondary') + '">' + escHtml(s || 'active') + '</span>';
 }
 
+/* Build a source picker dropdown for CVE external links */
+function buildSourcePicker(cveId, sourceLinks) {
+  if (!sourceLinks || sourceLinks.length === 0) {
+    return '<a href="https://nvd.nist.gov/vuln/detail/' + encodeURIComponent(cveId) + '" target="_blank" ' +
+      'class="btn btn-sm btn-outline-info ms-2"><i class="bi bi-box-arrow-up-right me-1"></i>NVD</a>';
+  }
+  if (sourceLinks.length === 1) {
+    var s0 = sourceLinks[0];
+    return '<a href="' + escHtml(s0.url) + '" target="_blank" ' +
+      'class="btn btn-sm btn-outline-info ms-2"><i class="bi bi-box-arrow-up-right me-1"></i>' + escHtml(s0.label.split(' ')[0]) + '</a>';
+  }
+  var items = sourceLinks.map(function(s) {
+    return '<li><a class="dropdown-item small" href="' + escHtml(s.url) + '" target="_blank" rel="noopener noreferrer">' + escHtml(s.label) + '</a></li>';
+  }).join('');
+  return '<div class="dropdown d-inline-block ms-2">' +
+    '<button class="btn btn-sm btn-outline-info dropdown-toggle" data-bs-toggle="dropdown">' +
+    '<i class="bi bi-box-arrow-up-right me-1"></i>Open in…</button>' +
+    '<ul class="dropdown-menu dropdown-menu-dark">' + items + '</ul></div>';
+}
+
 function parseCvssVector(vec) {
   if (!vec || !vec.includes('/')) return '';
   var labels = {
@@ -309,10 +350,7 @@ function renderDetail(d) {
 
   var sevCls   = severityClass(d.severity);
   var isCveId  = d.cve_id && /^CVE-\d{4}-\d+$/i.test(d.cve_id);
-  var nvdLink  = isCveId
-    ? '<a href="https://nvd.nist.gov/vuln/detail/' + d.cve_id + '" target="_blank" ' +
-      'class="btn btn-sm btn-outline-info ms-2"><i class="bi bi-box-arrow-up-right me-1"></i>NVD</a>'
-    : '';
+  var sourcePickerHtml = isCveId ? buildSourcePicker(d.cve_id, d.source_links) : '';
   var cvssVec  = parseCvssVector(d.cvss_vector);
 
   /* ─ patch refs ─ */
@@ -320,28 +358,43 @@ function renderDetail(d) {
   if (d.patch_refs && d.patch_refs.length) {
     patchHtml = '<ul class="list-unstyled mb-0">';
     d.patch_refs.slice(0, 10).forEach(function(url) {
-      patchHtml += '<li><i class="bi bi-patch-check-fill text-success me-2"></i>' +
-        '<a href="' + escHtml(url) + '" target="_blank" class="text-info small text-break">' +
-        escHtml(url) + '</a></li>';
+      patchHtml += '<li class="mb-1 d-flex align-items-start gap-2">' +
+        '<i class="bi bi-patch-check-fill text-success mt-1 flex-shrink-0"></i>' +
+        '<a href="' + escHtml(url) + '" target="_blank" class="text-info small text-break flex-grow-1">' +
+        escHtml(url) + '</a>' +
+        '<span class="badge bg-dark text-secondary border border-secondary flex-shrink-0" style="font-size:.6rem">NVD</span>' +
+        '</li>';
     });
     patchHtml += '</ul>';
   } else {
     patchHtml = '<span class="text-muted small">No specific patch references found in NVD.</span>';
   }
 
-  /* ─ all references (exclude patch_refs to avoid duplication) ─ */
-  var refs = [];
-  try { refs = JSON.parse(d.references || '[]'); } catch(e) {}
+  /* ─ all references with source attribution ─ */
+  var refsMeta = (typeof d.references_meta === 'object' && !Array.isArray(d.references_meta))
+    ? d.references_meta : {};
+  var allRefUrls = Object.keys(refsMeta);
+  if (allRefUrls.length === 0) {
+    // Fallback to plain references list if no meta
+    try { allRefUrls = JSON.parse(d.references || '[]'); } catch(e) {}
+  }
   var patchSet = {};
   (d.patch_refs || []).forEach(function(u) { patchSet[u] = true; });
-  var otherRefs = refs.filter(function(u) { return !patchSet[u]; });
+  var otherRefs = allRefUrls.filter(function(u) { return !patchSet[u]; });
   var refsHtml = '';
   if (otherRefs.length) {
     refsHtml = '<ul class="list-unstyled mb-0 small">';
-    otherRefs.slice(0, 12).forEach(function(url) {
-      refsHtml += '<li class="mb-1"><i class="bi bi-link-45deg text-muted me-1"></i>' +
-        '<a href="' + escHtml(url) + '" target="_blank" class="text-info text-break">' +
-        escHtml(url) + '</a></li>';
+    otherRefs.slice(0, 20).forEach(function(url) {
+      var srcs = (refsMeta[url] || []);
+      var srcBadges = srcs.map(function(s) {
+        return '<span class="badge bg-dark text-secondary border border-secondary ms-1" style="font-size:.6rem">' + escHtml(s) + '</span>';
+      }).join('');
+      refsHtml += '<li class="mb-1 d-flex align-items-start gap-1">' +
+        '<i class="bi bi-link-45deg text-muted flex-shrink-0 mt-1"></i>' +
+        '<a href="' + escHtml(url) + '" target="_blank" class="text-info text-break flex-grow-1" style="min-width:0">' +
+        escHtml(url) + '</a>' +
+        '<span class="flex-shrink-0">' + srcBadges + '</span>' +
+        '</li>';
     });
     refsHtml += '</ul>';
   }
@@ -486,13 +539,15 @@ function renderDetail(d) {
           '<span class="badge bg-' + sevCls + ' fs-6">' + escHtml(d.severity || 'UNKNOWN') + '</span>' +
           (d.cvss_score ? '<span class="badge bg-dark border fs-6 text-' + sevCls + '">' +
             'CVSS&nbsp;' + d.cvss_score.toFixed(1) + '</span>' : '') +
+          (d.epss_score != null ? '<span class="badge bg-secondary fs-6" title="FIRST EPSS exploitation probability">' +
+            'EPSS&nbsp;' + (d.epss_score * 100).toFixed(1) + '%</span>' : '') +
           (d.patch_refs && d.patch_refs.length
             ? '<span class="badge bg-success"><i class="bi bi-patch-check me-1"></i>Patch Available</span>'
             : '<span class="badge bg-secondary">No Patch Ref</span>') +
         '</div>' +
         '<div class="d-flex align-items-center gap-2">' +
           '<h6 class="mb-0 font-monospace fw-bold">' + escHtml(d.cve_id || d.title) + '</h6>' +
-          nvdLink +
+          sourcePickerHtml +
         '</div>' +
         (d.published ? '<div class="small text-muted mt-1">Published: ' + escHtml(d.published.split('T')[0]) +
           (d.last_modified ? ' — Last modified: ' + escHtml(d.last_modified.split('T')[0]) : '') + '</div>' : '') +

@@ -215,7 +215,7 @@ def cve_affected_software(cve_id):
     """Return a grouped, human-readable list of software affected by a CVE."""
     import re as _re
     from collections import OrderedDict
-    from services.cve_service import fetch_cve_configurations
+    from services.cve_service import fetch_cve_configurations, _fetch_osv
 
     cve_id = cve_id.upper().strip()
     if not _re.match(r"^CVE-\d{4}-\d{4,7}$", cve_id):
@@ -259,15 +259,49 @@ def cve_affected_software(cve_id):
                 key = (vendor, product)
                 if key not in groups:
                     groups[key] = {
-                        "type": {"a": "App", "o": "OS", "h": "HW"}.get(part_type, "?"),
-                        "vendor":  vendor.replace("_", " "),
-                        "product": product.replace("_", " "),
+                        "type":     {"a": "App", "o": "OS", "h": "HW"}.get(part_type, "?"),
+                        "vendor":   vendor.replace("_", " "),
+                        "product":  product.replace("_", " "),
                         "versions": [],
+                        "sources":  ["NVD"],
                     }
                 if version_range not in groups[key]["versions"]:
                     groups[key]["versions"].append(version_range)
 
     result = list(groups.values())
+
+    # Supplement with OSV package data (different structure: ecosystem + package)
+    try:
+        osv = _fetch_osv(cve_id) or {}
+        for pkg in (osv.get("affected_packages") or []):
+            eco  = pkg.get("ecosystem", "")
+            name = pkg.get("package", "")
+            rng  = pkg.get("ranges", "")
+            if not eco or not name:
+                continue
+            # Check if already represented by an NVD CPE entry (loose name match)
+            already = any(
+                name.lower().replace("-", "_").replace(":", "_")
+                in (r.get("product", "") + r.get("vendor", "")).lower().replace("-", "_")
+                for r in result
+            )
+            if already:
+                # Annotate the existing row with OSV source
+                for r in result:
+                    if name.lower() in (r.get("product", "") + r.get("vendor", "")).lower():
+                        if "OSV" not in r.get("sources", []):
+                            r.setdefault("sources", []).append("OSV")
+            else:
+                result.append({
+                    "type":     eco,
+                    "vendor":   eco,
+                    "product":  name,
+                    "versions": [rng] if rng else ["*"],
+                    "sources":  ["OSV"],
+                })
+    except Exception:
+        pass
+
     return jsonify({"affected": result, "count": len(result)})
 
 

@@ -146,6 +146,37 @@ def _detect_driver(url: str) -> str:
     return "generic"
 
 
+# Human-facing CVE page URL template per driver ({id} is replaced with the CVE ID)
+_DRIVER_HUMAN_URLS: dict[str, str] = {
+    "nvd":        "https://nvd.nist.gov/vuln/detail/{id}",
+    "circl":      "https://vulnerability.circl.lu/vuln/{id}",
+    "mitre":      "https://cve.org/CVERecord?id={id}",
+    "epss":       "",  # no human-facing per-CVE page
+    "osv":        "https://osv.dev/vulnerability/{id}",
+    "euvd":       "https://euvd.enisa.europa.eu/vuln/{id}",
+    "cvedetails": "https://www.cvedetails.com/cve/{id}/",
+    "tenable":    "https://www.tenable.com/cve/{id}",
+    "wiz":        "https://www.wiz.io/vulnerability-database/{id}",
+    "vuldb":      "https://vuldb.com/?cve.id={id}",
+    "cvefind":    "https://www.cvefind.com/cve/{id}",
+}
+
+# Short display labels per driver
+_DRIVER_LABELS: dict[str, str] = {
+    "nvd":        "NVD",
+    "circl":      "CIRCL CVE Search",
+    "mitre":      "MITRE CVE Program",
+    "epss":       "FIRST EPSS",
+    "osv":        "OSV",
+    "euvd":       "ENISA EUVD",
+    "cvedetails": "CVE Details",
+    "tenable":    "Tenable Research",
+    "wiz":        "Wiz",
+    "vuldb":      "VulDB",
+    "cvefind":    "CVEFind",
+}
+
+
 def _fetch_circl(cve_id: str) -> dict | None:
     """CIRCL CVE Search — https://cve.circl.lu/api/cve/{id}"""
     try:
@@ -242,9 +273,39 @@ def _fetch_osv(cve_id: str) -> dict | None:
         if not d:
             return None
         refs = [r.get("url", "") for r in d.get("references", []) if r.get("url")]
+        # Extract structured affected package data
+        affected_pkgs: list[dict] = []
+        for aff in (d.get("affected") or []):
+            pkg = aff.get("package") or {}
+            eco  = pkg.get("ecosystem", "")
+            name = pkg.get("name", "")
+            if not eco or not name:
+                continue
+            ranges_parts: list[str] = []
+            for r in (aff.get("ranges") or []):
+                evts = r.get("events") or []
+                introduced    = next((e.get("introduced")    for e in evts if "introduced"    in e), None)
+                fixed_v       = next((e.get("fixed")         for e in evts if "fixed"         in e), None)
+                last_affected = next((e.get("last_affected") for e in evts if "last_affected" in e), None)
+                parts: list[str] = []
+                if introduced and introduced not in ("0", "", None):
+                    parts.append(f">= {introduced}")
+                if fixed_v:
+                    parts.append(f"< {fixed_v}")
+                elif last_affected:
+                    parts.append(f"<= {last_affected}")
+                if parts:
+                    ranges_parts.append(", ".join(parts))
+            affected_pkgs.append({
+                "ecosystem": eco,
+                "package":   name,
+                "ranges":    " | ".join(ranges_parts) if ranges_parts else "all versions",
+                "source":    "OSV",
+            })
         return {
-            "description": d.get("summary", "") or d.get("details", ""),
-            "references":  list(dict.fromkeys(r for r in refs if r)),
+            "description":       d.get("summary", "") or d.get("details", ""),
+            "references":        list(dict.fromkeys(r for r in refs if r)),
+            "affected_packages": affected_pkgs,
         }
     except Exception:
         return None
@@ -342,29 +403,48 @@ _DRIVER_FETCHERS: dict = {
 def _enrich_from_extra_sources(cve_id: str, base: dict) -> dict:
     """
     Fan-out to all enabled non-NVD CveSource records and merge results into base.
-    Supplements: references, patch_refs, weaknesses, description (fallback), EPSS score.
+    Supplements: references (+meta), weaknesses, affected_packages, source_links,
+    description (fallback), EPSS score, CVSS fallback.
     """
     import json as _json
     try:
         from models import CveSource
         sources = CveSource.query.filter_by(enabled=True, is_builtin=False).all()
     except Exception:
-        return base
-
-    if not sources:
-        return base
+        sources = []
 
     try:
         existing_refs = _json.loads(base.get("references", "[]"))
     except Exception:
         existing_refs = []
 
-    all_refs   = list(existing_refs)
-    patch_refs = list(base.get("patch_refs", []))
-    weaknesses = list(base.get("weaknesses", []))
+    # Track which source(s) provided each URL
+    refs_meta: dict[str, list[str]] = {}
+    for ref in existing_refs:
+        if ref:
+            refs_meta[ref] = ["NVD"]
+
+    all_refs          = list(existing_refs)
+    weaknesses        = list(base.get("weaknesses", []))
+    affected_packages: list[dict] = list(base.get("affected_packages", []))
+
+    # NVD is always the first entry in source_links
+    source_links: list[dict] = [{
+        "label":  "NVD — National Vulnerability Database",
+        "url":    f"https://nvd.nist.gov/vuln/detail/{cve_id}",
+        "driver": "nvd",
+    }]
 
     for src in sources:
-        driver  = src.driver if src.driver and src.driver not in ("generic", "") else _detect_driver(src.url)
+        driver = src.driver if src.driver and src.driver not in ("generic", "") else _detect_driver(src.url)
+        label  = _DRIVER_LABELS.get(driver, src.label or driver)
+
+        # Build the human-facing URL for this source
+        url_tmpl   = _DRIVER_HUMAN_URLS.get(driver, "")
+        human_url  = url_tmpl.replace("{id}", cve_id) if url_tmpl else ""
+        if human_url and driver != "epss":
+            source_links.append({"label": label, "url": human_url, "driver": driver})
+
         fetcher = _DRIVER_FETCHERS.get(driver)
         if fetcher is None:
             continue
@@ -375,8 +455,13 @@ def _enrich_from_extra_sources(cve_id: str, base: dict) -> dict:
             if not base.get("description") and extra.get("description"):
                 base["description"] = extra["description"]
             for ref in extra.get("references", []):
-                if ref and ref not in all_refs:
+                if not ref:
+                    continue
+                if ref not in refs_meta:
+                    refs_meta[ref] = [label]
                     all_refs.append(ref)
+                elif label not in refs_meta[ref]:
+                    refs_meta[ref].append(label)
             for cwe in extra.get("weaknesses", []):
                 if cwe and cwe not in weaknesses:
                     weaknesses.append(cwe)
@@ -385,10 +470,20 @@ def _enrich_from_extra_sources(cve_id: str, base: dict) -> dict:
                 base["epss_percentile"] = extra.get("epss_percentile", 0.0)
             if base.get("cvss_score") is None and extra.get("cvss_score"):
                 base["cvss_score"] = extra["cvss_score"]
+            for pkg in extra.get("affected_packages", []):
+                key = (pkg.get("ecosystem", "").lower(), pkg.get("package", "").lower())
+                if not any(
+                    (p.get("ecosystem", "").lower(), p.get("package", "").lower()) == key
+                    for p in affected_packages
+                ):
+                    affected_packages.append(pkg)
         except Exception:
             pass
 
-    base["references"] = _json.dumps(all_refs[:15])
+    base["references"]        = _json.dumps(all_refs[:20])
+    base["references_meta"]   = refs_meta          # {url: [source_label, ...]}
+    base["source_links"]      = source_links        # [{label, url, driver}, ...]
+    base["affected_packages"] = affected_packages   # [{ecosystem, package, ranges, source}, ...]
     if weaknesses:
         base["weaknesses"] = weaknesses
     return base
@@ -449,6 +544,8 @@ def _extract_cve(cve: dict) -> dict | None:
     cisa_remediation = cve.get("cisaRequiredAction")
 
     import json as _json
+    # Initialise references_meta so NVD refs are already attributed before enrichment
+    refs_meta_init: dict[str, list[str]] = {url: ["NVD"] for url in all_ref_urls[:10]}
     return {
         "cve_id": cve_id,
         "title": cve_id,
@@ -457,6 +554,7 @@ def _extract_cve(cve: dict) -> dict | None:
         "cvss_score": cvss_score,
         "cvss_vector": cvss_vector,
         "references": _json.dumps(all_ref_urls[:10]),
+        "references_meta": refs_meta_init,
         "patch_refs": patch_refs[:8],
         "patch_available": patch_available,
         "weaknesses": weaknesses,
@@ -466,6 +564,8 @@ def _extract_cve(cve: dict) -> dict | None:
         "last_modified": cve.get("lastModified", ""),
         "vuln_status": cve.get("vulnStatus", ""),
         "configurations": cve.get("configurations", []),
+        "affected_packages": [],
+        "source_links": [],
         "source": "nvd",
     }
 
@@ -1120,6 +1220,43 @@ def build_remediation_steps(cve_data: dict,
                 add(f"Update {pl}", desc, "bi-arrow-up-circle-fill", "critical", cmds)
                 matched_any = True
 
+        # Also try OSV affected packages for ecosystem-specific update commands
+        for pkg_info in (cve_data.get("affected_packages") or []):
+            eco  = pkg_info.get("ecosystem", "")
+            name = pkg_info.get("package", "")
+            rng  = pkg_info.get("ranges", "")
+            if not eco or not name:
+                continue
+            t = f"Update {name} ({eco})"
+            if t in seen_titles:
+                continue
+            eco_lower = eco.lower()
+            if eco_lower in ("pypi", "python"):
+                eco_cmds = [{"label": "pip", "code": f"pip install --upgrade \"{name}\"\n# Affected versions: {rng}"}]
+            elif eco_lower in ("npm", "node", "node.js"):
+                eco_cmds = [{"label": "npm", "code": f"npm install {name}@latest\n# Affected versions: {rng}"}]
+            elif eco_lower in ("maven", "gradle"):
+                eco_cmds = [{"label": "Maven/Gradle", "code": f"# Update {name} to latest patched version in pom.xml / build.gradle\n# Affected versions: {rng}"}]
+            elif eco_lower in ("go", "golang"):
+                eco_cmds = [{"label": "Go modules", "code": f"go get -u {name}\ngo mod tidy\n# Affected versions: {rng}"}]
+            elif eco_lower in ("cargo", "rust"):
+                eco_cmds = [{"label": "Cargo", "code": f"cargo update -p {name}\n# Affected versions: {rng}"}]
+            elif eco_lower in ("rubygems", "ruby"):
+                eco_cmds = [{"label": "gem", "code": f"gem update {name}\n# Affected versions: {rng}"}]
+            elif eco_lower in ("nuget", ".net"):
+                eco_cmds = [{"label": "NuGet", "code": f"dotnet add package {name}\n# Affected versions: {rng}"}]
+            elif eco_lower in ("packagist", "composer", "php"):
+                eco_cmds = [{"label": "Composer", "code": f"composer require {name}\n# Affected versions: {rng}"}]
+            elif eco_lower in ("debian", "ubuntu"):
+                eco_cmds = [{"label": "apt", "code": f"sudo apt-get update\nsudo apt-get install --only-upgrade {name}\n# Affected versions: {rng}"}]
+            elif eco_lower in ("centos", "rhel", "fedora", "almalinux"):
+                eco_cmds = [{"label": "dnf/yum", "code": f"sudo dnf update {name}\n# Affected versions: {rng}"}]
+            else:
+                eco_cmds = [{"label": eco, "code": f"# Update {name} to the latest patched version\n# Ecosystem: {eco}\n# Affected versions: {rng}"}]
+            add(t, f"Affected package: **{name}** ({eco}) — {rng} *(source: OSV)*",
+                "bi-box-arrow-up", "critical", eco_cmds)
+            matched_any = True
+
         if not matched_any:
             # Truly generic fallback — patch refs are already shown in the section below
             add(
@@ -1129,6 +1266,31 @@ def build_remediation_steps(cve_data: dict,
                 "bi-patch-check-fill",
                 "critical" if (cve_data.get("cvss_score") or 0) >= 7 else "high",
             )
+
+    # ── 2b. Supplementary OSV ecosystem packages (when CPE data was present) ───
+    if cpe_targets:
+        for pkg_info in (cve_data.get("affected_packages") or []):
+            eco  = pkg_info.get("ecosystem", "")
+            name = pkg_info.get("package", "")
+            rng  = pkg_info.get("ranges", "")
+            if not eco or not name:
+                continue
+            t = f"Update {name} ({eco})"
+            if t in seen_titles:
+                continue
+            eco_lower = eco.lower()
+            if eco_lower in ("pypi", "python"):
+                eco_cmds = [{"label": "pip", "code": f"pip install --upgrade \"{name}\"\n# Affected versions: {rng}"}]
+            elif eco_lower in ("npm", "node", "node.js"):
+                eco_cmds = [{"label": "npm", "code": f"npm install {name}@latest\n# Affected versions: {rng}"}]
+            elif eco_lower in ("maven", "gradle"):
+                eco_cmds = [{"label": "Maven/Gradle", "code": f"# Update {name} to latest patched version in pom.xml / build.gradle\n# Affected versions: {rng}"}]
+            elif eco_lower in ("go", "golang"):
+                eco_cmds = [{"label": "Go modules", "code": f"go get -u {name}\ngo mod tidy\n# Affected versions: {rng}"}]
+            else:
+                eco_cmds = [{"label": eco, "code": f"# Update {name} to the latest patched version\n# Ecosystem: {eco}\n# Affected versions: {rng}"}]
+            add(t, f"Affected package: **{name}** ({eco}) — {rng} *(source: OSV)*",
+                "bi-box-arrow-up", "high", eco_cmds)
 
     # ── 3. CWE-specific code fixes ─────────────────────────────────────────────
     for cwe in (cve_data.get("weaknesses") or []):
@@ -1174,16 +1336,36 @@ def build_remediation_steps(cve_data: dict,
             )}],
         )
 
+    # ── 4.5 EPSS exploitation-probability notice ───────────────────────────────
+    epss = cve_data.get("epss_score")
+    epss_pct = cve_data.get("epss_percentile")
+    if epss is not None and float(epss) >= 0.5:
+        pct_str = f" (top {100 - int(float(epss_pct) * 100)}% of all CVEs)" if epss_pct else ""
+        add(
+            f"High exploitation probability — EPSS {float(epss)*100:.1f}%{pct_str}",
+            f"The FIRST EPSS model estimates a {float(epss)*100:.1f}% probability this CVE will "
+            "be exploited in the next 30 days. Prioritise patching above lower-EPSS findings.",
+            "bi-graph-up-arrow",
+            "critical" if float(epss) >= 0.7 else "high",
+        )
+
     # ── 5. Validate the fix ────────────────────────────────────────────────────
+    # Gather cross-source verification links
+    verify_links_code = "# Re-scan the affected host\nnuclei -u http://TARGET_HOST -tags cve -severity critical,high,medium"
+    source_links = cve_data.get("source_links") or []
+    if source_links:
+        link_lines = "\n".join(
+            f"# {sl['label']}:\n#   {sl['url']}" for sl in source_links
+        )
+        verify_links_code += f"\n\n# Verify the fix against all configured CVE sources:\n{link_lines}"
+
     add(
         "Validate the fix and update the audit record",
         "After patching: re-scan the host to confirm the CVE no longer fires, "
         "review logs for signs of prior exploitation, then mark this finding as 'corrected'.",
         "bi-clipboard-check", "normal",
         [
-            {"label": "Re-scan with Nuclei", "code": (
-                "# Re-scan the affected host\nnuclei -u http://TARGET_HOST -tags cve -severity critical,high,medium"
-            )},
+            {"label": "Re-scan with Nuclei", "code": verify_links_code},
             {"label": "Check service logs", "code": (
                 "# Look for exploitation evidence in the last 7 days\n"
                 "journalctl -u SERVICE_NAME --since '7 days ago' | grep -iE 'error|exploit|attack|injection'"
