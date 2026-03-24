@@ -4,7 +4,7 @@
 
 {% block content %}
 <div class="row g-4 justify-content-center">
-  <div class="col-lg-6">
+  <div class="col-lg-7">
 
     <!-- GitHub API Token -->
     <div class="card">
@@ -55,6 +55,76 @@
           </button>
           <span id="tokenStatusMsg" class="small ms-1"></span>
         </div>
+      </div>
+    </div>
+
+    <!-- CVE Database Sources -->
+    <div class="card mt-4">
+      <div class="card-header fw-semibold d-flex align-items-center gap-2">
+        <i class="bi bi-database-fill-gear"></i>CVE DataBase
+        <span class="text-muted fw-normal ms-1" style="font-size:.8rem">
+          — enrichit chaque CVE avec des données complémentaires (EPSS, références, corrections)
+        </span>
+      </div>
+      <div class="card-body">
+
+        {# Source list rendered server-side for initial load #}
+        <ul class="list-group mb-3" id="cveSourceList">
+          {% for src in cve_sources %}
+          <li class="list-group-item d-flex align-items-center gap-2 px-3 py-2"
+              id="cve-src-{{ src.id }}">
+            <i class="bi bi-circle-fill me-1 {% if src.enabled %}text-success{% else %}text-secondary{% endif %}"
+               style="font-size:.55rem"></i>
+            <div class="flex-grow-1 min-width-0">
+              <span class="fw-semibold small">{{ src.label or src.url }}</span>
+              <span class="text-muted small ms-2 font-monospace">{{ src.url }}</span>
+              {% if src.driver != 'generic' %}
+              <span class="badge bg-secondary ms-1" style="font-size:.65rem">{{ src.driver }}</span>
+              {% endif %}
+            </div>
+            <div class="d-flex gap-1 flex-shrink-0 ms-2">
+              {% if src.is_builtin %}
+                <span class="badge bg-dark border text-muted" title="Source permanente, ne peut pas être retirée">
+                  <i class="bi bi-lock-fill me-1"></i>Builtin
+                </span>
+              {% else %}
+                <button class="btn btn-sm btn-outline-secondary py-0 px-2"
+                        title="{{ 'Désactiver' if src.enabled else 'Activer' }}"
+                        onclick="toggleSource({{ src.id }}, this)">
+                  <i class="bi {{ 'bi-toggle-on text-success' if src.enabled else 'bi-toggle-off' }}"></i>
+                </button>
+                <button class="btn btn-sm btn-outline-danger py-0 px-2"
+                        title="Supprimer"
+                        onclick="deleteSource({{ src.id }}, this)">
+                  <i class="bi bi-trash"></i>
+                </button>
+              {% endif %}
+            </div>
+          </li>
+          {% endfor %}
+        </ul>
+
+        {# Add new source #}
+        <div class="border rounded p-3" style="background:rgba(255,255,255,.03)">
+          <div class="small fw-semibold mb-2 text-muted"><i class="bi bi-plus-circle me-1"></i>Ajouter une source</div>
+          <div class="d-flex gap-2 flex-wrap align-items-start">
+            <div class="flex-grow-1" style="min-width:220px">
+              <input type="url" id="newCveSrcUrl" class="form-control form-control-sm font-monospace"
+                     placeholder="https://cve.circl.lu  /  https://cve.org  /  ..."
+                     autocomplete="off">
+              <div class="form-text mt-1">
+                Supported drivers (auto-detected): NVD, <strong>CIRCL</strong>, <strong>MITRE CVE</strong>,
+                <strong>EPSS</strong> (first.org), <strong>OSV</strong> (osv.dev).
+                Any other URL is saved as generic reference.
+              </div>
+            </div>
+            <button class="btn btn-primary btn-sm mt-1" onclick="addSource()" id="addSrcBtn">
+              <i class="bi bi-floppy me-1"></i>Ajouter
+            </button>
+          </div>
+          <div id="srcMsg" class="small mt-2"></div>
+        </div>
+
       </div>
     </div>
 
@@ -146,6 +216,109 @@ async function testToken() {
     }
   } catch (e) {
     setTokenMsg('Connection failed.', 'text-danger');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+/* ── CVE Sources ──────────────────────────────────────────────────────────── */
+function setSrcMsg(msg, cls = 'text-muted') {
+  const el = document.getElementById('srcMsg');
+  el.className = 'small mt-2 ' + cls;
+  el.textContent = msg;
+  if (msg) setTimeout(() => { if (el.textContent === msg) el.textContent = ''; }, 5000);
+}
+
+function driverBadge(driver) {
+  if (!driver || driver === 'generic') return '';
+  return `<span class="badge bg-secondary ms-1" style="font-size:.65rem">${driver}</span>`;
+}
+
+function renderSourceItem(src) {
+  const enabled    = src.enabled;
+  const dotCls     = enabled ? 'text-success' : 'text-secondary';
+  const toggleIcon = enabled ? 'bi-toggle-on text-success' : 'bi-toggle-off';
+  const toggleTip  = enabled ? 'Désactiver' : 'Activer';
+  return `<li class="list-group-item d-flex align-items-center gap-2 px-3 py-2" id="cve-src-${src.id}">
+    <i class="bi bi-circle-fill me-1 ${dotCls}" style="font-size:.55rem"></i>
+    <div class="flex-grow-1" style="min-width:0">
+      <span class="fw-semibold small">${src.label}</span>
+      <span class="text-muted small ms-2 font-monospace">${src.url}</span>
+      ${driverBadge(src.driver)}
+    </div>
+    <div class="d-flex gap-1 flex-shrink-0 ms-2">
+      <button class="btn btn-sm btn-outline-secondary py-0 px-2" title="${toggleTip}"
+              onclick="toggleSource(${src.id}, this)">
+        <i class="bi ${toggleIcon}"></i>
+      </button>
+      <button class="btn btn-sm btn-outline-danger py-0 px-2" title="Supprimer"
+              onclick="deleteSource(${src.id}, this)">
+        <i class="bi bi-trash"></i>
+      </button>
+    </div>
+  </li>`;
+}
+
+async function addSource() {
+  const urlInp = document.getElementById('newCveSrcUrl');
+  const btn    = document.getElementById('addSrcBtn');
+  const url    = urlInp.value.trim();
+  if (!url) { setSrcMsg('Entrez une URL.', 'text-warning'); return; }
+  btn.disabled = true;
+  setSrcMsg('Ajout en cours…', 'text-muted');
+  try {
+    const resp = await fetch('/admin/cve-sources', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrfToken() },
+      body: JSON.stringify({ url }),
+    });
+    const d = await resp.json();
+    if (d.error) { setSrcMsg(d.error, 'text-danger'); return; }
+    document.getElementById('cveSourceList').insertAdjacentHTML('beforeend', renderSourceItem(d));
+    urlInp.value = '';
+    setSrcMsg('✓ Source ajoutée.', 'text-success');
+  } catch (e) {
+    setSrcMsg('Erreur réseau.', 'text-danger');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function toggleSource(id, btn) {
+  btn.disabled = true;
+  try {
+    const resp = await fetch(`/admin/cve-sources/${id}`, {
+      method: 'PATCH',
+      headers: { 'X-CSRFToken': getCsrfToken() },
+    });
+    const d = await resp.json();
+    if (d.error) { alert(d.error); return; }
+    const li     = document.getElementById(`cve-src-${id}`);
+    const dot    = li.querySelector('.bi-circle-fill');
+    const icon   = btn.querySelector('i');
+    dot.className  = `bi bi-circle-fill me-1 ${d.enabled ? 'text-success' : 'text-secondary'}`;
+    icon.className = `bi ${d.enabled ? 'bi-toggle-on text-success' : 'bi-toggle-off'}`;
+    btn.title = d.enabled ? 'Désactiver' : 'Activer';
+  } catch (e) {
+    alert('Erreur réseau.');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function deleteSource(id, btn) {
+  if (!confirm('Supprimer cette source CVE ?')) return;
+  btn.disabled = true;
+  try {
+    const resp = await fetch(`/admin/cve-sources/${id}`, {
+      method: 'DELETE',
+      headers: { 'X-CSRFToken': getCsrfToken() },
+    });
+    const d = await resp.json();
+    if (d.error) { alert(d.error); return; }
+    document.getElementById(`cve-src-${id}`)?.remove();
+  } catch (e) {
+    alert('Erreur réseau.');
   } finally {
     btn.disabled = false;
   }
