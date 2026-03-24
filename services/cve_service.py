@@ -145,14 +145,15 @@ def _extract_cve(cve: dict) -> dict | None:
             break
 
     refs = cve.get("references", [])
-    all_ref_urls = [r.get("url", "") for r in refs if r.get("url")]
+    # Deduplicate while preserving order
+    all_ref_urls = list(dict.fromkeys(r.get("url", "") for r in refs if r.get("url")))
 
     # References tagged as patches / fixes / workarounds
     PATCH_TAGS = {"Patch", "Fix", "Mitigation", "Vendor Advisory", "Third Party Advisory"}
-    patch_refs = [
+    patch_refs = list(dict.fromkeys(
         r["url"] for r in refs
         if r.get("url") and PATCH_TAGS.intersection(set(r.get("tags", [])))
-    ]
+    ))
     patch_available = len(patch_refs) > 0
 
     # CWE weaknesses
