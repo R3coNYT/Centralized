@@ -77,6 +77,27 @@ def _category(test_id: str) -> str:
     return _CATEGORY_MAP.get(prefix, "System Audit")
 
 
+def _build_recommendation(test_id: str, solution: str, description: str = "", details: str = "") -> str:
+    """Always return a non-empty recommendation string.
+    Uses the explicit Lynis solution when available, otherwise builds a guide
+    from the test category and links to the CISOfy online controls database.
+    """
+    parts = []
+    if solution:
+        parts.append(solution)
+    else:
+        cat = _category(test_id)
+        if description:
+            parts.append(f"Review and address: {description}")
+        if details:
+            parts.append(f"Details: {details}")
+        if not parts:
+            parts.append(f"Investigate the {cat} configuration.")
+    if test_id:
+        parts.append(f"\nLynis reference: https://cisofy.com/lynis/controls/{test_id}/")
+    return "\n".join(parts)
+
+
 # ---------------------------------------------------------------------------
 # lynis-report.dat parser
 # ---------------------------------------------------------------------------
@@ -142,7 +163,7 @@ def parse_lynis_report(file_path: str, target_ip: str) -> dict:
             "title":       f"[{test_id}] {description}"[:300],
             "severity":    "HIGH",
             "description": full_desc,
-            "recommendation": solution or None,
+            "recommendation": _build_recommendation(test_id, solution, description, details),
             "evidence":    f"Lynis test {test_id} — {_category(test_id)}",
             "source":      "lynis",
         })
@@ -170,7 +191,7 @@ def parse_lynis_report(file_path: str, target_ip: str) -> dict:
             "title":       f"[{test_id}] {description}"[:300],
             "severity":    "LOW",
             "description": full_desc,
-            "recommendation": solution or None,
+            "recommendation": _build_recommendation(test_id, solution, description, details),
             "evidence":    f"Lynis test {test_id} — {_category(test_id)}",
             "source":      "lynis",
         })
@@ -354,6 +375,7 @@ def parse_lynis_log(file_path: str, target_ip: str) -> dict:
             "title":       title,
             "severity":    sev,
             "description": description.strip(),
+            "recommendation": _build_recommendation(test_id or "", "", test_desc or ""),
             "evidence":    f"Lynis result{(' — '+_category(test_id)) if test_id else ''}",
             "source":      "lynis",
         })
@@ -377,6 +399,7 @@ def parse_lynis_log(file_path: str, target_ip: str) -> dict:
                         "title":       title,
                         "severity":    sev,
                         "description": desc,
+                        "recommendation": _build_recommendation(test_id or "", "", desc),
                         "evidence":    f"Lynis summary{(' — '+_category(test_id)) if test_id else ''}",
                         "source":      "lynis",
                     })

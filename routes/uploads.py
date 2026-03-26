@@ -464,8 +464,9 @@ def _persist_parsed_data(audit_id: int, parsed_hosts: list, enrich_nvd: bool):
                 dup = Vulnerability.query.filter_by(host_id=host.id, title=title).first()
             if dup:
                 # Backfill recommendation if the existing record is missing it
-                if not dup.recommendation and vdata.get("recommendation"):
-                    dup.recommendation = vdata["recommendation"]
+                new_rec = vdata.get("recommendation")
+                if not dup.recommendation and new_rec:
+                    dup.recommendation = new_rec
                 continue
 
             vuln = Vulnerability(
