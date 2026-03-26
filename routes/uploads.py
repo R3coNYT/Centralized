@@ -98,7 +98,14 @@ def upload(audit_id):
                 target_ip=target_ip if file_type in (FILE_TYPE_LYNIS_LOG, FILE_TYPE_LYNIS_REPORT) else None,
             )
             db.session.add(uploaded)
-            db.session.flush()
+            try:
+                db.session.flush()
+            except Exception as exc:
+                db.session.rollback()
+                if os.path.exists(save_path):
+                    os.remove(save_path)
+                errors.append(f"{original_name}: DB error saving record – {exc}")
+                continue
 
             extra = {"target_ip": target_ip} if target_ip else None
             result = parse_file(save_path, file_type, audit_id, db.session, extra=extra)
