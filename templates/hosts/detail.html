@@ -188,6 +188,13 @@
               <i class="bi bi-info-circle"></i>
             </button>
             {% endif %}
+            {% if v.recommendation %}
+            <button class="btn btn-sm btn-outline-success ms-1"
+                    onclick="showRemediation({{ v.title | tojson }}, {{ v.recommendation | tojson }})"
+                    title="Remediation guide">
+              <i class="bi bi-tools"></i>
+            </button>
+            {% endif %}
           </td>
         </tr>
         {% else %}
@@ -201,7 +208,28 @@
 
 {% include '_partials/cve_modal.html' %}
 
-<!-- ── Host Context Modal ──────────────────────────────────────────────────── -->
+<!-- ── Remediation Modal ─────────────────────────────────────────────────── -->
+<div class="modal fade" id="remediationModal" tabindex="-1" aria-labelledby="remediationModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="remediationModalLabel">
+          <i class="bi bi-tools me-2 text-success"></i>Remediation Guide
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p class="fw-semibold mb-3" id="remediationTitle"></p>
+        <div class="bg-body-secondary rounded p-3">
+          <pre id="remediationBody" class="mb-0 small" style="white-space:pre-wrap;word-break:break-word"></pre>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
 <div class="modal fade" id="contextModal" tabindex="-1" aria-labelledby="contextModalLabel" aria-hidden="true">
   <div class="modal-dialog modal-lg">
     <div class="modal-content bg-dark border-secondary">
@@ -475,6 +503,17 @@ if (UNKNOWN_VULNS.length > 0) {
 function getCsrfToken() {
   const meta = document.querySelector('meta[name="csrf-token"]');
   return meta ? meta.getAttribute('content') : '';
+}
+
+// ── Lynis / tool remediation guide modal ──────────────────────────────────
+let _remediationModal = null;
+function showRemediation(title, recommendation) {
+  document.getElementById('remediationTitle').textContent = title;
+  document.getElementById('remediationBody').textContent  = recommendation;
+  if (!_remediationModal) {
+    _remediationModal = new bootstrap.Modal(document.getElementById('remediationModal'));
+  }
+  _remediationModal.show();
 }
 
 function showToast(type, msg) {

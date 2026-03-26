@@ -466,6 +466,7 @@ def _persist_parsed_data(audit_id: int, parsed_hosts: list, enrich_nvd: bool):
                 source=vdata.get("source", "unknown"),
                 template_id=vdata.get("template_id"),
                 evidence=vdata.get("evidence"),
+                recommendation=vdata.get("recommendation"),
             )
             db.session.add(vuln)
 
