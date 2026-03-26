@@ -183,7 +183,18 @@ def reprocess_files(audit_id):
         if not os.path.exists(path):
             errors.append(f"{uf.original_filename}: file not found on disk.")
             continue
-        result = parse_file(path, uf.file_type, audit_id, db.session)
+        # Lynis files need a target_ip — recover it from any host already
+        # associated with this audit that was created by this file type.
+        extra = None
+        if uf.file_type in (FILE_TYPE_LYNIS_LOG, FILE_TYPE_LYNIS_REPORT):
+            host_obj = Host.query.filter_by(audit_id=audit_id).first()
+            if host_obj and host_obj.ip:
+                extra = {"target_ip": host_obj.ip}
+            else:
+                errors.append(f"{uf.original_filename}: cannot reprocess — no host IP found.")
+                continue
+
+        result = parse_file(path, uf.file_type, audit_id, db.session, extra=extra)
         if result.get("error"):
             errors.append(f"{uf.original_filename}: {result['error']}")
             continue
@@ -452,6 +463,9 @@ def _persist_parsed_data(audit_id: int, parsed_hosts: list, enrich_nvd: bool):
             if not dup and title:
                 dup = Vulnerability.query.filter_by(host_id=host.id, title=title).first()
             if dup:
+                # Backfill recommendation if the existing record is missing it
+                if not dup.recommendation and vdata.get("recommendation"):
+                    dup.recommendation = vdata["recommendation"]
                 continue
 
             vuln = Vulnerability(
