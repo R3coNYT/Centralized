@@ -325,7 +325,16 @@ uploadForm.addEventListener('submit', function(e) {
   uploadBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Uploading…';
   progressWrap.classList.remove('d-none');
 
-  const fd = new FormData(this);
+  // Build FormData directly from fileMap — do NOT rely on DataTransfer/fileInput.files
+  // assignment (can silently fail on Firefox/Linux and other environments).
+  const fd = new FormData();
+  const csrfEl = this.querySelector('[name="csrf_token"]');
+  if (csrfEl) fd.append('csrf_token', csrfEl.value);
+  const ipEl = document.getElementById('target_ip');
+  if (ipEl && ipEl.value.trim()) fd.append('target_ip', ipEl.value.trim());
+  const enrichEl = document.getElementById('enrich_nvd');
+  if (enrichEl && enrichEl.checked) fd.append('enrich_nvd', '1');
+  fileMap.forEach(function(f) { fd.append('files', f, f.name); });
 
   const xhr = new XMLHttpRequest();
   xhr.open('POST', this.action || window.location.href);
