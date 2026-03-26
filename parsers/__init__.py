@@ -32,8 +32,21 @@ def detect_file_type(file_path: str, original_filename: str) -> str:
     if ext == ".log":
         try:
             with open(file_path, "r", encoding="utf-8", errors="replace") as f:
-                head = f.read(4000)
-            if "Starting Lynis" in head or "lynis_version" in head.lower():
+                head = f.read(8000)
+            lynis_log_signals = (
+                "Starting Lynis",
+                "lynis_version",
+                "Lynis version",
+                "Lynis 2.",
+                "Lynis 3.",
+                "Lynis 4.",
+                "[+] Initializing",
+                "LYNIS - ",
+                "cisofy.com",
+            )
+            fname_lower = original_filename.lower()
+            # Filename hint: lynis*.log is almost certainly a Lynis log
+            if "lynis" in fname_lower or any(sig in head for sig in lynis_log_signals):
                 return FILE_TYPE_LYNIS_LOG
         except Exception:
             pass
@@ -42,8 +55,17 @@ def detect_file_type(file_path: str, original_filename: str) -> str:
     if ext == ".dat":
         try:
             with open(file_path, "r", encoding="utf-8", errors="replace") as f:
-                head = f.read(2000)
-            if "lynis_version=" in head or "report_version_major=" in head:
+                head = f.read(4000)
+            lynis_dat_signals = (
+                "lynis_version=",
+                "report_version_major=",
+                "# Lynis",
+                "# lynis",
+                "warning[]=",
+                "suggestion[]=",
+            )
+            fname_lower = original_filename.lower()
+            if "lynis" in fname_lower or any(sig in head for sig in lynis_dat_signals):
                 return FILE_TYPE_LYNIS_REPORT
         except Exception:
             pass
