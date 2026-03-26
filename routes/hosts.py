@@ -1,9 +1,23 @@
+import re
 from flask import Blueprint, render_template, request, jsonify
 from flask_login import login_required
 from models import Host, Port, Vulnerability, HttpPage, CVE_STATUS_VALUES
 from extensions import db
 
 hosts_bp = Blueprint("hosts", __name__, url_prefix="/hosts")
+
+
+def _lynis_recommendation_from_title(title: str) -> str:
+    """Regenerate a recommendation string from a Lynis vuln title.
+    Title format: '[TEST-ID] description'
+    """
+    from parsers.lynis_parser import _build_recommendation
+    m = re.match(r'^\[([A-Z0-9-]+)\]\s*(.*)', title or '')
+    if m:
+        test_id, description = m.group(1), m.group(2)
+    else:
+        test_id, description = '', title or ''
+    return _build_recommendation(test_id, '', description)
 
 
 @hosts_bp.route("/<int:host_id>")
@@ -23,6 +37,16 @@ def detail(host_id):
         .all()
     )
     pages = HttpPage.query.filter_by(host_id=host_id).all()
+
+    # Auto-backfill missing recommendations for Lynis vulns.
+    # This runs transparently so existing data is healed without any user action.
+    needs_commit = False
+    for v in vulns:
+        if v.source == 'lynis' and not v.recommendation:
+            v.recommendation = _lynis_recommendation_from_title(v.title)
+            needs_commit = True
+    if needs_commit:
+        db.session.commit()
 
     return render_template(
         "hosts/detail.html",

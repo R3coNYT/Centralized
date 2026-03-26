@@ -230,6 +230,7 @@ class UploadedFile(db.Model):
     file_size = db.Column(db.Integer)
     parsed = db.Column(db.Boolean, default=False)
     parse_error = db.Column(db.Text)
+    target_ip = db.Column(db.String(255))               # filled for Lynis files (user-supplied host IP/hostname)
     created_at = db.Column(db.DateTime, default=utcnow)
 
 
