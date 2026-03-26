@@ -15,12 +15,21 @@
   - HTTPX JSON output
   - Nuclei JSON / JSONL output
   - Nikto XML and JSON output
+  - Lynis audit output — `lynis.log` (verbose) and `lynis-report.dat` (key=value) — maps warnings → HIGH, suggestions → LOW
   - PDF audit reports (AutoRecon + generic) — extracts CVEs, IPs, ports via text analysis
-- **CVE detection** from uploaded files + on-demand lookup / keyword search via [NVD API v2](https://nvd.nist.gov/developers/vulnerabilities)
+- **CVE detection** from uploaded files + on-demand lookup / keyword search
+- **Multi-source CVE enrichment** — NVD is the default source; additional data sources can be enabled from **Admin → Settings**:
+  - [CIRCL CVE Search](https://cve.circl.lu) — CVSS fallback, affected packages
+  - [MITRE / cve.org](https://www.cve.org) — authoritative CVE descriptions and weaknesses
+  - [EPSS (FIRST.org)](https://www.first.org/epss) — exploit prediction score and percentile
+  - [OSV (Google)](https://osv.dev) — open-source vulnerability data, affected packages
+  - [EUVD / ENISA](https://euvd.enisa.europa.eu) — European Union vulnerability database
+  - [CVE Details](https://www.cvedetails.com), [Tenable](https://www.tenable.com/cve), [Wiz](https://www.wiz.io), [VulDB](https://vuldb.com), [CVEFind](https://www.cvefind.com) — link enrichment (clickable references in the CVE modal)
 - **NVD enrichment** — optionally auto-query NVD for every discovered service/version during upload
 - **Host detail view** — open ports, HTTP pages, vulnerabilities, TLS info
 - **Manual findings** — add analyst notes with severity, status, evidence, recommendations
 - **CVE modal** — click any CVE ID to instantly pull CVSS score, description and references from NVD
+- **Remediation guide** — wrench button on each Lynis finding opens a modal with the fix suggestion and a direct link to the [CISOfy controls database](https://cisofy.com/lynis/controls/)
 
 ---
 
@@ -222,6 +231,7 @@ Edit `config.py` or set environment variables:
 | `DATABASE_URL`  | `sqlite:///centralized.db` | SQLAlchemy DB URI                   |
 | `NVD_API_KEY`   | *(empty)*                  | NVD API key — raises rate limit from 5 to 50 req/30s |
 | `UPLOAD_FOLDER` | `./uploads/`               | Where uploaded files are stored      |
+| `CVE_CACHE_TTL_DAYS` | `7`                   | How long enriched CVE data is cached locally |
 
 ### GitHub API Token
 
@@ -256,7 +266,11 @@ The token file is excluded from git (`.gitignore`) and is preserved across updat
 | Nuclei JSON/JSONL | `template-id` key | Vulnerabilities, severity, CVE IDs, evidence |
 | Nikto XML | `<niktoscan` tag | Vulnerabilities, OSVDB IDs, CVEs |
 | Nikto JSON | `host`/`vulnerabilities` keys | Same as above |
+| Lynis `.log` | `lynis.log` filename | Warnings (HIGH) and suggestions (LOW) with test ID, category, fix |
+| Lynis `.dat` | `lynis-report.dat` filename | Same + host metadata (OS, kernel, hostname) |
 | PDF (AutoRecon/generic) | `.pdf` extension | IPs, CVE IDs, port references (regex extraction) |
+
+> **Lynis uploads require a Target IP** — enter it in the *Target IP* field on the upload page because Lynis runs locally on the audited machine and does not embed a network address in its output.
 
 ---
 
@@ -272,7 +286,7 @@ Centralized/
 ├── app.py                  # Flask factory + startup
 ├── config.py               # Configuration
 ├── models/__init__.py      # SQLAlchemy models
-├── parsers/                # File parsers (nmap, httpx, nuclei, nikto, pdf, autorecon)
+├── parsers/                # File parsers (nmap, httpx, nuclei, nikto, lynis, pdf, autorecon)
 ├── services/cve_service.py # NVD API v2 integration
 ├── routes/                 # Flask blueprints
 │   ├── auth.py             # Login / logout / user management
@@ -298,8 +312,8 @@ Centralized/
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/cve/lookup?id=CVE-2024-XXXX` | Fetch CVE details from NVD |
-| GET | `/api/cve/search?q=OpenSSH+8.4` | Search CVEs by keyword |
+| GET | `/api/cve/lookup?id=CVE-2024-XXXX` | Fetch CVE details (NVD + enabled extra sources) |
+| GET | `/api/cve/search?q=OpenSSH+8.4` | Search CVEs by keyword via NVD |
 | GET | `/api/audits/<id>/stats` | JSON stats for an audit |
 | GET | `/api/dashboard/stats` | Global dashboard stats |
 
