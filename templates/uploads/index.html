@@ -20,7 +20,7 @@
             <p class="mb-1 fw-semibold">Drag & drop files here</p>
             <p class="text-muted small mb-3">or click to browse — <strong>you can add files in multiple batches</strong></p>
             <input type="file" id="fileInput" name="files" multiple
-                   accept=".xml,.json,.pdf" class="d-none"/>
+                   accept=".xml,.json,.pdf,.log,.dat" class="d-none"/>
             <button type="button" class="btn btn-outline-primary btn-sm" onclick="document.getElementById('fileInput').click()">
               <i class="bi bi-folder2-open me-1"></i>Browse Files
             </button>
@@ -60,9 +60,21 @@
                 <div class="col-sm-6"><i class="bi bi-check2 text-success me-1"></i>HTTPX JSON output</div>
                 <div class="col-sm-6"><i class="bi bi-check2 text-success me-1"></i>Nuclei JSON / JSONL</div>
                 <div class="col-sm-6"><i class="bi bi-check2 text-success me-1"></i>Nikto XML / JSON</div>
+                <div class="col-sm-6"><i class="bi bi-check2 text-success me-1"></i>Lynis audit report (<code>.log</code> / <code>.dat</code>)</div>
                 <div class="col-sm-6"><i class="bi bi-check2 text-success me-1"></i>PDF audit reports (AutoRecon)</div>
               </div>
             </div>
+          </div>
+
+          <!-- Target IP for Lynis files (shown dynamically) -->
+          <div id="lynisTargetWrap" class="mb-3 d-none">
+            <label class="form-label fw-semibold" for="target_ip">
+              <i class="bi bi-hdd-network me-1 text-primary"></i>
+              Target IP / Hostname <span class="text-danger">*</span>
+            </label>
+            <p class="text-muted small mb-1">Required when uploading Lynis files (.log / .dat) — the audited machine's IP or hostname.</p>
+            <input type="text" class="form-control" name="target_ip" id="target_ip"
+                   placeholder="e.g. 192.168.1.50 or srv-glpi.local">
           </div>
 
           <!-- NVD enrichment option -->
@@ -151,7 +163,9 @@ const progressWrap = document.getElementById('progressWrap');
 const progressBar  = document.getElementById('progressBar');
 const progressPct  = document.getElementById('progressPct');
 
-const ALLOWED = new Set(['xml', 'json', 'pdf']);
+const ALLOWED = new Set(['xml', 'json', 'pdf', 'log', 'dat']);
+const LYNIS_EXTS = new Set(['log', 'dat']);
+const lynisTargetWrap = document.getElementById('lynisTargetWrap');
 
 function ext(name) {
   return name.split('.').pop().toLowerCase();
@@ -165,7 +179,7 @@ function addFiles(newFiles) {
     fileMap.set(f.name, f); // overwrite same name → keeps latest
   });
   if (rejected) {
-    showToast(`${rejected} file(s) skipped — only .xml, .json and .pdf are accepted.`, 'warning');
+    showToast(`${rejected} file(s) skipped — only .xml, .json, .pdf, .log and .dat are accepted.`, 'warning');
   }
   renderList();
   syncInput();
@@ -176,6 +190,12 @@ function renderList() {
   fileList.innerHTML = '';
   fileBar.classList.toggle('d-none', fileMap.size === 0);
   uploadBtn.disabled = fileMap.size === 0;
+
+  // Show/hide the Lynis target IP field
+  const hasLynis = [...fileMap.keys()].some(n => LYNIS_EXTS.has(ext(n)));
+  lynisTargetWrap.classList.toggle('d-none', !hasLynis);
+  const targetInput = document.getElementById('target_ip');
+  if (!hasLynis) targetInput.value = '';
 
   if (!fileMap.size) { return; }
 
@@ -225,8 +245,10 @@ function syncInput() {
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 function iconForExt(e) {
-  return e === 'pdf' ? 'bi-file-earmark-pdf' :
-         e === 'xml' ? 'bi-file-earmark-code' :
+  return e === 'pdf'  ? 'bi-file-earmark-pdf'  :
+         e === 'xml'  ? 'bi-file-earmark-code' :
+         e === 'log'  ? 'bi-file-earmark-text' :
+         e === 'dat'  ? 'bi-file-earmark-text' :
          'bi-file-earmark-text';
 }
 

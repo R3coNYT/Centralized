@@ -206,6 +206,48 @@ def enrich_vulnerabilities(port_product: str, port_version: str | None) -> list[
     return search_cves_by_keyword(keyword, max_results=50)
 
 
+def search_cves_for_service(product: str, version: str | None, max_results: int = 50) -> list[dict]:
+    """Multi-source CVE search for a detected service product + version.
+
+    Always queries NVD.  Additionally queries any enabled configured sources
+    that expose a product-level keyword search (currently CIRCL CVE Search).
+    Results are deduplicated by CVE ID; the NVD entry takes precedence when
+    the same CVE appears in multiple sources.
+
+    Returns a list of CVE dicts suitable for persisting as Vulnerability rows.
+    """
+    if not product:
+        return []
+
+    # ── 1. NVD (always) ───────────────────────────────────────────────────────
+    nvd_results = enrich_vulnerabilities(product, version)
+    seen: dict[str, dict] = {r["cve_id"]: r for r in nvd_results if r.get("cve_id")}
+
+    # ── 2. Enabled non-NVD sources that support keyword/product search ────────
+    try:
+        from models import CveSource
+        extra_sources = CveSource.query.filter_by(enabled=True, is_builtin=False).all()
+    except Exception:
+        extra_sources = []
+
+    for src in extra_sources:
+        driver = (
+            src.driver
+            if src.driver and src.driver not in ("generic", "")
+            else _detect_driver(src.url)
+        )
+        if driver == "circl":
+            for cve in _search_circl_by_product(product, max_results=max_results):
+                cid = cve.get("cve_id", "")
+                if cid and cid not in seen:
+                    seen[cid] = cve
+        # OSV, EUVD, MITRE, EPSS and link-only sources do not expose a useful
+        # product keyword search endpoint — they are used for per-CVE enrichment
+        # only (via lookup_cve → _enrich_from_extra_sources).
+
+    return list(seen.values())
+
+
 # ---------------------------------------------------------------------------
 # Multi-source CVE enrichment
 # ---------------------------------------------------------------------------
@@ -719,6 +761,60 @@ def _score_to_severity(score) -> str:
     if score > 0.0:
         return "LOW"
     return "INFO"
+
+
+def _search_circl_by_product(product: str, max_results: int = 50) -> list[dict]:
+    """Search CIRCL CVE Search database for CVEs matching a product name.
+
+    Uses ``GET /api/search/{vendor}/{product}`` treating the normalised product
+    name as both vendor and product — this works well for products where the
+    vendor identifier == product name (e.g. mysql, openssl, openssh, apache).
+    Returns a list of lightweight CVE dicts (cve_id, description, severity,
+    cvss_score) suitable for deduplication with NVD results.
+    """
+    if not product or len(product.strip()) < 3:
+        return []
+    normalized = re.sub(r"[^a-z0-9_-]", "_", product.lower().strip()).strip("_")
+    if len(normalized) < 2:
+        return []
+    try:
+        resp = requests.get(
+            f"https://cve.circl.lu/api/search/{normalized}/{normalized}",
+            headers={"User-Agent": "Centralized-PentestTool/1.0"},
+            timeout=12,
+        )
+        if resp.status_code != 200:
+            return []
+        payload = resp.json()
+        if not payload:
+            return []
+        items = payload if isinstance(payload, list) else payload.get("data", [])
+        results: list[dict] = []
+        for item in (items or [])[:max_results]:
+            cve_id = item.get("id") or item.get("cve_id") or ""
+            if not cve_id or not re.match(r"^CVE-\d{4}-\d{4,7}$", cve_id, re.IGNORECASE):
+                continue
+            cve_id = cve_id.upper()
+            score = None
+            for key in ("cvss3", "cvss"):
+                try:
+                    score = float(item[key])
+                    break
+                except (KeyError, ValueError, TypeError):
+                    pass
+            results.append({
+                "cve_id":      cve_id,
+                "title":       cve_id,
+                "description": item.get("summary", ""),
+                "severity":    _score_to_severity(score),
+                "cvss_score":  score,
+                "cvss_vector": None,
+                "references":  "[]",
+                "source":      "circl",
+            })
+        return results
+    except Exception:
+        return []
 
 
 # ---------------------------------------------------------------------------
