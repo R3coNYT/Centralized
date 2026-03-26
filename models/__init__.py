@@ -258,7 +258,10 @@ class HostContext(db.Model):
     notes = db.Column(db.Text)
     updated_at = db.Column(db.DateTime, default=utcnow, onupdate=utcnow)
 
-    host = db.relationship("Host", backref=db.backref("context", uselist=False))
+    host = db.relationship(
+        "Host",
+        backref=db.backref("context", uselist=False, cascade="all, delete-orphan", single_parent=True),
+    )
 
 
 # ---------------------------------------------------------------------------
