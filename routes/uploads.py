@@ -466,11 +466,13 @@ def _persist_parsed_data(audit_id: int, parsed_hosts: list, enrich_nvd: bool):
         db.session.flush()
 
         # ── Auto CVE lookup from port data ────────────────────────────────────
-        # For every new port that has a product/service name, search NVD.
-        # This runs automatically (not gated by enrich_nvd) for known-risky
-        # services; for other services it only runs when enrich_nvd is set.
-        # '?' / '-' have already been normalised to None above; we always
-        # prefer the product name but fall back to the service keyword.
+        # For every new (or newly-enriched) port that has a product/service
+        # name, search all configured CVE sources (NVD + any enabled extras).
+        # This always runs: the enrich_nvd checkbox is no longer required to
+        # trigger product-based searches.  When only the service keyword is
+        # known (product is None), the search is limited to the well-known
+        # high-risk service set so we avoid noisy lookups for generic names.
+        # '?' / '-' have already been normalised to None above.
         for port_obj in new_ports_for_cve:
             product = port_obj.product           # None when nmap returned '?'
             service = (port_obj.service or "").lower()
@@ -480,8 +482,7 @@ def _persist_parsed_data(audit_id: int, parsed_hosts: list, enrich_nvd: bool):
             # When only service is known (product is None / unknown), search by
             # service name only if it's in the well-known auto-lookup set.
             search_term = product or service
-            auto = service in _AUTO_CVE_SERVICES
-            if auto or (enrich_nvd and product):
+            if product or service in _AUTO_CVE_SERVICES:
                 version = port_obj.version        # None when nmap returned '?'
                 _nvd_enrich_port(host.id, port_obj.id, search_term, version)
 
@@ -499,10 +500,14 @@ def _persist_parsed_data(audit_id: int, parsed_hosts: list, enrich_nvd: bool):
 
 
 def _nvd_enrich_port(host_id: int, port_id: int, product: str, version: str | None):
-    """Search NVD for CVEs related to a port's product/version."""
-    from services.cve_service import enrich_vulnerabilities
+    """Search all configured CVE sources for CVEs related to a port's product/version.
+
+    Queries NVD plus any enabled additional sources (e.g. CIRCL) that support
+    product keyword search.  Results are deduplicated by CVE ID.
+    """
+    from services.cve_service import search_cves_for_service
     try:
-        cves = enrich_vulnerabilities(product, version)
+        cves = search_cves_for_service(product, version)
         for cve_data in cves:
             cve_id = cve_data.get("cve_id")
             if not cve_id:
@@ -519,10 +524,10 @@ def _nvd_enrich_port(host_id: int, port_id: int, product: str, version: str | No
                     cvss_vector=cve_data.get("cvss_vector"),
                     description=cve_data.get("description"),
                     references=cve_data.get("references"),
-                    source="nvd",
+                    source=cve_data.get("source", "nvd"),
                 ))
     except Exception:
-        pass  # NVD lookup is best-effort
+        pass  # CVE lookup is best-effort
 
 
 def _nvd_enrich_vuln(vuln, cve_id: str):
