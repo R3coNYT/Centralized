@@ -15,6 +15,8 @@ FILE_TYPE_NUCLEI_JSON = "nuclei_json"
 FILE_TYPE_NIKTO_XML = "nikto_xml"
 FILE_TYPE_NIKTO_JSON = "nikto_json"
 FILE_TYPE_PDF = "pdf"
+FILE_TYPE_LYNIS_LOG = "lynis_log"
+FILE_TYPE_LYNIS_REPORT = "lynis_report"
 FILE_TYPE_UNKNOWN = "unknown"
 
 CVE_PATTERN = re.compile(r"CVE-\d{4}-\d{4,7}", re.IGNORECASE)
@@ -26,6 +28,26 @@ def detect_file_type(file_path: str, original_filename: str) -> str:
 
     if ext == ".pdf":
         return FILE_TYPE_PDF
+
+    if ext == ".log":
+        try:
+            with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+                head = f.read(4000)
+            if "Starting Lynis" in head or "lynis_version" in head.lower():
+                return FILE_TYPE_LYNIS_LOG
+        except Exception:
+            pass
+        return FILE_TYPE_UNKNOWN
+
+    if ext == ".dat":
+        try:
+            with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+                head = f.read(2000)
+            if "lynis_version=" in head or "report_version_major=" in head:
+                return FILE_TYPE_LYNIS_REPORT
+        except Exception:
+            pass
+        return FILE_TYPE_UNKNOWN
 
     if ext == ".xml":
         try:
@@ -75,7 +97,7 @@ def detect_file_type(file_path: str, original_filename: str) -> str:
     return FILE_TYPE_UNKNOWN
 
 
-def parse_file(file_path: str, file_type: str, audit_id: int, db_session):
+def parse_file(file_path: str, file_type: str, audit_id: int, db_session, extra: dict = None):
     """
     Route a file to the correct parser. Returns a dict:
     {
@@ -91,6 +113,16 @@ def parse_file(file_path: str, file_type: str, audit_id: int, db_session):
     from parsers.nuclei_parser import parse_nuclei_json
     from parsers.nikto_parser import parse_nikto_xml, parse_nikto_json
     from parsers.pdf_parser import parse_pdf
+    from parsers.lynis_parser import parse_lynis_log, parse_lynis_report
+
+    # Lynis parsers require a target IP supplied by the user
+    if file_type in (FILE_TYPE_LYNIS_LOG, FILE_TYPE_LYNIS_REPORT):
+        target_ip = (extra or {}).get("target_ip", "")
+        parser_fn = parse_lynis_log if file_type == FILE_TYPE_LYNIS_LOG else parse_lynis_report
+        try:
+            return parser_fn(file_path, target_ip)
+        except Exception as exc:
+            return {"hosts": [], "error": str(exc)}
 
     dispatch = {
         FILE_TYPE_NMAP_XML: parse_nmap_xml,

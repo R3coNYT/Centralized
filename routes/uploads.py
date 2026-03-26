@@ -8,11 +8,11 @@ from flask_login import login_required, current_user
 from werkzeug.utils import secure_filename
 from models import Audit, Host, Port, Vulnerability, HttpPage, UploadedFile
 from extensions import db
-from parsers import detect_file_type, parse_file
+from parsers import detect_file_type, parse_file, FILE_TYPE_LYNIS_LOG, FILE_TYPE_LYNIS_REPORT
 
 uploads_bp = Blueprint("uploads", __name__, url_prefix="/uploads")
 
-ALLOWED_EXTENSIONS = {"xml", "json", "pdf"}
+ALLOWED_EXTENSIONS = {"xml", "json", "pdf", "log", "dat"}
 
 
 def _allowed_file(filename: str) -> bool:
@@ -52,6 +52,7 @@ def upload(audit_id):
             return redirect(request.url)
 
         enrich_nvd = bool(request.form.get("enrich_nvd"))
+        target_ip  = request.form.get("target_ip", "").strip()
         saved_count = 0
         errors = []
 
@@ -62,7 +63,7 @@ def upload(audit_id):
             if file.filename == "":
                 continue
             if not _allowed_file(file.filename):
-                errors.append(f"{file.filename}: unsupported extension (only xml, json, pdf).")
+                errors.append(f"{file.filename}: unsupported extension (only xml, json, pdf, log, dat).")
                 continue
 
             original_name = secure_filename(file.filename)
@@ -79,6 +80,14 @@ def upload(audit_id):
 
             file_type = detect_file_type(save_path, original_name)
 
+            # Lynis files require a target IP provided by the user
+            if file_type in (FILE_TYPE_LYNIS_LOG, FILE_TYPE_LYNIS_REPORT) and not target_ip:
+                errors.append(
+                    f"{original_name}: a Target IP / Hostname is required for Lynis files."
+                )
+                os.remove(save_path)
+                continue
+
             uploaded = UploadedFile(
                 audit_id=audit_id,
                 original_filename=original_name,
@@ -90,7 +99,9 @@ def upload(audit_id):
             db.session.add(uploaded)
             db.session.flush()
 
-            result = parse_file(save_path, file_type, audit_id, db.session)
+            extra = {"target_ip": target_ip} if target_ip else None
+            result = parse_file(save_path, file_type, audit_id, db.session, extra=extra)
+
             if result.get("error"):
                 uploaded.parse_error = result["error"]
                 errors.append(f"{original_name}: {result['error']}")
