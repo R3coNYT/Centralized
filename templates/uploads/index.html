@@ -339,6 +339,14 @@ uploadForm.addEventListener('submit', function(e) {
   });
 
   xhr.addEventListener('load', () => {
+    // Non-2xx status (e.g. 500) = stay on page and show error
+    if (xhr.status >= 400) {
+      showToast('Server error (' + xhr.status + ') — check the file and try again.', 'danger');
+      uploadBtn.disabled = false;
+      uploadBtn.innerHTML = '<i class="bi bi-upload me-1"></i>Upload & Parse';
+      progressWrap.classList.add('d-none');
+      return;
+    }
     // Server returns redirect (302) — follow it
     if (xhr.responseURL) {
       window.location.href = xhr.responseURL;
