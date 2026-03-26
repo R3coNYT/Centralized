@@ -221,9 +221,12 @@
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">
-        <p class="fw-semibold mb-3" id="remediationTitle"></p>
-        <div class="bg-body-secondary rounded p-3">
-          <pre id="remediationBody" class="mb-0 small" style="white-space:pre-wrap;word-break:break-word"></pre>
+        <p class="d-flex align-items-start gap-2 fw-semibold mb-3">
+          <i class="bi bi-exclamation-triangle-fill text-warning mt-1 flex-shrink-0"></i>
+          <span id="remediationTitle"></span>
+        </p>
+        <div class="rounded-3 p-3 border border-success border-opacity-25" style="background:rgba(0,0,0,.45)">
+          <div id="remediationBody" class="mb-0 small font-monospace text-body" style="white-space:pre-wrap;word-break:break-word"></div>
         </div>
       </div>
       <div class="modal-footer">
@@ -511,7 +514,17 @@ function getCsrfToken() {
 let _remediationModal = null;
 function showRemediation(btn) {
   document.getElementById('remediationTitle').textContent = btn.dataset.remediationTitle || '';
-  document.getElementById('remediationBody').textContent  = btn.dataset.remediationBody  || '';
+  const raw = btn.dataset.remediationBody || '';
+  // Escape HTML entities first, then linkify URLs (safe from XSS)
+  const esc = raw
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+  const linked = esc.replace(
+    /(https?:\/\/[^\s<>&]+)/g,
+    '<a href="$1" target="_blank" rel="noopener noreferrer" class="link-success">$1</a>'
+  );
+  document.getElementById('remediationBody').innerHTML = linked;
   if (!_remediationModal) {
     _remediationModal = new bootstrap.Modal(document.getElementById('remediationModal'));
   }
