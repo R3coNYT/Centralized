@@ -95,6 +95,7 @@ def upload(audit_id):
                 file_type=file_type,
                 file_size=file_size,
                 parsed=False,
+                target_ip=target_ip if file_type in (FILE_TYPE_LYNIS_LOG, FILE_TYPE_LYNIS_REPORT) else None,
             )
             db.session.add(uploaded)
             db.session.flush()
@@ -183,16 +184,36 @@ def reprocess_files(audit_id):
         if not os.path.exists(path):
             errors.append(f"{uf.original_filename}: file not found on disk.")
             continue
-        # Lynis files need a target_ip — recover it from any host already
-        # associated with this audit that was created by this file type.
+        # Lynis files need a target_ip — use the one stored on the UploadedFile
+        # record (saved at upload time), which ties each file to the correct host.
         extra = None
         if uf.file_type in (FILE_TYPE_LYNIS_LOG, FILE_TYPE_LYNIS_REPORT):
-            host_obj = Host.query.filter_by(audit_id=audit_id).first()
-            if host_obj and host_obj.ip:
-                extra = {"target_ip": host_obj.ip}
-            else:
+            stored_ip = (uf.target_ip or "").strip()
+            if not stored_ip:
+                # Fallback for legacy records: find the host that owns Lynis vulns
+                # matching this file's basename (hostname embedded in Lynis output).
+                # If still ambiguous, skip rather than corrupt another host.
+                lynis_hosts = (
+                    db.session.query(Host)
+                    .join(Vulnerability, Vulnerability.host_id == Host.id)
+                    .filter(Host.audit_id == audit_id, Vulnerability.source == "lynis")
+                    .distinct()
+                    .all()
+                )
+                if len(lynis_hosts) == 1:
+                    stored_ip = lynis_hosts[0].ip
+                elif len(lynis_hosts) == 0:
+                    stored_ip = (Host.query.filter_by(audit_id=audit_id).first() or Host()).ip or ""
+                else:
+                    errors.append(
+                        f"{uf.original_filename}: cannot reprocess — multiple Lynis hosts found "
+                        f"and no target IP stored. Re-upload the file with the correct IP."
+                    )
+                    continue
+            if not stored_ip:
                 errors.append(f"{uf.original_filename}: cannot reprocess — no host IP found.")
                 continue
+            extra = {"target_ip": stored_ip}
 
         result = parse_file(path, uf.file_type, audit_id, db.session, extra=extra)
         if result.get("error"):
