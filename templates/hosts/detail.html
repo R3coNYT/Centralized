@@ -190,7 +190,9 @@
             {% endif %}
             {% if v.recommendation %}
             <button class="btn btn-sm btn-outline-success ms-1"
-                    onclick="showRemediation({{ v.title | tojson }}, {{ v.recommendation | tojson }})"
+                    data-remediation-title="{{ v.title | e }}"
+                    data-remediation-body="{{ v.recommendation | e }}"
+                    onclick="showRemediation(this)"
                     title="Remediation guide">
               <i class="bi bi-tools"></i>
             </button>
@@ -507,9 +509,9 @@ function getCsrfToken() {
 
 // ── Lynis / tool remediation guide modal ──────────────────────────────────
 let _remediationModal = null;
-function showRemediation(title, recommendation) {
-  document.getElementById('remediationTitle').textContent = title;
-  document.getElementById('remediationBody').textContent  = recommendation;
+function showRemediation(btn) {
+  document.getElementById('remediationTitle').textContent = btn.dataset.remediationTitle || '';
+  document.getElementById('remediationBody').textContent  = btn.dataset.remediationBody  || '';
   if (!_remediationModal) {
     _remediationModal = new bootstrap.Modal(document.getElementById('remediationModal'));
   }
