@@ -131,6 +131,147 @@
 </div>
 {% endif %}
 
+{# ── Shodan Intelligence ──────────────────────────────────────────────────── #}
+{% set shodan_data = extra_data.get('shodan', {}) %}
+{% if shodan_data %}
+<div class="card mb-4">
+  <div class="card-header fw-semibold">
+    <i class="bi bi-search me-2"></i>Shodan Intelligence
+    <span class="badge bg-secondary ms-2">{{ shodan_data|length }} IP(s)</span>
+  </div>
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table table-hover align-middle mb-0 small">
+        <thead class="table-header"><tr><th>IP</th><th>Org</th><th>Hostnames</th><th>Open Ports</th><th>CVEs</th></tr></thead>
+        <tbody>
+        {% for ip_key, sd in shodan_data.items() %}
+        {% if sd is mapping and not sd.get('error') %}
+        <tr>
+          <td class="font-monospace">{{ ip_key }}</td>
+          <td>{{ sd.get('org') or '—' }}</td>
+          <td class="text-muted">{{ (sd.get('hostnames') or [])|join(', ') or '—' }}</td>
+          <td>
+            {% set sp = sd.get('ports') or [] %}
+            {% for p in sp[:12] %}<span class="badge bg-secondary me-1">{{ p }}</span>{% endfor %}
+            {% if sp|length > 12 %}<span class="text-muted">+{{ sp|length - 12 }} more</span>{% endif %}
+            {% if not sp %}—{% endif %}
+          </td>
+          <td>
+            {% set sv = sd.get('vulns') or [] %}
+            {% if sv %}
+              {% for c in sv[:5] %}<span class="badge bg-danger me-1">{{ c }}</span>{% endfor %}
+              {% if sv|length > 5 %}<span class="text-muted small">+{{ sv|length - 5 }}</span>{% endif %}
+            {% else %}<span class="text-success small">None</span>{% endif %}
+          </td>
+        </tr>
+        {% endif %}
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+{# ── theHarvester OSINT ───────────────────────────────────────────────────── #}
+{% set harvest = extra_data.get('theharvester', {}) %}
+{% if harvest and (harvest.get('emails') or harvest.get('subdomains') or harvest.get('ips')) %}
+<div class="card mb-4">
+  <div class="card-header fw-semibold"><i class="bi bi-binoculars me-2"></i>OSINT — theHarvester</div>
+  <div class="card-body">
+    {% if harvest.get('emails') %}
+    <p class="fw-semibold small mb-1">Emails ({{ harvest.emails|length }})</p>
+    <div class="mb-3">{% for e in harvest.emails[:30] %}<span class="badge bg-info text-dark me-1 mb-1">{{ e }}</span>{% endfor %}{% if harvest.emails|length > 30 %}<span class="text-muted small">+{{ harvest.emails|length - 30 }} more</span>{% endif %}</div>
+    {% endif %}
+    {% if harvest.get('subdomains') %}
+    <p class="fw-semibold small mb-1">Subdomains ({{ harvest.subdomains|length }})</p>
+    <div class="mb-3 font-monospace small text-muted">{{ harvest.subdomains[:30]|join(', ') }}{% if harvest.subdomains|length > 30 %}, …{% endif %}</div>
+    {% endif %}
+    {% if harvest.get('ips') %}
+    <p class="fw-semibold small mb-1">IPs ({{ harvest.ips|length }})</p>
+    <div class="font-monospace small text-muted">{{ harvest.ips[:30]|join(', ') }}</div>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
+{# ── Login Forms ──────────────────────────────────────────────────────────── #}
+{% set login_forms = extra_data.get('login_forms', []) %}
+{% if login_forms %}
+<div class="card mb-4">
+  <div class="card-header fw-semibold"><i class="bi bi-person-lock me-2"></i>Login Forms Detected ({{ login_forms|length }})</div>
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table table-hover align-middle mb-0 small">
+        <thead class="table-header"><tr><th>Source URL</th><th>Action</th><th>Method</th></tr></thead>
+        <tbody>
+        {% for lf in login_forms %}
+        <tr>
+          <td class="text-break small">{{ lf.get('url') or '—' }}</td>
+          <td class="font-monospace small">{{ lf.get('action') or '—' }}</td>
+          <td><span class="badge bg-secondary">{{ (lf.get('method') or 'get')|upper }}</span></td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+{# ── Directory / File Bruteforce ──────────────────────────────────────────── #}
+{% set dir_bust = extra_data.get('dir_bruteforce', []) %}
+{% if dir_bust %}
+<div class="card mb-4">
+  <div class="card-header fw-semibold d-flex justify-content-between align-items-center">
+    <span><i class="bi bi-folder2-open me-2"></i>Directory / File Bruteforce ({{ dir_bust|length }})</span>
+    <button class="btn btn-sm btn-outline-secondary py-0" data-bs-toggle="collapse" data-bs-target="#dirBustCollapse">Toggle</button>
+  </div>
+  <div class="collapse show" id="dirBustCollapse">
+    <div class="card-body p-0">
+      <div class="table-responsive" style="max-height:280px;overflow-y:auto">
+        <table class="table table-hover align-middle mb-0 small">
+          <thead class="table-header" style="position:sticky;top:0;z-index:1"><tr><th>Path</th><th>Status</th><th>Size</th></tr></thead>
+          <tbody>
+          {% for entry in dir_bust %}
+          <tr>
+            <td class="font-monospace small">{{ entry.get('path') or '—' }}</td>
+            <td>{% set sc = entry.get('status')|string|int(0) %}<span class="badge {% if sc > 0 and sc < 300 %}bg-success{% elif sc < 400 %}bg-info text-dark{% elif sc < 500 %}bg-warning text-dark{% else %}bg-danger{% endif %}">{{ sc or '—' }}</span></td>
+            <td class="text-muted small">{{ entry.get('size') or '—' }}</td>
+          </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+{# ── Parameter Discovery ──────────────────────────────────────────────────── #}
+{% set params = extra_data.get('param_discovery', []) %}
+{% if params %}
+<div class="card mb-4">
+  <div class="card-header fw-semibold"><i class="bi bi-code-slash me-2"></i>Hidden Parameters — arjun ({{ params|length }} endpoint(s))</div>
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table table-hover align-middle mb-0 small">
+        <thead class="table-header"><tr><th>URL</th><th>Method</th><th>Parameters</th></tr></thead>
+        <tbody>
+        {% for ep in params %}
+        <tr>
+          <td class="text-break small">{{ ep.get('url') or '—' }}</td>
+          <td><span class="badge bg-secondary">{{ (ep.get('method') or 'GET')|upper }}</span></td>
+          <td class="font-monospace small">{{ (ep.get('parameters') or [])|join(', ') or '—' }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endif %}
+
 <!-- Vulnerabilities -->
 <div class="card">
   <div class="card-header fw-semibold"><i class="bi bi-shield-exclamation me-2"></i>Vulnerabilities ({{ vulns|length }})</div>
