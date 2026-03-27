@@ -310,17 +310,14 @@
     });
   }
 
-  // Select (check) all allowed checkboxes matching ext — deselect all others.
-  // ext="" means select all.
+  // Select (check) all allowed checkboxes matching ext — leave others untouched.
+  // ext="" (All button) selects every allowed file.
   function selectByExt(ext) {
     tbody.querySelectorAll("input.file-chk:not(:disabled)").forEach(chk => {
       const chkExt = (chk.dataset.ext || "").toLowerCase();
-      const shouldCheck = !ext || chkExt === ext;
-      chk.checked = shouldCheck;
-      if (shouldCheck) {
+      if (!ext || chkExt === ext) {
+        chk.checked = true;
         selectedPaths.set(chk.dataset.path, {name: chk.dataset.name, ext: chk.dataset.ext});
-      } else {
-        selectedPaths.delete(chk.dataset.path);
       }
     });
     updateSelUI();
