@@ -9,11 +9,25 @@ from flask_login import login_required, current_user
 from werkzeug.utils import secure_filename
 from models import Audit, Host, Port, Vulnerability, HttpPage, UploadedFile
 from extensions import db
-from parsers import detect_file_type, parse_file, FILE_TYPE_LYNIS_LOG, FILE_TYPE_LYNIS_REPORT
+from parsers import (
+    detect_file_type, parse_file,
+    FILE_TYPE_LYNIS_LOG, FILE_TYPE_LYNIS_REPORT,
+    FILE_TYPE_SQLMAP_TXT, FILE_TYPE_SQLMAP_CSV,
+    FILE_TYPE_DIRBUST_JSON, FILE_TYPE_DIRBUST_TXT,
+    FILE_TYPE_SCREENSHOT,
+)
 
 uploads_bp = Blueprint("uploads", __name__, url_prefix="/uploads")
 
-ALLOWED_EXTENSIONS = {"xml", "json", "pdf", "log", "dat"}
+ALLOWED_EXTENSIONS = {"xml", "json", "pdf", "log", "dat", "txt", "csv", "png", "jpg", "jpeg"}
+
+# File types that require the user to supply a target IP
+_NEEDS_TARGET_IP = {
+    FILE_TYPE_LYNIS_LOG, FILE_TYPE_LYNIS_REPORT,
+    FILE_TYPE_SQLMAP_TXT, FILE_TYPE_SQLMAP_CSV,
+    FILE_TYPE_DIRBUST_JSON, FILE_TYPE_DIRBUST_TXT,
+    FILE_TYPE_SCREENSHOT,
+}
 
 
 def _allowed_file(filename: str) -> bool:
@@ -64,7 +78,7 @@ def upload(audit_id):
             if file.filename == "":
                 continue
             if not _allowed_file(file.filename):
-                errors.append(f"{file.filename}: unsupported extension (only xml, json, pdf, log, dat).")
+                errors.append(f"{file.filename}: unsupported extension (xml, json, pdf, log, dat, txt, csv, png, jpg, jpeg).")
                 continue
 
             original_name = secure_filename(file.filename)
@@ -81,10 +95,10 @@ def upload(audit_id):
 
             file_type = detect_file_type(save_path, original_name)
 
-            # Lynis files require a target IP provided by the user
-            if file_type in (FILE_TYPE_LYNIS_LOG, FILE_TYPE_LYNIS_REPORT) and not target_ip:
+            # Some file types require a target IP provided by the user
+            if file_type in _NEEDS_TARGET_IP and not target_ip:
                 errors.append(
-                    f"{original_name}: a Target IP / Hostname is required for Lynis files."
+                    f"{original_name}: a Target IP / Hostname is required for this file type ({file_type})."
                 )
                 os.remove(save_path)
                 continue
@@ -96,7 +110,7 @@ def upload(audit_id):
                 file_type=file_type,
                 file_size=file_size,
                 parsed=False,
-                target_ip=target_ip if file_type in (FILE_TYPE_LYNIS_LOG, FILE_TYPE_LYNIS_REPORT) else None,
+                target_ip=target_ip if file_type in _NEEDS_TARGET_IP else None,
             )
             db.session.add(uploaded)
             try:
@@ -108,8 +122,14 @@ def upload(audit_id):
                 errors.append(f"{original_name}: DB error saving record – {exc}")
                 continue
 
-            extra = {"target_ip": target_ip} if target_ip else None
+            extra = {"target_ip": target_ip, "original_filename": original_name} if target_ip else {"original_filename": original_name}
             result = parse_file(save_path, file_type, audit_id, db.session, extra=extra)
+
+            # For screenshots, backfill the file_id so the template can link back
+            if file_type == FILE_TYPE_SCREENSHOT and not result.get("error"):
+                for h in result.get("hosts", []):
+                    for shot in h.get("extra_data", {}).get("screenshots", []):
+                        shot["file_id"] = uploaded.id
 
             if result.get("error"):
                 uploaded.parse_error = result["error"]
@@ -151,6 +171,10 @@ def view_file(audit_id, file_id):
         "pdf":  "application/pdf",
         "xml":  "text/xml",
         "json": "application/json",
+        "txt":  "text/plain",
+        "png":  "image/png",
+        "jpg":  "image/jpeg",
+        "jpeg": "image/jpeg",
     }
     mime = mime_map.get(ext, "application/octet-stream")
     return send_file(path, mimetype=mime, download_name=uf.original_filename, as_attachment=False)
@@ -195,9 +219,9 @@ def reprocess_files(audit_id):
         # Lynis files need a target_ip — use the one stored on the UploadedFile
         # record (saved at upload time), which ties each file to the correct host.
         extra = None
-        if uf.file_type in (FILE_TYPE_LYNIS_LOG, FILE_TYPE_LYNIS_REPORT):
+        if uf.file_type in _NEEDS_TARGET_IP:
             stored_ip = (uf.target_ip or "").strip()
-            if not stored_ip:
+            if uf.file_type in (FILE_TYPE_LYNIS_LOG, FILE_TYPE_LYNIS_REPORT) and not stored_ip:
                 # Fallback for legacy records: find the host that owns Lynis vulns
                 # matching this file's basename (hostname embedded in Lynis output).
                 # If still ambiguous, skip rather than corrupt another host.
@@ -221,7 +245,7 @@ def reprocess_files(audit_id):
             if not stored_ip:
                 errors.append(f"{uf.original_filename}: cannot reprocess — no host IP found.")
                 continue
-            extra = {"target_ip": stored_ip}
+            extra = {"target_ip": stored_ip, "original_filename": uf.original_filename}
 
         result = parse_file(path, uf.file_type, audit_id, db.session, extra=extra)
         if result.get("error"):
@@ -407,7 +431,33 @@ def _persist_parsed_data(audit_id: int, parsed_hosts: list, enrich_nvd: bool):
         if host_data.get("waf"):
             host.waf = host_data["waf"]
         if host_data.get("extra_data") is not None:
-            host.extra_data = json.dumps(host_data["extra_data"])
+            # Merge incoming extra_data with whatever is already stored so that
+            # uploading a dirbust file or screenshot does not wipe data from a
+            # previously imported autorecon_json for the same host.
+            existing_extra: dict = {}
+            if host.extra_data:
+                try:
+                    existing_extra = json.loads(host.extra_data)
+                except Exception:
+                    existing_extra = {}
+            new_extra = host_data["extra_data"]
+            for key, value in new_extra.items():
+                if key not in existing_extra:
+                    existing_extra[key] = value
+                elif isinstance(existing_extra[key], list) and isinstance(value, list):
+                    # Deduplicate by converting to string repr (works for simple dicts)
+                    existing_set = {json.dumps(item, sort_keys=True) for item in existing_extra[key]}
+                    for item in value:
+                        if json.dumps(item, sort_keys=True) not in existing_set:
+                            existing_extra[key].append(item)
+                            existing_set.add(json.dumps(item, sort_keys=True))
+                elif isinstance(existing_extra[key], dict) and isinstance(value, dict):
+                    existing_extra[key].update(value)
+                else:
+                    # Scalar: only overwrite if existing is falsy
+                    if not existing_extra[key]:
+                        existing_extra[key] = value
+            host.extra_data = json.dumps(existing_extra)
 
         db.session.flush()
 
