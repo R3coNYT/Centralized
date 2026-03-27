@@ -37,8 +37,8 @@
 
 <!-- Extension filter bar -->
 <div id="ext-filter-bar" class="mb-2 d-flex flex-wrap gap-1 align-items-center d-none">
-  <span class="text-muted small me-1">Filter:</span>
-  <button type="button" class="btn btn-sm btn-outline-secondary active ext-filter-btn" data-ext="">All</button>
+  <span class="text-muted small me-1">Select by type:</span>
+  <button type="button" class="btn btn-sm btn-outline-secondary ext-filter-btn" data-ext="">All</button>
 </div>
 
 <!-- File browser table -->
@@ -162,7 +162,6 @@
   const toastBody   = document.getElementById("import-toast-body");
   const toast       = toastEl ? new bootstrap.Toast(toastEl, {delay: 5000}) : null;
   const extFilterBar = document.getElementById("ext-filter-bar");
-  let   activeExtFilter = ""; // "" = show all
 
   /* ── helpers ── */
   function fmtSize(bytes) {
@@ -183,13 +182,12 @@
     selCounter.classList.toggle("d-none", n === 0);
     btnAdd.classList.toggle("d-none", n === 0);
 
-    // update chk-all indeterminate state based on visible rows only
+    // update chk-all indeterminate state
     if (!chkAll) return;
-    const visible = [...tbody.querySelectorAll("input.file-chk")]
-      .filter(c => !c.closest("tr").classList.contains("d-none"));
-    const checkedVisible = visible.filter(c => c.checked);
-    chkAll.indeterminate = checkedVisible.length > 0 && checkedVisible.length < visible.length;
-    chkAll.checked = visible.length > 0 && checkedVisible.length === visible.length;
+    const rows = tbody.querySelectorAll("input.file-chk");
+    const checked = tbody.querySelectorAll("input.file-chk:checked");
+    chkAll.indeterminate = checked.length > 0 && checked.length < rows.length;
+    chkAll.checked = rows.length > 0 && checked.length === rows.length;
   }
 
   /* ── browse ── */
@@ -256,7 +254,6 @@
         const isAllowed = item.allowed;
         const checked   = selectedPaths.has(item.path) ? "checked" : "";
         const disabled  = isAllowed ? "" : "disabled";
-        tr.dataset.rowExt = item.ext ? item.ext.toLowerCase() : "";
         tr.innerHTML = `
           <td>
             <input type="checkbox" class="form-check-input file-chk" ${checked} ${disabled}
@@ -278,12 +275,12 @@
     buildExtFilters(data.items);
   }
 
-  /* ── extension filter bar ── */
+  /* ── extension select bar ── */
   function buildExtFilters(items) {
     if (!extFilterBar) return;
-    // Collect unique extensions from file items (not dirs)
+    // Collect unique extensions from allowed file items only
     const exts = [...new Set(
-      items.filter(i => i.type === "file" && i.ext).map(i => i.ext.toLowerCase())
+      items.filter(i => i.type === "file" && i.ext && i.allowed).map(i => i.ext.toLowerCase())
     )].sort();
 
     if (exts.length === 0) {
@@ -291,50 +288,42 @@
       return;
     }
 
-    // Keep the "All" button, remove previous ext buttons
-    const allBtn = extFilterBar.querySelector('[data-ext=""]');
+    // Rebuild buttons (keep the "All" button, recreate ext buttons)
     extFilterBar.querySelectorAll('.ext-filter-btn:not([data-ext=""])').forEach(b => b.remove());
 
     exts.forEach(ext => {
+      const count = items.filter(i => i.type === "file" && (i.ext || "").toLowerCase() === ext && i.allowed).length;
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "btn btn-sm ext-filter-btn " + extBtnClass(ext);
       btn.dataset.ext = ext;
-      btn.textContent = ext.toUpperCase();
+      btn.innerHTML = ext.toUpperCase() + ` <span class="badge bg-light text-dark ms-1">${count}</span>`;
       extFilterBar.appendChild(btn);
     });
-
-    // Reset active filter when directory changes
-    activeExtFilter = "";
-    allBtn.classList.add("active");
-    extFilterBar.querySelectorAll('.ext-filter-btn:not([data-ext=""])').forEach(b => b.classList.remove("active"));
 
     extFilterBar.classList.remove("d-none");
 
     extFilterBar.querySelectorAll(".ext-filter-btn").forEach(btn => {
       btn.addEventListener("click", () => {
-        activeExtFilter = btn.dataset.ext;
-        extFilterBar.querySelectorAll(".ext-filter-btn").forEach(b => b.classList.remove("active"));
-        btn.classList.add("active");
-        applyExtFilter();
+        selectByExt(btn.dataset.ext);
       });
     });
-
-    applyExtFilter();
   }
 
-  function applyExtFilter() {
-    tbody.querySelectorAll("tr[data-row-ext]").forEach(tr => {
-      const match = !activeExtFilter || tr.dataset.rowExt === activeExtFilter;
-      tr.classList.toggle("d-none", !match);
+  // Select (check) all allowed checkboxes matching ext — deselect all others.
+  // ext="" means select all.
+  function selectByExt(ext) {
+    tbody.querySelectorAll("input.file-chk:not(:disabled)").forEach(chk => {
+      const chkExt = (chk.dataset.ext || "").toLowerCase();
+      const shouldCheck = !ext || chkExt === ext;
+      chk.checked = shouldCheck;
+      if (shouldCheck) {
+        selectedPaths.set(chk.dataset.path, {name: chk.dataset.name, ext: chk.dataset.ext});
+      } else {
+        selectedPaths.delete(chk.dataset.path);
+      }
     });
-    // Re-sync chk-all state after filter
-    if (chkAll) {
-      const visible = [...tbody.querySelectorAll("input.file-chk")].filter(c => !c.closest("tr").classList.contains("d-none"));
-      const checkedVisible = visible.filter(c => c.checked);
-      chkAll.indeterminate = checkedVisible.length > 0 && checkedVisible.length < visible.length;
-      chkAll.checked = visible.length > 0 && checkedVisible.length === visible.length;
-    }
+    updateSelUI();
   }
 
   function extBtnClass(ext) {
@@ -396,9 +385,7 @@
 
   if (chkAll) {
     chkAll.addEventListener("change", () => {
-      const visible = [...tbody.querySelectorAll("input.file-chk:not(:disabled)")]
-        .filter(c => !c.closest("tr").classList.contains("d-none"));
-      visible.forEach(chk => {
+      tbody.querySelectorAll("input.file-chk:not(:disabled)").forEach(chk => {
         chk.checked = chkAll.checked;
         if (chk.checked) {
           selectedPaths.set(chk.dataset.path, {name: chk.dataset.name, ext: chk.dataset.ext});
