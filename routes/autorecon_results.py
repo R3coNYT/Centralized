@@ -13,10 +13,18 @@ from werkzeug.utils import secure_filename
 from models import Audit, UploadedFile
 from extensions import db, csrf
 from parsers import detect_file_type, parse_file
+from parsers import (
+    FILE_TYPE_SQLMAP_TXT, FILE_TYPE_SQLMAP_CSV,
+    FILE_TYPE_DIRBUST_JSON, FILE_TYPE_DIRBUST_TXT,
+    FILE_TYPE_SCREENSHOT,
+)
 
 autorecon_results_bp = Blueprint("autorecon_results", __name__, url_prefix="/autorecon-results")
 
-ALLOWED_EXTENSIONS = {"xml", "json", "pdf"}
+ALLOWED_EXTENSIONS = {"xml", "json", "pdf", "txt", "csv", "png", "jpg", "jpeg"}
+
+# Types that require a target IP
+_NEEDS_TARGET_IP = {FILE_TYPE_SQLMAP_TXT, FILE_TYPE_SQLMAP_CSV, FILE_TYPE_DIRBUST_JSON, FILE_TYPE_DIRBUST_TXT, FILE_TYPE_SCREENSHOT}
 
 
 # ---------------------------------------------------------------------------
@@ -165,6 +173,7 @@ def api_import():
     paths = data.get("paths", [])
     audit_id = data.get("audit_id")
     enrich_nvd = bool(data.get("enrich_nvd", False))
+    target_ip = str(data.get("target_ip") or "").strip()
 
     if not paths:
         return jsonify({"error": "No files selected"}), 400
@@ -209,6 +218,13 @@ def api_import():
         file_size = os.path.getsize(save_path)
         file_type = detect_file_type(save_path, original_name)
 
+        if file_type in _NEEDS_TARGET_IP and not target_ip:
+            if os.path.exists(save_path):
+                os.remove(save_path)
+            results.append({"path": rel_path, "ok": False,
+                             "error": f"A Target IP is required for this file type ({file_type})."})
+            continue
+
         uploaded = UploadedFile(
             audit_id=audit_id,
             original_filename=original_name,
@@ -216,12 +232,21 @@ def api_import():
             file_type=file_type,
             file_size=file_size,
             parsed=False,
+            target_ip=target_ip if file_type in _NEEDS_TARGET_IP else None,
         )
         db.session.add(uploaded)
         db.session.flush()
 
         from routes.uploads import _persist_parsed_data
-        parse_result = parse_file(save_path, file_type, audit_id, db.session)
+        extra = {"target_ip": target_ip, "original_filename": original_name} if target_ip else {"original_filename": original_name}
+        parse_result = parse_file(save_path, file_type, audit_id, db.session, extra=extra)
+
+        # For screenshots, backfill the file_id so the template can link back
+        if file_type == FILE_TYPE_SCREENSHOT and not parse_result.get("error"):
+            for h in parse_result.get("hosts", []):
+                for shot in h.get("extra_data", {}).get("screenshots", []):
+                    shot["file_id"] = uploaded.id
+
         if parse_result.get("error"):
             uploaded.parse_error = parse_result["error"]
             results.append({"path": rel_path, "ok": False, "error": parse_result["error"]})

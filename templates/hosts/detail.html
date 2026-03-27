@@ -248,6 +248,37 @@
 </div>
 {% endif %}
 
+{# ── Screenshots ──────────────────────────────────────────────────────────── #}
+{% set screenshots = extra_data.get('screenshots', []) %}
+{% if screenshots %}
+<div class="card mb-4">
+  <div class="card-header fw-semibold d-flex justify-content-between align-items-center">
+    <span><i class="bi bi-camera me-2"></i>Screenshots ({{ screenshots|length }})</span>
+    <button class="btn btn-sm btn-outline-secondary py-0" data-bs-toggle="collapse" data-bs-target="#screenshotsCollapse">Toggle</button>
+  </div>
+  <div class="collapse show" id="screenshotsCollapse">
+    <div class="card-body">
+      <div class="row g-3">
+      {% for shot in screenshots %}
+        <div class="col-12 col-md-6 col-lg-4">
+          <div class="border rounded p-1 text-center">
+            {% if shot.get('file_id') %}
+              <a href="{{ url_for('uploads.view_file', audit_id=audit.id, file_id=shot.file_id) }}" target="_blank">
+                <img src="{{ url_for('uploads.view_file', audit_id=audit.id, file_id=shot.file_id) }}"
+                     class="img-fluid rounded" style="max-height:200px;object-fit:contain"
+                     alt="{{ shot.get('filename','screenshot') }}">
+              </a>
+            {% endif %}
+            <div class="text-muted small mt-1 text-truncate" title="{{ shot.get('filename','') }}">{{ shot.get('filename','screenshot') }}</div>
+          </div>
+        </div>
+      {% endfor %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
+
 {# ── Parameter Discovery ──────────────────────────────────────────────────── #}
 {% set params = extra_data.get('param_discovery', []) %}
 {% if params %}

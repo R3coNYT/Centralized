@@ -17,6 +17,11 @@ FILE_TYPE_NIKTO_JSON = "nikto_json"
 FILE_TYPE_PDF = "pdf"
 FILE_TYPE_LYNIS_LOG = "lynis_log"
 FILE_TYPE_LYNIS_REPORT = "lynis_report"
+FILE_TYPE_SQLMAP_TXT = "sqlmap_txt"
+FILE_TYPE_SQLMAP_CSV = "sqlmap_csv"
+FILE_TYPE_DIRBUST_JSON = "dirbust_json"
+FILE_TYPE_DIRBUST_TXT = "dirbust_txt"
+FILE_TYPE_SCREENSHOT = "screenshot"
 FILE_TYPE_UNKNOWN = "unknown"
 
 CVE_PATTERN = re.compile(r"CVE-\d{4}-\d{4,7}", re.IGNORECASE)
@@ -28,6 +33,9 @@ def detect_file_type(file_path: str, original_filename: str) -> str:
 
     if ext == ".pdf":
         return FILE_TYPE_PDF
+
+    if ext in (".png", ".jpg", ".jpeg", ".gif", ".webp"):
+        return FILE_TYPE_SCREENSHOT
 
     if ext == ".log":
         try:
@@ -67,6 +75,35 @@ def detect_file_type(file_path: str, original_filename: str) -> str:
             fname_lower = original_filename.lower()
             if "lynis" in fname_lower or any(sig in head for sig in lynis_dat_signals):
                 return FILE_TYPE_LYNIS_REPORT
+        except Exception:
+            pass
+        return FILE_TYPE_UNKNOWN
+
+    if ext == ".txt":
+        fname_lower = original_filename.lower()
+        if "sqlmap_output" in fname_lower or "sqlmap" in fname_lower:
+            return FILE_TYPE_SQLMAP_TXT
+        # Gobuster plain-text output: check for lines matching gobuster format
+        try:
+            with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+                head = f.read(4000)
+            if re.search(r"^/\S+\s+\(Status:\s*\d+\)", head, re.MULTILINE):
+                return FILE_TYPE_DIRBUST_TXT
+            # sqlmap raw log can also be .txt without "sqlmap" in the name
+            if "back-end DBMS" in head or "Parameter:" in head and "Type:" in head:
+                return FILE_TYPE_SQLMAP_TXT
+        except Exception:
+            pass
+        return FILE_TYPE_UNKNOWN
+
+    if ext == ".csv":
+        # sqlmap --results-file CSV: header row contains "Target URL" / "Parameter" / "Type"
+        try:
+            with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+                header = f.readline().lower()
+            sqlmap_csv_signals = ("target url", "parameter", "type", "title", "vector", "payload")
+            if sum(1 for s in sqlmap_csv_signals if s in header) >= 2:
+                return FILE_TYPE_SQLMAP_CSV
         except Exception:
             pass
         return FILE_TYPE_UNKNOWN
@@ -112,6 +149,11 @@ def detect_file_type(file_path: str, original_filename: str) -> str:
             if isinstance(data, dict) and ("vulnerabilities" in data or "items" in data) and "host" in data:
                 return FILE_TYPE_NIKTO_JSON
 
+            # ffuf JSON: has "results" and "commandline"
+            from parsers.dirbust_parser import is_ffuf_json, is_gobuster_json
+            if is_ffuf_json(data) or is_gobuster_json(data):
+                return FILE_TYPE_DIRBUST_JSON
+
         except (json.JSONDecodeError, UnicodeDecodeError):
             pass
         return FILE_TYPE_UNKNOWN
@@ -137,7 +179,7 @@ def parse_file(file_path: str, file_type: str, audit_id: int, db_session, extra:
     from parsers.pdf_parser import parse_pdf
     from parsers.lynis_parser import parse_lynis_log, parse_lynis_report
 
-    # Lynis parsers require a target IP supplied by the user
+    # Parsers that require a target IP supplied by the user
     if file_type in (FILE_TYPE_LYNIS_LOG, FILE_TYPE_LYNIS_REPORT):
         target_ip = (extra or {}).get("target_ip", "")
         parser_fn = parse_lynis_log if file_type == FILE_TYPE_LYNIS_LOG else parse_lynis_report
@@ -145,6 +187,50 @@ def parse_file(file_path: str, file_type: str, audit_id: int, db_session, extra:
             return parser_fn(file_path, target_ip)
         except Exception as exc:
             return {"hosts": [], "error": str(exc)}
+
+    if file_type == FILE_TYPE_SQLMAP_TXT:
+        from parsers.sqlmap_parser import parse_sqlmap_txt
+        target_ip = (extra or {}).get("target_ip", "")
+        try:
+            return parse_sqlmap_txt(file_path, target_ip)
+        except Exception as exc:
+            return {"hosts": [], "error": str(exc)}
+
+    if file_type == FILE_TYPE_SQLMAP_CSV:
+        from parsers.sqlmap_parser import parse_sqlmap_csv
+        target_ip = (extra or {}).get("target_ip", "")
+        try:
+            return parse_sqlmap_csv(file_path, target_ip)
+        except Exception as exc:
+            return {"hosts": [], "error": str(exc)}
+
+    if file_type in (FILE_TYPE_DIRBUST_JSON, FILE_TYPE_DIRBUST_TXT):
+        from parsers.dirbust_parser import parse_dirbust_file
+        target_ip = (extra or {}).get("target_ip", "")
+        original_filename = (extra or {}).get("original_filename", file_path)
+        try:
+            return parse_dirbust_file(file_path, original_filename, target_ip)
+        except Exception as exc:
+            return {"hosts": [], "error": str(exc)}
+
+    if file_type == FILE_TYPE_SCREENSHOT:
+        # Screenshots are stored as extra_data references — no DB Vulnerability created.
+        # The caller (uploads.py) handles copying the file to a public location.
+        target_ip = (extra or {}).get("target_ip", "")
+        original_filename = (extra or {}).get("original_filename", os.path.basename(file_path))
+        if not target_ip:
+            return {"hosts": [], "error": "A Target IP is required to import a screenshot."}
+        return {
+            "hosts": [
+                {
+                    "ip": target_ip,
+                    "extra_data": {
+                        "screenshots": [{"filename": original_filename, "stored_filename": ""}]
+                    },
+                }
+            ],
+            "error": None,
+        }
 
     dispatch = {
         FILE_TYPE_NMAP_XML: parse_nmap_xml,
