@@ -1,3 +1,4 @@
+import json
 import re
 from flask import Blueprint, render_template, request, jsonify
 from flask_login import login_required
@@ -48,6 +49,13 @@ def detail(host_id):
     if needs_commit:
         db.session.commit()
 
+    extra_data = {}
+    if host.extra_data:
+        try:
+            extra_data = json.loads(host.extra_data)
+        except Exception:
+            extra_data = {}
+
     return render_template(
         "hosts/detail.html",
         host=host,
@@ -55,6 +63,7 @@ def detail(host_id):
         vulns=vulns,
         pages=pages,
         cve_status_values=CVE_STATUS_VALUES,
+        extra_data=extra_data,
     )
 
 

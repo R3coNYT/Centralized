@@ -15,6 +15,21 @@ Schema (simplified):
             "waf": [...],
             "pages": [...],
             "login_forms": [...],
+            "xss_findings": [...],
+            "sqli_findings": [...],
+            "jwt_findings": [...],
+            "dom_xss": [...],
+            "shodan": {"<ip>": {...}},
+            "cloud_buckets": [...],
+            "theharvester": {"emails": [...], "subdomains": [...], "ips": [...]},
+            "param_discovery": [...],
+            "dir_bruteforce": [...],
+            "security_headers": {"missing": [...], "leaky": [...]},
+            "cookies": [...],
+            "cors_findings": [...],
+            "http_methods": [...],
+            "open_redirects": [...],
+            "js_secrets": [...],
             "cves": [...],
             "risk": {"score": N, "level": "...", ...},
             "httpx": [...],
@@ -212,6 +227,220 @@ def parse_autorecon_json(file_path: str) -> dict:
                     "redirect_location": None,
                 })
 
+        # ── New security findings → Vulnerability records ────────────────────
+
+        # Reflected XSS
+        for xss in host_data.get("xss_findings", []) or []:
+            if not isinstance(xss, dict):
+                continue
+            param = xss.get("parameter", "?")
+            vulns.append({
+                "cve_id": None,
+                "title": f"Reflected XSS – parameter: {param}",
+                "severity": "HIGH",
+                "description": (
+                    f"Reflected XSS on {xss.get('url', '')} "
+                    f"parameter '{param}'. Payload: {xss.get('payload', '')}"
+                ),
+                "evidence": xss.get("evidence"),
+                "source": "xss_scan",
+            })
+
+        # SQL Injection (sqlmap)
+        for sqli in host_data.get("sqli_findings", []) or []:
+            if not isinstance(sqli, dict):
+                continue
+            param = sqli.get("parameter", "?")
+            vulns.append({
+                "cve_id": None,
+                "title": f"SQL Injection – parameter: {param}",
+                "severity": "CRITICAL",
+                "description": (
+                    f"SQL injection on {sqli.get('url', '')} parameter '{param}' "
+                    f"({sqli.get('technique', '')}). DBMS: {sqli.get('db_type') or 'unknown'}."
+                ),
+                "evidence": sqli.get("evidence"),
+                "source": "sqli_scan",
+            })
+
+        # JWT vulnerabilities (HIGH / CRITICAL only)
+        for jwt in host_data.get("jwt_findings", []) or []:
+            if not isinstance(jwt, dict):
+                continue
+            sev = str(jwt.get("severity", "")).upper()
+            if sev in ("HIGH", "CRITICAL"):
+                issues = jwt.get("issues", [])
+                issues_str = ", ".join(issues) if isinstance(issues, list) else str(issues)
+                vulns.append({
+                    "cve_id": None,
+                    "title": f"JWT Vulnerability – {issues_str[:80] or 'insecure JWT'}",
+                    "severity": sev,
+                    "description": (
+                        f"JWT token analysis: {issues_str}. "
+                        f"Algorithm: {jwt.get('algorithm', 'unknown')}"
+                    ),
+                    "evidence": (jwt.get("token", "")[:60] + "…") if jwt.get("token") else None,
+                    "source": "jwt_analysis",
+                })
+
+        # DOM XSS (confirmed only)
+        for dx in host_data.get("dom_xss", []) or []:
+            if not isinstance(dx, dict) or not dx.get("confirmed"):
+                continue
+            vulns.append({
+                "cve_id": None,
+                "title": f"DOM XSS – {dx.get('sink', 'unknown sink')}",
+                "severity": "HIGH",
+                "description": (
+                    f"DOM-based XSS confirmed on {dx.get('url', '')}. "
+                    f"Sink: {dx.get('sink', '')}. Payload: {dx.get('payload', '')}"
+                ),
+                "evidence": dx.get("url"),
+                "source": "dom_xss",
+            })
+
+        # Public cloud storage buckets
+        for bucket in host_data.get("cloud_buckets", []) or []:
+            if not isinstance(bucket, dict) or not bucket.get("public"):
+                continue
+            vulns.append({
+                "cve_id": None,
+                "title": f"Public Cloud Bucket – {bucket.get('name', '?')} ({bucket.get('provider', '?')})",
+                "severity": "HIGH",
+                "description": f"Publicly accessible cloud storage bucket: {bucket.get('url', '')}",
+                "evidence": bucket.get("url"),
+                "source": "cloud_buckets",
+            })
+
+        # Shodan CVEs
+        shodan = host_data.get("shodan", {}) or {}
+        for ip_key, sd in shodan.items():
+            if not isinstance(sd, dict) or sd.get("error"):
+                continue
+            for cve_id in (sd.get("vulns") or []):
+                if isinstance(cve_id, str) and CVE_RE.match(cve_id):
+                    vulns.append({
+                        "cve_id": cve_id,
+                        "title": cve_id,
+                        "severity": "HIGH",
+                        "description": f"CVE reported by Shodan for {ip_key}",
+                        "source": "shodan",
+                    })
+
+        # Missing security headers
+        sec_hdrs = host_data.get("security_headers", {}) or {}
+        for hdr in sec_hdrs.get("missing", []) or []:
+            if not isinstance(hdr, dict):
+                continue
+            vulns.append({
+                "cve_id": None,
+                "title": f"Missing Security Header – {hdr.get('header', '?')}",
+                "severity": _norm_severity(hdr.get("severity", "MEDIUM")),
+                "description": f"HTTP security header '{hdr.get('header')}' is missing.",
+                "source": "security_headers",
+            })
+
+        # Insecure cookies
+        for ck in host_data.get("cookies", []) or []:
+            if not isinstance(ck, dict):
+                continue
+            flags = ", ".join(ck.get("missing_flags", []) or [])
+            if flags:
+                vulns.append({
+                    "cve_id": None,
+                    "title": f"Insecure Cookie – {ck.get('name', '?')}",
+                    "severity": _norm_severity(ck.get("severity", "LOW")),
+                    "description": f"Cookie '{ck.get('name')}' is missing security flags: {flags}.",
+                    "source": "cookies",
+                })
+
+        # CORS misconfigurations
+        for cors in host_data.get("cors_findings", []) or []:
+            if not isinstance(cors, dict):
+                continue
+            vulns.append({
+                "cve_id": None,
+                "title": f"CORS Misconfiguration – {cors.get('url', '')[:60]}",
+                "severity": _norm_severity(cors.get("severity", "MEDIUM")),
+                "description": (
+                    f"CORS allows origin: {cors.get('reflected_origin', '')}. "
+                    f"Credentials: {cors.get('credentials_allowed', False)}"
+                ),
+                "evidence": cors.get("url"),
+                "source": "cors",
+            })
+
+        # Open redirects
+        for rd in host_data.get("open_redirects", []) or []:
+            if not isinstance(rd, dict):
+                continue
+            vulns.append({
+                "cve_id": None,
+                "title": f"Open Redirect – {rd.get('parameter', '?')}",
+                "severity": _norm_severity(rd.get("severity", "MEDIUM")),
+                "description": (
+                    f"Open redirect on {rd.get('url', '')} "
+                    f"via parameter '{rd.get('parameter', '')}'"
+                ),
+                "evidence": rd.get("url"),
+                "source": "open_redirect",
+            })
+
+        # JavaScript secrets / sensitive data
+        for sec in host_data.get("js_secrets", []) or []:
+            if not isinstance(sec, dict):
+                continue
+            vulns.append({
+                "cve_id": None,
+                "title": f"JS Secret – {sec.get('type', 'Unknown')}",
+                "severity": "HIGH",
+                "description": (
+                    f"Sensitive data found in JavaScript: {sec.get('type', '')} "
+                    f"in {sec.get('source', '')}"
+                ),
+                "evidence": str(sec.get("match", ""))[:100],
+                "source": "js_secrets",
+            })
+
+        # Dangerous HTTP methods
+        for hm in host_data.get("http_methods", []) or []:
+            if not isinstance(hm, dict):
+                continue
+            vulns.append({
+                "cve_id": None,
+                "title": f"Dangerous HTTP Method – {hm.get('method', '?')}",
+                "severity": _norm_severity(hm.get("severity", "MEDIUM")),
+                "description": (
+                    f"Dangerous HTTP method '{hm.get('method')}' "
+                    f"enabled on {hm.get('url', '')}"
+                ),
+                "source": "http_methods",
+            })
+
+        # ── Informational enrichment data → extra_data JSON blob ─────────────
+        extra_data: dict = {}
+
+        if shodan:
+            extra_data["shodan"] = shodan
+
+        harvest = host_data.get("theharvester", {}) or {}
+        if harvest and not harvest.get("error") and any(
+            harvest.get(k) for k in ("emails", "subdomains", "ips", "hosts")
+        ):
+            extra_data["theharvester"] = harvest
+
+        login_forms = host_data.get("login_forms", []) or []
+        if login_forms:
+            extra_data["login_forms"] = login_forms
+
+        dir_bust = host_data.get("dir_bruteforce", []) or []
+        if dir_bust:
+            extra_data["dir_bruteforce"] = dir_bust
+
+        params = host_data.get("param_discovery", []) or []
+        if params:
+            extra_data["param_discovery"] = params
+
         hosts.append({
             "ip": ip,
             "hostname": host_key if host_key != ip else host_reverse_dns,
@@ -225,6 +454,7 @@ def parse_autorecon_json(file_path: str) -> dict:
             "ports": ports,
             "vulnerabilities": vulns,
             "http_pages": http_pages,
+            "extra_data": extra_data if extra_data else None,
         })
 
     return {"hosts": hosts, "error": None}

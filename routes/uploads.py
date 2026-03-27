@@ -1,3 +1,4 @@
+import json
 import os
 import re
 import uuid
@@ -405,6 +406,8 @@ def _persist_parsed_data(audit_id: int, parsed_hosts: list, enrich_nvd: bool):
             host.cms = host_data["cms"]
         if host_data.get("waf"):
             host.waf = host_data["waf"]
+        if host_data.get("extra_data") is not None:
+            host.extra_data = json.dumps(host_data["extra_data"])
 
         db.session.flush()
 

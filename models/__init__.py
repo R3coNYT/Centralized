@@ -110,6 +110,7 @@ class Host(db.Model):
     cms = db.Column(db.String(200))
     waf = db.Column(db.String(200))
     tag = db.Column(db.String(100))
+    extra_data = db.Column(db.Text)             # JSON blob: shodan, theharvester, login_forms, dir_bruteforce, param_discovery
     created_at = db.Column(db.DateTime, default=utcnow)
 
     ports = db.relationship("Port", backref="host", lazy="dynamic", cascade="all, delete-orphan")
