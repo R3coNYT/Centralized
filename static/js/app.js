@@ -3,6 +3,18 @@
    Chart.js initialization + CVE lookup modal
    ========================================================= */
 
+/* ── Auto-dismiss flash alerts ──────────────────────────── */
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('.alert.alert-dismissible').forEach(el => {
+    const isError = el.classList.contains('alert-danger') || el.classList.contains('alert-warning');
+    const delay = isError ? 8000 : 4000;
+    setTimeout(() => {
+      el.classList.remove('show');
+      el.addEventListener('transitionend', () => el.remove(), { once: true });
+    }, delay);
+  });
+});
+
 /* ── Chart defaults ─────────────────────────────────────── */
 
 Chart.defaults.color = '#adb5bd';
