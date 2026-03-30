@@ -69,18 +69,6 @@
             </div>
           </div>
 
-          <!-- Target IP (required for Lynis, sqlmap, dirbust, screenshot) -->
-          <div id="lynisTargetWrap" class="mb-3 d-none">
-            <label class="form-label fw-semibold" for="target_ip">
-              <i class="bi bi-hdd-network me-1 text-primary"></i>
-              Target IP / Hostname <span class="text-danger">*</span>
-            </label>
-            <p class="text-muted small mb-1">Required for Lynis (.log / .dat), SQLmap output (.txt), dir bruteforce, and screenshots — the audited machine's IP or hostname.</p>
-            <input type="text" class="form-control" name="target_ip" id="target_ip"
-                   placeholder="e.g. 192.168.1.50 or srv-web.local">
-            <div class="invalid-feedback">Please enter the Target IP / Hostname.</div>
-          </div>
-
           <!-- NVD enrichment option -->
           <div class="form-check mb-4">
             <input class="form-check-input" type="checkbox" id="enrich_nvd" name="enrich_nvd" value="1"/>
@@ -169,7 +157,7 @@ const progressPct  = document.getElementById('progressPct');
 
 const ALLOWED = new Set(['xml', 'json', 'pdf', 'log', 'dat', 'txt', 'csv', 'png', 'jpg', 'jpeg']);
 const LYNIS_EXTS = new Set(['log', 'dat', 'txt', 'csv', 'png', 'jpg', 'jpeg']);
-const lynisTargetWrap = document.getElementById('lynisTargetWrap');
+let ipInputMap = new Map(); // filename → ip input element
 
 function ext(name) {
   return name.split('.').pop().toLowerCase();
@@ -192,14 +180,9 @@ function addFiles(newFiles) {
 // ── Render the file preview list ───────────────────────────────────────────────
 function renderList() {
   fileList.innerHTML = '';
+  ipInputMap.clear();
   fileBar.classList.toggle('d-none', fileMap.size === 0);
   uploadBtn.disabled = fileMap.size === 0;
-
-  // Show/hide the Target IP field when relevant file types are present
-  const needsIp = [...fileMap.keys()].some(n => LYNIS_EXTS.has(ext(n)));
-  lynisTargetWrap.classList.toggle('d-none', !needsIp);
-  const targetInput = document.getElementById('target_ip');
-  if (!needsIp) targetInput.value = '';
 
   if (!fileMap.size) { return; }
 
@@ -209,20 +192,28 @@ function renderList() {
 
   fileMap.forEach((f, name) => {
     totalBytes += f.size;
+    const needsIp = LYNIS_EXTS.has(ext(name));
     const li = document.createElement('li');
-    li.className = 'list-group-item list-group-item-action d-flex justify-content-between align-items-center py-2';
+    li.className = 'list-group-item py-2';
 
     const icon = iconForExt(ext(name));
     li.innerHTML = `
-      <span class="small d-flex align-items-center gap-2">
-        <i class="bi ${icon} text-muted"></i>
-        <span>${escHtml(name)}</span>
-        <span class="badge bg-secondary font-monospace">${formatSize(f.size)}</span>
-      </span>
-      <button type="button" class="btn btn-link btn-sm p-0 text-danger remove-btn"
-              data-name="${escHtml(name)}" title="Remove">
-        <i class="bi bi-x-circle"></i>
-      </button>`;
+      <div class="d-flex justify-content-between align-items-center">
+        <span class="small d-flex align-items-center gap-2">
+          <i class="bi ${icon} text-muted"></i>
+          <span>${escHtml(name)}</span>
+          <span class="badge bg-secondary font-monospace">${formatSize(f.size)}</span>
+        </span>
+        <button type="button" class="btn btn-link btn-sm p-0 text-danger remove-btn"
+                data-name="${escHtml(name)}" title="Remove">
+          <i class="bi bi-x-circle"></i>
+        </button>
+      </div>
+      ${needsIp ? `<div class="mt-2"><input type="text" class="form-control form-control-sm ip-input-field" placeholder="Target IP / Hostname *"><div class="invalid-feedback">Target IP required for this file.</div></div>` : ''}`;
+
+    if (needsIp) {
+      ipInputMap.set(name, li.querySelector('.ip-input-field'));
+    }
     ul.appendChild(li);
   });
 
@@ -317,15 +308,17 @@ uploadForm.addEventListener('submit', function(e) {
   e.preventDefault();
   if (!fileMap.size) return;
 
-  // Validate: if files requiring IP are present, Target IP must be filled
-  const needsIp = [...fileMap.keys()].some(n => LYNIS_EXTS.has(ext(n)));
-  const targetVal = (document.getElementById('target_ip').value || '').trim();
-  if (needsIp && !targetVal) {
-    document.getElementById('target_ip').classList.add('is-invalid');
-    document.getElementById('target_ip').focus();
-    return;
-  }
-  document.getElementById('target_ip').classList.remove('is-invalid');
+  // Validate: each file needing an IP must have its field filled
+  let valid = true;
+  ipInputMap.forEach((input) => {
+    if (!input.value.trim()) {
+      input.classList.add('is-invalid');
+      valid = false;
+    } else {
+      input.classList.remove('is-invalid');
+    }
+  });
+  if (!valid) return;
 
   uploadBtn.disabled = true;
   uploadBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Uploading…';
@@ -336,11 +329,15 @@ uploadForm.addEventListener('submit', function(e) {
   const fd = new FormData();
   const csrfEl = this.querySelector('[name="csrf_token"]');
   if (csrfEl) fd.append('csrf_token', csrfEl.value);
-  const ipEl = document.getElementById('target_ip');
-  if (ipEl && ipEl.value.trim()) fd.append('target_ip', ipEl.value.trim());
   const enrichEl = document.getElementById('enrich_nvd');
   if (enrichEl && enrichEl.checked) fd.append('enrich_nvd', '1');
-  fileMap.forEach(function(f) { fd.append('files', f, f.name); });
+  let fileIdx = 0;
+  fileMap.forEach(function(f, name) {
+    const ipInput = ipInputMap.get(name);
+    if (ipInput) fd.append(`target_ip_${fileIdx}`, ipInput.value.trim());
+    fd.append('files', f, f.name);
+    fileIdx++;
+  });
 
   const xhr = new XMLHttpRequest();
   xhr.open('POST', this.action || window.location.href);
