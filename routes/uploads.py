@@ -67,14 +67,14 @@ def upload(audit_id):
             return redirect(request.url)
 
         enrich_nvd = bool(request.form.get("enrich_nvd"))
-        target_ip  = request.form.get("target_ip", "").strip()
         saved_count = 0
         errors = []
 
         audit_dir = _audit_upload_dir(audit)
         os.makedirs(audit_dir, exist_ok=True)
 
-        for file in files:
+        for i, file in enumerate(files):
+            target_ip = request.form.get(f"target_ip_{i}", "").strip()
             if file.filename == "":
                 continue
             if not _allowed_file(file.filename):
