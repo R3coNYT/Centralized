@@ -14,8 +14,9 @@
 {% block content %}
 
 <!-- Host Summary -->
+{% set tls_info = extra_data.get('tls', {}) %}
 <div class="row g-3 mb-4">
-  <div class="col-md-6">
+  <div class="{{ 'col-md-4' if tls_info else 'col-md-6' }}">
     <div class="card h-100">
       <div class="card-header fw-semibold"><i class="bi bi-hdd me-2"></i>Host Information</div>
       <div class="card-body">
@@ -26,6 +27,8 @@
           <tr><td class="text-muted">MAC</td><td class="font-monospace">{{ host.mac_address or '—' }}{% if host.mac_vendor %} <span class="text-muted">({{ host.mac_vendor }})</span>{% endif %}</td></tr>
           <tr><td class="text-muted">CMS</td><td>{{ host.cms or '—' }}</td></tr>
           <tr><td class="text-muted">WAF</td><td>{% if host.waf %}<span class="badge bg-warning text-dark">{{ host.waf }}</span>{% else %}—{% endif %}</td></tr>
+          {% if extra_data.get('network_range') %}<tr><td class="text-muted">Network Range</td><td class="font-monospace small">{{ extra_data.network_range }}</td></tr>{% endif %}
+          {% if extra_data.get('network_name') %}<tr><td class="text-muted">Network Name</td><td>{{ extra_data.network_name }}</td></tr>{% endif %}
           <tr><td class="text-muted">Risk Score</td><td>
             {% if host.risk_level %}
               {% set severity = host.risk_level %}
@@ -37,7 +40,50 @@
       </div>
     </div>
   </div>
-  <div class="col-md-6">
+  {% if tls_info %}
+  <div class="col-md-4">
+    <div class="card h-100">
+      <div class="card-header fw-semibold"><i class="bi bi-shield-lock me-2"></i>TLS Information</div>
+      <div class="card-body">
+        <table class="table table-borderless mb-0 small">
+          <tr><td class="text-muted w-40">Protocol</td><td class="font-monospace fw-semibold">{{ tls_info.get('protocol') or '—' }}</td></tr>
+          <tr><td class="text-muted">Cipher</td><td class="font-monospace small">
+            {% set cipher = tls_info.get('cipher') %}
+            {% if cipher is iterable and cipher is not string %}
+              {{ cipher[0] }}{% if cipher|length > 1 %} <span class="text-muted">({{ cipher[1] }} bits)</span>{% endif %}
+            {% else %}{{ cipher or '—' }}{% endif %}
+          </td></tr>
+          <tr><td class="text-muted">Valid From</td><td class="small">{{ tls_info.get('not_before') or '—' }}</td></tr>
+          <tr><td class="text-muted">Valid Until</td><td class="small">{{ tls_info.get('not_after') or '—' }}</td></tr>
+          <tr><td class="text-muted">Expired</td><td>
+            {% if tls_info.get('cert_expired') %}
+              <span class="badge bg-danger">Yes</span>
+            {% else %}
+              <span class="badge bg-success">No</span>
+            {% endif %}
+          </td></tr>
+          <tr><td class="text-muted">Issuer</td><td class="small text-break">
+            {% set issuer = tls_info.get('cert_issuer') %}
+            {% if issuer is iterable and issuer is not string %}
+              {% set parts = [] %}
+              {% for entry in issuer %}
+                {% if entry is iterable and entry is not string %}
+                  {% for pair in entry %}
+                    {% if pair is iterable and pair is not string and pair|list|length >= 2 %}
+                      {% set _ = parts.append(pair[0] ~ '=' ~ pair[1]) %}
+                    {% endif %}
+                  {% endfor %}
+                {% endif %}
+              {% endfor %}
+              {{ parts | join(', ') or (issuer | string) }}
+            {% else %}{{ issuer or '—' }}{% endif %}
+          </td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+  <div class="{{ 'col-md-4' if tls_info else 'col-md-6' }}">
     <div class="card h-100">
       <div class="card-header fw-semibold"><i class="bi bi-pie-chart me-2"></i>Vulnerabilities</div>
       <div class="card-body d-flex align-items-center justify-content-center" style="min-height:200px">

@@ -441,6 +441,23 @@ def parse_autorecon_json(file_path: str) -> dict:
         if params:
             extra_data["param_discovery"] = params
 
+        # TLS data
+        tls = host_data.get("tls") or {}
+        if tls:
+            extra_data["tls"] = tls
+
+        # Network info from first valid ip_enrichment entry
+        for enrichment in ip_enrichment:
+            if not isinstance(enrichment, dict):
+                continue
+            rdap = enrichment.get("rdap") or {}
+            if rdap and not rdap.get("error"):
+                if rdap.get("startAddress") and rdap.get("endAddress"):
+                    extra_data["network_range"] = f"{rdap['startAddress']} – {rdap['endAddress']}"
+                if rdap.get("name"):
+                    extra_data["network_name"] = rdap["name"]
+            break
+
         hosts.append({
             "ip": ip,
             "hostname": host_key if host_key != ip else host_reverse_dns,
