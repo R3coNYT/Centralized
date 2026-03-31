@@ -350,7 +350,7 @@ def _fetch_page(url: str) -> Optional[dict]:
     page_title = title_elems[0].text_content().strip() if title_elems else url
 
     # Remove noisy elements
-    for tag in doc.xpath("//script | //style | //nav | //footer | //header | //aside | //form | //[contains(@class,'menu')] | //[contains(@class,'sidebar')]"):
+    for tag in doc.xpath("//script | //style | //nav | //footer | //header | //aside | //form | //*[contains(@class,'menu')] | //*[contains(@class,'sidebar')]"):
         try:
             tag.drop_tree()
         except Exception:
@@ -503,10 +503,11 @@ def fetch_all_findings(app, findings_ids: list[int]) -> None:
                 if f is None or f.remediation_web_fetched:
                     continue
                 data = fetch_remediation_for_finding(f.indicator_key or f.title, f.title)
-                f.remediation_web = json.dumps(data, ensure_ascii=False)
-                f.remediation_web_fetched = True
-                _db.session.commit()
-                log.info("Fetched web remediation for finding %d (%s)", fid, f.title)
+                if data.get("sources"):
+                    f.remediation_web = json.dumps(data, ensure_ascii=False)
+                    f.remediation_web_fetched = True
+                    _db.session.commit()
+                    log.info("Fetched web remediation for finding %d (%s): %d sources", fid, f.title, len(data["sources"]))
             except Exception as exc:
                 log.warning("Web remediation fetch failed for finding %d: %s", fid, exc)
                 try:
