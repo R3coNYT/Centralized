@@ -10,6 +10,52 @@ import shutil
 import uuid
 import zipfile
 
+
+def _sanitize_adminer_js(folder: str) -> None:
+    """
+    Fix invalid JS emitted by AD-Miner when a metric has no data:
+    AD-Miner writes  `data: N/A,`  inside <script> blocks and .js files.
+    The JS parser reads `N` as an undefined variable.  Replace every
+    bare N/A that is NOT inside a JS string literal with `null`.
+    Only processes .html and .js files.
+    """
+    # Regex that matches N/A when NOT preceded by  ' or "
+    # (i.e. not already inside a string literal)
+    _na_re = re.compile(r'(?<!["\'])N/A(?!["\'])')
+
+    for root, _dirs, files in os.walk(folder):
+        for fname in files:
+            if not (fname.endswith(".html") or fname.endswith(".js")):
+                continue
+            fpath = os.path.join(root, fname)
+            try:
+                with open(fpath, "r", encoding="utf-8", errors="replace") as fh:
+                    content = fh.read()
+                if "N/A" not in content:
+                    continue
+
+                if fname.endswith(".js"):
+                    patched = _na_re.sub("null", content)
+                else:
+                    # Only patch inside <script> … </script> blocks
+                    def _patch_script(m):
+                        return m.group(0).replace(
+                            m.group(1),
+                            _na_re.sub("null", m.group(1)),
+                        )
+                    patched = re.sub(
+                        r'(<script[^>]*>)(.*?)(</script>)',
+                        lambda m: m.group(1) + _na_re.sub("null", m.group(2)) + m.group(3),
+                        content,
+                        flags=re.DOTALL | re.IGNORECASE,
+                    )
+
+                if patched != content:
+                    with open(fpath, "w", encoding="utf-8") as fh:
+                        fh.write(patched)
+            except Exception:
+                pass  # skip unreadable files
+
 from flask import (
     Blueprint, abort, current_app, flash, redirect,
     render_template, request, send_from_directory, url_for,
@@ -280,6 +326,9 @@ def upload_adminer(client_id):
     if not os.path.isfile(os.path.join(dest_dir, "index.html")):
         flash("No index.html found at the root of the ZIP. Make sure you zip the AD-Miner output folder directly.", "warning")
         return _back(client_id)
+
+    # ── Sanitize invalid JS emitted by AD-Miner (N/A → null) ──────────────────
+    _sanitize_adminer_js(dest_dir)
 
     # ── Parse data_*.json from the extracted folder ────────────────────────────
     from parsers.adminer_data_parser import find_adminer_data_json, parse_adminer_data_json
