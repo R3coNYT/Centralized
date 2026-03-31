@@ -383,8 +383,9 @@ def upload_adminer(client_id):
             # Delete previous AD-Miner findings and re-insert fresh ones
             ADFinding.query.filter_by(ad_data_id=ad.id, source="adminer").delete()
             db.session.flush()
+            new_findings = []
             for fd in parsed["findings"]:
-                db.session.add(ADFinding(
+                f = ADFinding(
                     ad_data_id     = ad.id,
                     source         = "adminer",
                     category       = fd["category"],
@@ -394,11 +395,30 @@ def upload_adminer(client_id):
                     affected_count = fd["affected_count"],
                     details        = fd["details"],
                     remediation    = fd.get("remediation", "[]"),
-                ))
+                    indicator_key  = fd.get("indicator_key", ""),
+                )
+                db.session.add(f)
+                new_findings.append(f)
 
             db.session.commit()
+
+            # ── Background fetch of web remediation for all new findings ──────
+            finding_ids = [f.id for f in new_findings]
+            if finding_ids:
+                import threading
+                from services.ad_remediation_fetcher import fetch_all_findings
+                app = current_app._get_current_object()
+                t = threading.Thread(
+                    target=fetch_all_findings,
+                    args=(app, finding_ids),
+                    daemon=True,
+                    name=f"ad-rem-fetch-{client_id}",
+                )
+                t.start()
+
             flash(
-                f"AD-Miner report uploaded — {len(parsed['findings'])} finding(s) extracted from data JSON.",
+                f"AD-Miner report uploaded — {len(parsed['findings'])} finding(s) extracted. "
+                "Web remediation is loading in background.",
                 "success",
             )
         except Exception as exc:
@@ -417,6 +437,46 @@ def _back(client_id: int):
     if client and client.ad_data:
         return redirect(url_for("ad_miner.ad_data", client_id=client_id))
     return redirect(url_for("clients.detail", client_id=client_id))
+
+
+# ── AJAX: web remediation for a single finding ────────────────────────────────
+
+@ad_miner_bp.route("/<int:client_id>/ad/findings/<int:finding_id>/remediation")
+@login_required
+def finding_remediation(client_id, finding_id):
+    """
+    Returns JSON with web-fetched remediation sources for a finding.
+    If not yet fetched, triggers a synchronous fetch (first call) and caches.
+    Response: { "fetched": bool, "data": {...} }
+    """
+    from flask import jsonify
+    client = Client.query.get_or_404(client_id)
+    finding = ADFinding.query.get_or_404(finding_id)
+
+    # Security: ensure finding belongs to this client
+    if finding.ad_data_id != (client.ad_data.id if client.ad_data else None):
+        abort(403)
+
+    if finding.remediation_web_fetched and finding.remediation_web:
+        try:
+            data = json.loads(finding.remediation_web)
+            return jsonify({"fetched": True, "data": data})
+        except Exception:
+            pass
+
+    # Not yet fetched — do it now synchronously
+    try:
+        from services.ad_remediation_fetcher import fetch_remediation_for_finding
+        data = fetch_remediation_for_finding(
+            finding.indicator_key or finding.title,
+            finding.title,
+        )
+        finding.remediation_web = json.dumps(data, ensure_ascii=False)
+        finding.remediation_web_fetched = True
+        db.session.commit()
+        return jsonify({"fetched": True, "data": data})
+    except Exception as exc:
+        return jsonify({"fetched": False, "error": str(exc)}), 500
 
 
 # ── Serve AD-Miner static files ────────────────────────────────────────────────

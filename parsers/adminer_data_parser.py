@@ -68,12 +68,12 @@ _INDICATOR_META = {
             {"step": 2, "priority": "critical", "icon": "bi-scissors", "title": "Break the most critical path segments",
              "detail": "Remove dangerous ACEs on the objects identified in the paths. Prioritize edges leading directly to DCs and privileged groups.",
              "commands": [{"label": "PowerShell — remove a specific ACE", "code": "$acl = Get-Acl 'AD:CN=target,DC=domain,DC=com'\n$ace = $acl.Access | Where-Object {$_.IdentityReference -eq 'DOMAIN\\user' -and $_.ActiveDirectoryRights -match 'GenericAll'}\n$acl.RemoveAccessRule($ace)\nSet-Acl 'AD:CN=target,DC=domain,DC=com' $acl"}]},
-            {"step": 3, "priority": "normal", "icon": "bi-people", "title": "Apply the principle of least privilege",
-             "detail": "Audit group memberships, remove users from Tier 0/1 groups when not required, and enforce role-based access control (RBAC).",
-             "commands": []},
-            {"step": 4, "priority": "normal", "icon": "bi-shield-check", "title": "Implement AD Tiering model",
-             "detail": "Adopt Microsoft's Active Directory Tiering model (Tier 0 = DCs, Tier 1 = Servers, Tier 2 = Workstations) to contain lateral movement.",
-             "commands": []},
+            {"step": 3, "priority": "normal", "icon": "bi-people", "title": "Auditer et r\u00e9duire les membres de tous les groupes Tier 0",
+             "detail": "\u00c9num\u00e9rer chaque groupe privil\u00e9gi\u00e9 et questionner chaque membre. Les comptes de service ne doivent jamais \u00eatre DA/EA. Objectif : moins de 5 comptes DA au total.",
+             "commands": [{"label": "PowerShell \u2014 audit complet des groupes Tier 0", "code": "@('Domain Admins','Enterprise Admins','Schema Admins','Group Policy Creator Owners','DnsAdmins','Administrators','Account Operators','Backup Operators','Print Operators','Server Operators') | ForEach-Object {\n    $grp = $_\n    Get-ADGroupMember -Identity $grp -Recursive -ErrorAction SilentlyContinue | Select-Object @{N='Group';E={$grp}}, Name, SamAccountName, objectClass, DistinguishedName\n} | Export-Csv tier0_audit.csv -NoTypeInformation\nWrite-Host 'Export\u00e9 dans tier0_audit.csv'"}]},
+            {"step": 4, "priority": "normal", "icon": "bi-shield-check", "title": "Appliquer le mod\u00e8le de Tiering AD par GPO",
+             "detail": "Bloquer les cr\u00e9dentiels Tier 0 sur les machines Tier 1/2 via des GPO de refus de connexion. Lier une GPO \u00e0 l'OU Servers ET \u00e0 l'OU Workstations qui interdit explicitement la connexion des DA/EA.",
+             "commands": [{"label": "GPO \u2014 User Rights Assignment (refus DA/EA Tier 1 & 2)", "code": "# Chemin GPO (Computer Configuration > Policies > Windows Settings >\n#   Security Settings > Local Policies > User Rights Assignment) :\n#\n#   Deny log on locally                     -> ajouter : Domain Admins, Enterprise Admins, Schema Admins\n#   Deny log on through Remote Desktop      -> ajouter : Domain Admins, Enterprise Admins, Schema Admins\n#   Deny log on as a batch job              -> ajouter : Domain Admins, Enterprise Admins, Schema Admins\n#   Deny log on as a service               -> ajouter : Domain Admins, Enterprise Admins, Schema Admins\n#\n# V\u00e9rifier la politique effective sur un serveur :\nInvoke-Command -ComputerName <server> {\n    secedit /export /cfg C:\\Temp\\secpol.cfg /areas USER_RIGHTS\n    Get-Content C:\\Temp\\secpol.cfg | Select-String 'SeDeny'"}]}],
         ]
     ),
     "can_dcsync": (
@@ -132,9 +132,9 @@ _INDICATOR_META = {
             {"step": 1, "priority": "critical", "icon": "bi-folder2-open", "title": "Audit OU and GPO write permissions",
              "detail": "Identify accounts with WriteDACL, GenericAll, or GPLink permissions on OUs containing privileged accounts.",
              "commands": [{"label": "PowerShell — OU ACL", "code": "Get-GPPermission -All -DomainName domain.com | Where-Object {$_.Permission -eq 'GpoEditDeleteModifySecurity'}"}]},
-            {"step": 2, "priority": "critical", "icon": "bi-x-circle", "title": "Remove excessive GPO and OU permissions",
-             "detail": "Delegate only the minimum required permissions. Remove direct GenericAll/WriteDACL from non-admin accounts.",
-             "commands": []},
+            {"step": 2, "priority": "critical", "icon": "bi-x-circle", "title": "Supprimer les permissions excessives sur les OUs et GPOs",
+             "detail": "D\u00e9l\u00e9guer uniquement le minimum requis. Supprimer les ACE GenericAll/WriteDACL/WriteOwner non h\u00e9rit\u00e9es des comptes non-admins sur les OUs et les objets GPO.",
+             "commands": [{"label": "PowerShell \u2014 supprimer WriteDACL/GenericAll sur une OU", "code": "# Remplacer <OU_DN> et <IDENTITY>\n$ouDN     = 'OU=Corp,DC=domain,DC=com'\n$identity = 'DOMAIN\\user_or_group'\n$acl = Get-Acl \"AD:$ouDN\"\n$toRemove = $acl.Access | Where-Object {\n    $_.IdentityReference -eq $identity -and\n    $_.ActiveDirectoryRights -match 'GenericAll|WriteDacl|WriteOwner' -and\n    $_.IsInherited -eq $false\n}\n$toRemove | ForEach-Object { $acl.RemoveAccessRule($_) | Out-Null }\nSet-Acl \"AD:$ouDN\" $acl\n\n# Supprimer les droits d'\u00e9dition GPO :\nSet-GPPermission -Guid '<GPO_GUID>' -TargetName 'DOMAIN\\user' -TargetType User -PermissionLevel None -ErrorAction Stop"}]},
             {"step": 3, "priority": "normal", "icon": "bi-eye", "title": "Enable GPO change auditing",
              "detail": "Audit all changes to Group Policy Objects with Event ID 5136.",
              "commands": []},
@@ -151,9 +151,9 @@ _INDICATOR_META = {
             {"step": 2, "priority": "critical", "icon": "bi-trash3", "title": "Remove anomalous ACEs",
              "detail": "For each ACE identified, verify if it is legitimate. Remove those that are not.",
              "commands": [{"label": "PowerShell", "code": "$dn = 'CN=target,DC=domain,DC=com'\n$acl = Get-Acl \"AD:$dn\"\n$ace = $acl.Access | Where-Object {$_.IdentityReference -eq 'DOMAIN\\user' -and $_.ActiveDirectoryRights -match 'GenericAll'}\n$acl.RemoveAccessRule($ace)\nSet-Acl \"AD:$dn\" $acl"}]},
-            {"step": 3, "priority": "normal", "icon": "bi-clipboard-check", "title": "Establish an ACL baseline",
-             "detail": "Use Microsoft's AD ACL Scanner to establish a baseline and detect future anomalies.",
-             "commands": []},
+            {"step": 3, "priority": "normal", "icon": "bi-clipboard-check", "title": "\u00c9tablir une baseline ACL avec AD ACL Scanner",
+             "detail": "Utiliser l'outil AD ACL Scanner de Microsoft pour exporter l'int\u00e9gralit\u00e9 des ACLs AD sous forme de rapport. Ex\u00e9cuter p\u00e9riodiquement et comparer au baseline pour d\u00e9tecter les modifications non autoris\u00e9es.",
+             "commands": [{"label": "PowerShell \u2014 baseline ACL sans outil tiers", "code": "# Export baseline des ACLs sur tous les objets privil\u00e9gi\u00e9s (AdminCount=1) :\n$date = Get-Date -Format 'yyyyMMdd'\nGet-ADObject -Filter {adminCount -eq 1} -Properties DistinguishedName |\nForEach-Object {\n    $dn = $_.DistinguishedName\n    (Get-Acl \"AD:$dn\").Access |\n    Select-Object @{N='Object';E={$dn}}, IdentityReference, ActiveDirectoryRights, IsInherited, AccessControlType\n} | Export-Csv \"ACL_baseline_$date.csv\" -NoTypeInformation\nWrite-Host \"Baseline export\u00e9 : ACL_baseline_$date.csv\"\n\n# Comparer baseline N et N-1 :\n$old = Import-Csv 'ACL_baseline_20260101.csv'\n$new = Import-Csv \"ACL_baseline_$date.csv\"\nCompare-Object $old $new -Property Object, IdentityReference, ActiveDirectoryRights | Where-Object { $_.SideIndicator -eq '=>' }"}]},
         ]
     ),
     # ORANGE - Alerts
@@ -175,12 +175,12 @@ _INDICATOR_META = {
         "Non-privileged objects with a direct or indirect path to Domain Admin privileges.",
         "Attack Paths",
         [
-            {"step": 1, "priority": "high", "icon": "bi-binoculars", "title": "Map all paths to Domain Admins",
-             "detail": "Use AD-Miner or BloodHound to visualize the full attack graph. Focus on the shortest paths and choke points.",
-             "commands": []},
-            {"step": 2, "priority": "high", "icon": "bi-scissors", "title": "Break privilege escalation paths",
-             "detail": "Remove unnecessary ACEs (GenericAll, WriteDACL, etc.) on the intermediate objects in the attack path.",
-             "commands": []},
+            {"step": 1, "priority": "high", "icon": "bi-binoculars", "title": "Cartographier les chemins vers les Domain Admins (Cypher)",
+             "detail": "Interroger Neo4j (backend BloodHound) pour trouver tous les chemins vers DA. Identifier les n\u0153uds choke-points qui apparaissent dans le plus de chemins.",
+             "commands": [{"label": "Cypher \u2014 shortest paths vers Domain Admins", "code": "// Dans le navigateur Neo4j / BloodHound\nMATCH p=shortestPath((u:User {enabled:true})-[*1..]->(g:Group {name:'DOMAIN ADMINS@DOMAIN.COM'}))\nWHERE NOT u.name STARTS WITH 'KRBTGT'\nRETURN p LIMIT 50\n\n// Trouver les choke points (noeuds les plus travers\u00e9s) :\nMATCH p=shortestPath((u:User {enabled:true})-[*1..]->(g:Group {name:'DOMAIN ADMINS@DOMAIN.COM'}))\nUNWIND nodes(p) AS n\nRETURN n.name, count(*) AS occurrences ORDER BY occurrences DESC LIMIT 20"}]},
+            {"step": 2, "priority": "high", "icon": "bi-scissors", "title": "Supprimer les ACE permettant l'escalade de privil\u00e8ges",
+             "detail": "Pour chaque n\u0153ud interm\u00e9diaire dans le chemin d'attaque, supprimer l'ACE dangereuse (GenericAll, GenericWrite, WriteDACL, WriteOwner, AddMember) qui constitue le maillon de la cha\u00eene.",
+             "commands": [{"label": "PowerShell \u2014 supprimer une ACE GenericAll sur un objet cible", "code": "# Remplacer <OBJECT_DN> et <IDENTITY> par les valeurs du chemin d'attaque\n$targetDN = 'CN=TargetUser,OU=Users,DC=domain,DC=com'\n$identity  = 'DOMAIN\\source_user'\n$acl = Get-Acl \"AD:$targetDN\"\n$rulesToRemove = $acl.Access | Where-Object {\n    $_.IdentityReference -eq $identity -and\n    ($_.ActiveDirectoryRights -band [System.DirectoryServices.ActiveDirectoryRights]::GenericAll) -ne 0\n}\n$rulesToRemove | ForEach-Object { $acl.RemoveAccessRule($_) | Out-Null }\nSet-Acl \"AD:$targetDN\" $acl\nWrite-Host \"ACE supprim\u00e9e sur $targetDN\""}]},
             {"step": 3, "priority": "normal", "icon": "bi-people", "title": "Reduce Domain Admins group membership",
              "detail": "Keep Domain Admins membership to an absolute minimum. Use Just-In-Time (JIT) privileged access for administrative tasks.",
              "commands": [{"label": "PowerShell — list DA members", "code": "Get-ADGroupMember -Identity 'Domain Admins' -Recursive | Select-Object Name, SamAccountName, objectClass"}]},
@@ -207,9 +207,9 @@ _INDICATOR_META = {
             {"step": 1, "priority": "high", "icon": "bi-shield-plus", "title": "Add privileged accounts to Protected Users group",
              "detail": "All Tier 0 accounts (Domain Admins, Enterprise Admins, Schema Admins, etc.) should be in the Protected Users security group.",
              "commands": [{"label": "PowerShell", "code": "# Add all Domain Admins to Protected Users:\nGet-ADGroupMember 'Domain Admins' | ForEach-Object {\n    Add-ADGroupMember -Identity 'Protected Users' -Members $_.DistinguishedName\n}"}]},
-            {"step": 2, "priority": "normal", "icon": "bi-info-circle", "title": "Understand Protected Users restrictions",
-             "detail": "Protected Users cannot use NTLM, DES, RC4, unconstrained delegation, or cached credentials. Verify applications do not require these before adding accounts.",
-             "commands": []},
+            {"step": 2, "priority": "normal", "icon": "bi-info-circle", "title": "V\u00e9rifier la compatibilit\u00e9 et valider les restrictions Protected Users",
+             "detail": "Les membres du groupe Protected Users ne peuvent plus utiliser NTLM, DES, RC4 Kerberos, la d\u00e9l\u00e9gation non contrainte ni les cr\u00e9dentiels mis en cache. Tester sur un compte de staging avant g\u00e9n\u00e9ralisation. Monitorer avec les evenements Kerberos.",
+             "commands": [{"label": "PowerShell \u2014 d\u00e9tecter les comptes encore NTLM / RC4 avant ajout", "code": "# Event 4776 = authentification NTLM (DC Security Log) :\nGet-WinEvent -ComputerName <DC> -FilterHashtable @{LogName='Security';Id=4776} -MaxEvents 1000 |\n    ForEach-Object {\n        [xml]$x = $_.ToXml()\n        $user = ($x.Event.EventData.Data | Where-Object Name -eq 'TargetUserName').'#text'\n        [pscustomobject]@{ Time=$_.TimeCreated; User=$user; Type='NTLM' }\n    } | Group-Object User | Sort-Object Count -Descending | Select-Object -First 20 Name, Count\n\n# Event 4769 avec EncryptionType 0x17 = RC4 Kerberos :\nGet-WinEvent -ComputerName <DC> -FilterHashtable @{LogName='Security';Id=4769} -MaxEvents 500 |\n    Where-Object { $_.Message -match '0x17' } |\n    ForEach-Object { [xml]$x = $_.ToXml(); ($x.Event.EventData.Data | Where-Object Name -eq 'ServiceName').'#text' } |\n    Sort-Object -Unique"}]},
         ]
     ),
     "server_users_could_be_admin": (
@@ -217,9 +217,9 @@ _INDICATOR_META = {
         "Non-admin users who could escalate to admin on servers via misconfiguration.",
         "Permissions",
         [
-            {"step": 1, "priority": "high", "icon": "bi-search", "title": "Identify misconfigured server permissions",
-             "detail": "Find local admin rights, service misconfigurations, or ACE paths that allow standard users to escalate on servers.",
-             "commands": []},
+            {"step": 1, "priority": "high", "icon": "bi-search", "title": "Identifier les permissions mal configur\u00e9es sur les serveurs",
+             "detail": "Trouver les droits admin locaux non justifi\u00e9s, les services avec des ex\u00e9cutables modifiables ou des chemins non quot\u00e9s, qui permettent \u00e0 un utilisateur standard d'escalader sur un serveur.",
+             "commands": [{"label": "PowerShell \u2014 admins locaux sur tous les serveurs", "code": "$servers = Get-ADComputer -Filter {OperatingSystem -like '*Server*' -and Enabled -eq $true} | Select-Object -ExpandProperty Name\n$results = foreach ($s in $servers) {\n    try {\n        $members = Invoke-Command -ComputerName $s -ScriptBlock {\n            net localgroup Administrators 2>&1\n        } -ErrorAction Stop\n        [pscustomobject]@{Server=$s; Members=($members | Where-Object {$_ -match '\\\\'})}\n    } catch { [pscustomobject]@{Server=$s; Members=\"ERREUR: $_\"} }\n}\n$results | Export-Csv server_localadmins.csv -NoTypeInformation -Encoding UTF8"}, {"label": "PowerShell \u2014 services avec ex\u00e9cutables modifiables", "code": "Get-WmiObject Win32_Service | Where StartMode -ne 'Disabled' | ForEach-Object {\n    $bin = ($_.PathName -replace '\"','').Trim() -split ' ' | Select-Object -First 1\n    if ($bin -and (Test-Path $bin)) {\n        $acl = Get-Acl $bin\n        $acl.Access | Where-Object {\n            $_.FileSystemRights -match 'FullControl|Write|Modify' -and\n            $_.IdentityReference -notmatch 'SYSTEM|Admins|TrustedInstaller|CREATOR'\n        } | Select-Object @{N='Service';E={$_.Name}}, @{N='Binary';E={$bin}}, IdentityReference, FileSystemRights\n    }\n}"}]},
             {"step": 2, "priority": "high", "icon": "bi-x-circle", "title": "Remove unnecessary local admin rights",
              "detail": "Audit local Administrators groups on all servers and remove any non-admin user accounts.",
              "commands": [{"label": "PowerShell (remote)", "code": "Invoke-Command -ComputerName <server> {\n    $members = net localgroup Administrators | Where-Object {$_ -and $_ -notmatch 'Alias|Members|-'}\n    $members\n}"}]},
@@ -378,9 +378,9 @@ _INDICATOR_META = {
             {"step": 2, "priority": "high", "icon": "bi-x-circle", "title": "Remove unconstrained delegation",
              "detail": "Disable unconstrained delegation and replace with constrained or resource-based constrained delegation.",
              "commands": [{"label": "PowerShell", "code": "Set-ADComputer -Identity <computer> -TrustedForDelegation $false"}]},
-            {"step": 3, "priority": "normal", "icon": "bi-check2-square", "title": "Use constrained delegation instead",
-             "detail": "Configure the machine to use constrained delegation (msDS-AllowedToDelegateTo) limited to specific services only.",
-             "commands": []},
+            {"step": 3, "priority": "normal", "icon": "bi-check2-square", "title": "Remplacer par de la d\u00e9l\u00e9gation contrainte (KCD) ou RBCD",
+             "detail": "Configurer the machine avec de la d\u00e9l\u00e9gation contrainte classique (msDS-AllowedToDelegateTo) limit\u00e9e \u00e0 des SPNs sp\u00e9cifiques, ou utiliser RBCD (Resource-Based Constrained Delegation) qui donne le contr\u00f4le au service cible.",
+             "commands": [{"label": "PowerShell \u2014 configurer KCD (d\u00e9l\u00e9gation contrainte classique)", "code": "# D\u00e9sactiver la d\u00e9l\u00e9gation non contrainte :\nSet-ADComputer <computer> -TrustedForDelegation $false\n\n# Configurer KCD vers un service sp\u00e9cifique :\nSet-ADComputer <computer> -Add @{'msDS-AllowedToDelegateTo' = 'cifs/<target_server>', 'cifs/<target_server.domain.com>'}\n\n# Configurer RBCD (le serveur cible contr\u00f4le qui peut d\u00e9l\u00e9guer vers lui) :\n$sid = (Get-ADComputer <source_computer>).SID\n$sd  = New-Object Security.AccessControl.RawSecurityDescriptor \"O:BAD:(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;$($sid.Value))\"\n$sdb = New-Object byte[] ($sd.BinaryLength)\n$sd.GetBinaryForm($sdb, 0)\nGet-ADComputer <target_server> | Set-ADObject -Replace @{'msDS-AllowedToActOnBehalfOfOtherIdentity' = $sdb}\nWrite-Host 'RBCD configur\u00e9 : <source_computer> peut d\u00e9l\u00e9guer vers <target_server>'"}]},
         ]
     ),
     "users_constrained_delegations": (
@@ -391,9 +391,9 @@ _INDICATOR_META = {
             {"step": 1, "priority": "normal", "icon": "bi-search", "title": "Review constrained delegation assignments",
              "detail": "List all users with constrained delegation configured and verify each is legitimate.",
              "commands": [{"label": "PowerShell", "code": "Get-ADUser -Filter {msDS-AllowedToDelegateTo -ne '$null'} -Properties msDS-AllowedToDelegateTo | Select-Object Name, SamAccountName, msDS-AllowedToDelegateTo"}]},
-            {"step": 2, "priority": "normal", "icon": "bi-diagram-2", "title": "Migrate to resource-based constrained delegation (RBCD)",
-             "detail": "RBCD is safer as the target service controls which accounts can delegate to it, rather than relying on the source object.",
-             "commands": []},
+            {"step": 2, "priority": "normal", "icon": "bi-diagram-2", "title": "Migrer vers la d\u00e9l\u00e9gation bas\u00e9e sur les ressources (RBCD)",
+             "detail": "La RBCD est plus s\u00fbre car c'est le service cible qui contr\u00f4le quels comptes peuvent d\u00e9l\u00e9guer vers lui (attribut msDS-AllowedToActOnBehalfOfOtherIdentity). Supprimer la d\u00e9l\u00e9gation contrainte sur la source et configurer RBCD sur la cible.",
+             "commands": [{"label": "PowerShell \u2014 supprimer KCD source et configurer RBCD sur la cible", "code": "# 1. Supprimer la d\u00e9l\u00e9gation contrainte existante sur le compte source :\nSet-ADUser <source_user> -Clear msDS-AllowedToDelegateTo\nSet-ADAccountControl <source_user> -TrustedToAuthForDelegation $false\n\n# 2. Configurer RBCD sur le serveur cible :\n$sourceSid = (Get-ADUser <source_user>).SID\n$sd = New-Object Security.AccessControl.RawSecurityDescriptor \"O:BAD:(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;$($sourceSid.Value))\"\n$sdb = New-Object byte[] ($sd.BinaryLength)\n$sd.GetBinaryForm($sdb, 0)\nGet-ADComputer <target_server> | Set-ADObject -Replace @{'msDS-AllowedToActOnBehalfOfOtherIdentity' = $sdb}\nWrite-Host 'RBCD : <source_user> peut maintenant d\u00e9l\u00e9guer vers <target_server>'\n\n# V\u00e9rifier :\n$raw = (Get-ADComputer <target_server> -Properties msDS-AllowedToActOnBehalfOfOtherIdentity).'msDS-AllowedToActOnBehalfOfOtherIdentity'\nif ($raw) { (New-Object Security.AccessControl.RawSecurityDescriptor($raw,0)).DiscretionaryAcl | Select-Object * }"}]},
         ]
     ),
     "has_sid_history": (
@@ -446,9 +446,9 @@ _INDICATOR_META = {
             {"step": 2, "priority": "high", "icon": "bi-box-arrow-up", "title": "Upgrade or isolate end-of-life systems",
              "detail": "Upgrade to a supported OS. If upgrade is not possible, isolate the machine in a dedicated VLAN with strict firewall rules.",
              "commands": []},
-            {"step": 3, "priority": "normal", "icon": "bi-shield-slash", "title": "Apply micro-segmentation",
-             "detail": "Use host-based firewalls and network segmentation to limit attack surface from EOL systems.",
-             "commands": []},
+            {"step": 3, "priority": "normal", "icon": "bi-shield-slash", "title": "Isoler les syst\u00e8mes EOL par micro-segmentation",
+             "detail": "Placer les machines EOL dans un VLAN de quarantaine avec des r\u00e8gles strictes. Bloquer SMB (445), RPC (135), WinRM (5985/5986) en inbound depuis les segments non approuv\u00e9s. N'autoriser que les flux strictement n\u00e9cessaires.",
+             "commands": [{"label": "PowerShell \u2014 r\u00e8gles de pare-feu Windows sur la machine EOL", "code": "# Bloquer SMB entrant sauf depuis les DCs :\nNew-NetFirewallRule -DisplayName 'Block Inbound SMB (non-DC)' -Direction Inbound -Protocol TCP -LocalPort 445 -Action Block -Profile Domain\n\n# Bloquer RPC :\nNew-NetFirewallRule -DisplayName 'Block Inbound RPC' -Direction Inbound -Protocol TCP -LocalPort 135 -Action Block -Profile Domain\n\n# Bloquer WinRM :\nNew-NetFirewallRule -DisplayName 'Block Inbound WinRM' -Direction Inbound -Protocol TCP -LocalPort 5985,5986 -Action Block -Profile Domain\n\n# V\u00e9rifier les r\u00e8gles actives :\nGet-NetFirewallRule | Where-Object { $_.Enabled -eq 'True' -and $_.Direction -eq 'Inbound' } | Select-Object DisplayName, Action, LocalPort"}]},
         ]
     ),
     "can_read_laps": (
@@ -504,12 +504,12 @@ _INDICATOR_META = {
             {"step": 1, "priority": "high", "icon": "bi-exclamation-triangle", "title": "Identify DA accounts used on non-DC systems",
              "detail": "Credential exposure on workstations/servers is a major risk — credentials can be extracted with tools like Mimikatz.",
              "commands": [{"label": "PowerShell — check recent logons", "code": "Get-WinEvent -ComputerName <server> -FilterHashtable @{LogName='Security'; Id=4624} | Where-Object {$_.Message -match 'Domain Admins'}"}]},
-            {"step": 2, "priority": "high", "icon": "bi-diagram-3", "title": "Enforce AD Tiering — no DA logon outside Tier 0",
-             "detail": "Domain Admin accounts must ONLY log on to Domain Controllers. Use dedicated admin workstations (PAWs) for administrative tasks.",
-             "commands": []},
-            {"step": 3, "priority": "normal", "icon": "bi-pc-display-horizontal", "title": "Deploy Privileged Access Workstations (PAWs)",
-             "detail": "Use hardened, dedicated workstations for all Tier 0 administration. Block internet access and limit installed software.",
-             "commands": []},
+            {"step": 2, "priority": "high", "icon": "bi-diagram-3", "title": "Appliquer le Tiering AD \u2014 interdire les connexions DA hors Tier 0",
+             "detail": "Les comptes Domain Admin ne doivent se connecter QUE sur des DCs. Cr\u00e9er une GPO li\u00e9e aux OUs Servers (Tier 1) ET Workstations (Tier 2) qui interdit explicitement la connexion des DA/EA via les User Rights Assignment.",
+             "commands": [{"label": "GPO \u2014 User Rights Assignment sur OUs Tier 1 & 2", "code": "# Computer Configuration > Policies > Windows Settings > Security Settings >\n#   Local Policies > User Rights Assignment\n#\n# Ajouter Domain Admins, Enterprise Admins, Schema Admins dans :\n#   Deny log on locally                   (SeInteractiveLogonRight)\n#   Deny log on through Remote Desktop    (SeRemoteInteractiveLogonRight)\n#   Deny log on as a batch job            (SeBatchLogonRight)\n#   Deny log on as a service             (SeServiceLogonRight)\n\n# V\u00e9rifier la politique effective sur un serveur cible :\nInvoke-Command -ComputerName <server> {\n    secedit /export /cfg C:\\Temp\\secpol.cfg /areas USER_RIGHTS\n    Get-Content C:\\Temp\\secpol.cfg | Select-String 'SeDenyInteractive|SeDenyRemote|SeDenyBatch|SeDenyService'\n}"}]},
+            {"step": 3, "priority": "normal", "icon": "bi-pc-display-horizontal", "title": "D\u00e9ployer des Privileged Access Workstations (PAW)",
+             "detail": "Durcir un poste d\u00e9di\u00e9 exclusivement \u00e0 l'administration Tier 0. Activer Credential Guard, bloquer l'acc\u00e8s internet, AppLocker/WDAC pour ex\u00e9cutables autoris\u00e9s uniquement.",
+             "commands": [{"label": "PowerShell \u2014 activer Credential Guard (VBS)", "code": "# Activer Virtualization-Based Security + Credential Guard sur la PAW :\n$basePath = 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\DeviceGuard'\nSet-ItemProperty $basePath -Name 'EnableVirtualizationBasedSecurity'   -Value 1 -Type DWord\nSet-ItemProperty $basePath -Name 'RequirePlatformSecurityFeatures'     -Value 3 -Type DWord  # Secure Boot + DMA\nSet-ItemProperty $basePath -Name 'HypervisorEnforcedCodeIntegrity'     -Value 1 -Type DWord\n$cgPath = 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Lsa'\nSet-ItemProperty $cgPath   -Name 'LsaCfgFlags'                         -Value 1 -Type DWord  # Credential Guard enabled\n# V\u00e9rifier apr\u00e8s red\u00e9marrage :\nGet-ComputerInfo | Select-Object DeviceGuard*"}]},
         ]
     ),
     "users_pwd_cleartext": (
@@ -556,12 +556,12 @@ _INDICATOR_META = {
             {"step": 1, "priority": "high", "icon": "bi-search", "title": "Audit ADCS permissions and templates",
              "detail": "Review Enrollment Agent templates, vulnerable template configurations (ESC1-ESC8), and CA permissions.",
              "commands": [{"label": "Certify (from attacker perspective)", "code": "# Use Certipy or Certify to enumerate vulnerable templates:\n# certify.exe find /vulnerable\n# certipy find -u user@domain.com -p password -dc-ip <dc_ip>"}]},
-            {"step": 2, "priority": "high", "icon": "bi-shield-lock", "title": "Harden ADCS templates and CA",
-             "detail": "Remove 'Enrollee Supplies Subject' from templates unless explicitly required. Restrict enrollment permissions to specific groups.",
-             "commands": []},
-            {"step": 3, "priority": "normal", "icon": "bi-graph-up", "title": "Implement Certificate Authority Web Enrollment hardening",
-             "detail": "Disable NTLM authentication on the CA web enrollment endpoint and enable EPA (Extended Protection for Authentication).",
-             "commands": []},
+            {"step": 2, "priority": "high", "icon": "bi-shield-lock", "title": "Durcir les templates ADCS vuln\u00e9rables (ESC1 \u2013 ESC4)",
+             "detail": "ESC1 : supprimer CT_FLAG_ENROLLEE_SUPPLIES_SUBJECT des templates. ESC2 : retirer 'Any Purpose' / 'Client Authentication' des templates \u00e0 enr\u00f4lement faible. ESC3 : retirer les droits Enrollment Agent des non-admins CA. ESC4 : retirer les permissions Write sur les objets template.",
+             "commands": [{"label": "PowerShell \u2014 identifier et corriger ESC1 (Enrollee Supplies Subject)", "code": "# Identifier les templates vuln\u00e9rables ESC1 :\n$tmplBase = 'CN=Certificate Templates,CN=Public Key Services,CN=Services,CN=Configuration,DC=domain,DC=com'\n$vuln = Get-ADObject -SearchBase $tmplBase -Filter {objectClass -eq 'pKICertificateTemplate'} -Properties msPKI-Certificate-Name-Flag, msPKI-RA-Signature, 'msPKI-Enrollment-Flag' |\n    Where-Object { ($_.'msPKI-Certificate-Name-Flag' -band 1) -and ($_.'msPKI-RA-Signature' -eq 0) }\n$vuln | Select-Object Name, 'msPKI-Certificate-Name-Flag'\n\n# Corriger ESC1 : supprimer le flag CT_FLAG_ENROLLEE_SUPPLIES_SUBJECT (bit 0)\nforeach ($t in $vuln) {\n    $newFlag = $t.'msPKI-Certificate-Name-Flag' -band (-bnot 1)\n    Set-ADObject $t.DistinguishedName -Replace @{'msPKI-Certificate-Name-Flag' = $newFlag}\n    Write-Host \"Corrig\u00e9 : $($t.Name)\"\n}"}, {"label": "Certipy \u2014 \u00e9num\u00e9rer tous les chemins ESC (Linux/Windows)", "code": "# Depuis Linux :\ncertipy find -u admin@domain.com -p 'Password' -dc-ip <DC_IP> -vulnerable -stdout\n\n# Depuis Windows :\nCertify.exe find /vulnerable"}]},
+            {"step": 3, "priority": "normal", "icon": "bi-graph-up", "title": "Durcir le Web Enrollment CA \u2014 HTTPS + EPA, pas de NTLM (ESC8)",
+             "detail": "Le endpoint HTTP du CA Web Enrollment est vuln\u00e9rable au relay NTLM (ESC8/PetitPotam). Imposer HTTPS, activer EPA (Extended Protection for Authentication) et d\u00e9sactiver NTLM sur ce endpoint IIS.",
+             "commands": [{"label": "PowerShell \u2014 activer EPA et HTTPS sur IIS CertSrv", "code": "# Ex\u00e9cuter sur le serveur CA\nImport-Module WebAdministration\n\n# Exiger SSL sur CertSrv\nSet-WebConfigurationProperty -Filter 'system.webServer/security/access' `\n    -Name 'sslFlags' -Value 'Ssl' `\n    -PSPath 'IIS:\\Sites\\Default Web Site\\CertSrv'\n\n# Activer Extended Protection (EPA) :\nSet-WebConfigurationProperty `\n    -Filter 'system.webServer/security/authentication/windowsAuthentication' `\n    -Name 'extendedProtection.tokenChecking' `\n    -Value 'Require' `\n    -PSPath 'IIS:\\Sites\\Default Web Site\\CertSrv'\n\n# V\u00e9rifier :\nGet-WebConfigurationProperty -Filter 'system.webServer/security/authentication/windowsAuthentication' `\n    -Name 'extendedProtection.tokenChecking' `\n    -PSPath 'IIS:\\Sites\\Default Web Site\\CertSrv'"}]},
         ]
     ),
     "cross_domain_admin_privileges": (
@@ -569,9 +569,9 @@ _INDICATOR_META = {
         "Accounts with administrative privileges spanning multiple domains.",
         "Permissions",
         [
-            {"step": 1, "priority": "high", "icon": "bi-search", "title": "Audit cross-domain admin memberships",
-             "detail": "Find accounts from one domain that are members of privileged groups in other domains.",
-             "commands": []},
+            {"step": 1, "priority": "high", "icon": "bi-search", "title": "Auditer les appartenances admin inter-domaines",
+             "detail": "Trouver les comptes d'un domaine membres de groupes privil\u00e9gi\u00e9s dans d'autres domaines. Les Foreign Security Principals dans des groupes Tier 0 sont un vecteur d'escalade inter-domaines courant.",
+             "commands": [{"label": "PowerShell \u2014 Foreign Security Principals dans groupes privil\u00e9gi\u00e9s", "code": "$privilegedGroups = @('Domain Admins','Enterprise Admins','Schema Admins','Administrators','Backup Operators','Account Operators')\nforeach ($grp in $privilegedGroups) {\n    try {\n        $members = Get-ADGroupMember -Identity $grp -ErrorAction Stop\n        $foreign = $members | Where-Object { $_.objectClass -eq 'foreignSecurityPrincipal' }\n        if ($foreign) {\n            Write-Host \"[!] Membres \u00e9trangers dans $grp :\"\n            $foreign | ForEach-Object {\n                $fsp = Get-ADObject -Identity $_.DistinguishedName -Properties objectSid\n                Write-Host \"  - $($fsp.Name)  SID: $($fsp.objectSid)\"\n            }\n        }\n    } catch {}\n}"}]},
             {"step": 2, "priority": "high", "icon": "bi-x-circle", "title": "Remove unnecessary cross-domain privileges",
              "detail": "Cross-domain admin rights should be extremely limited. Use trusts with SID filtering to prevent privilege escalation across domains.",
              "commands": [{"label": "PowerShell — enable SID filtering on trust", "code": "netdom trust <TrustingDomain> /domain:<TrustedDomain> /quarantine:yes"}]},
@@ -595,9 +595,15 @@ _INDICATOR_META = {
         "Shadow credentials set on non-privileged accounts.",
         "Credentials / Authentication",
         [
-            {"step": 1, "priority": "high", "icon": "bi-trash3", "title": "Clear unauthorized shadow credentials on user accounts",
-             "detail": "Even on non-admin accounts, shadow credentials can be used as stepping stones in an attack path.",
-             "commands": [{"label": "PowerShell", "code": "Get-ADUser -Filter * -Properties msDS-KeyCredentialLink | Where-Object {$_.'msDS-KeyCredentialLink'} | Set-ADUser -Clear msDS-KeyCredentialLink"}]},
+            {"step": 1, "priority": "high", "icon": "bi-search", "title": "Inventorier les utilisateurs avec msDS-KeyCredentialLink d\u00e9fini",
+             "detail": "Les Shadow Credentials sur n'importe quel compte permettent d'obtenir un TGT sans conna\u00eetre le mot de passe. M\u00eame sur un compte non-admin, c'est un maillon exploitable dans une cha\u00eene d'escalade.",
+             "commands": [{"label": "PowerShell \u2014 lister les comptes affect\u00e9s avec date de modification", "code": "Get-ADUser -Filter * -Properties msDS-KeyCredentialLink, whenChanged |\n    Where-Object { $_.'msDS-KeyCredentialLink' } |\n    Select-Object Name, SamAccountName, whenChanged, @{N='KeyCount';E={$_.'msDS-KeyCredentialLink'.Count}} |\n    Sort-Object whenChanged -Descending"}]},
+            {"step": 2, "priority": "high", "icon": "bi-trash3", "title": "Supprimer les Shadow Credentials non autoris\u00e9es",
+             "detail": "Retirer msDS-KeyCredentialLink de tous les comptes o\u00f9 cet attribut n'a pas \u00e9t\u00e9 positionn\u00e9 par un d\u00e9ploiement l\u00e9gitime (Windows Hello for Business, Azure AD Hybrid Join).",
+             "commands": [{"label": "PowerShell \u2014 nettoyage en masse", "code": "Get-ADUser -Filter * -Properties msDS-KeyCredentialLink | Where-Object { $_.'msDS-KeyCredentialLink' } | ForEach-Object {\n    Write-Host \"Nettoyage Shadow Credentials : $($_.SamAccountName)\"\n    Set-ADUser -Identity $_.DistinguishedName -Clear msDS-KeyCredentialLink\n}"}]},
+            {"step": 3, "priority": "normal", "icon": "bi-bell", "title": "Surveiller les \u00e9critures sur msDS-KeyCredentialLink via SACL",
+             "detail": "Ajouter une SACL sur le container Users pour auditer toute \u00e9criture de l'attribut msDS-KeyCredentialLink. Alerter sur l'Event ID 5136 (Directory Service object modified) pour cet attribut OID.",
+             "commands": [{"label": "PowerShell \u2014 activer l'audit DS et la SACL", "code": "# 1. Activer 'Audit Directory Service Changes' via GPO :\n#    Computer Config > Policies > Windows Settings > Security Settings >\n#    Advanced Audit Policy > DS Access > Audit Directory Service Changes = Success\n\n# 2. Ajouter une SACL sur le container Users :\n$acl = Get-Acl 'AD:CN=Users,DC=domain,DC=com'\n$everyone = [System.Security.Principal.SecurityIdentifier]::new('S-1-1-0')\n# OID de msDS-KeyCredentialLink : 5b47d60f-6090-40b2-9f37-2a4de88f3063\n$attrGuid  = [guid]'5b47d60f-6090-40b2-9f37-2a4de88f3063'\n$userClass = [guid]'bf967aba-0de6-11d0-a285-00aa003049e2'\n$auditRule = New-Object System.DirectoryServices.ActiveDirectoryAuditRule(\n    $everyone, 'WriteProperty', 'Success', $attrGuid, 'Descendents', $userClass\n)\n$acl.AddAuditRule($auditRule)\nSet-Acl 'AD:CN=Users,DC=domain,DC=com' $acl\nWrite-Host 'SACL configur\u00e9e sur CN=Users'"}]},
         ]
     ),
     "can_read_gmsapassword_of_adm": (
@@ -673,9 +679,9 @@ _INDICATOR_META = {
             {"step": 1, "priority": "high", "icon": "bi-shield-fill-exclamation", "title": "Enable SID filtering on forest trusts",
              "detail": "SID filtering (quarantine) prevents SID history abuse across domain trusts.",
              "commands": [{"label": "Command", "code": "netdom trust <TrustingDomain> /domain:<TrustedDomain> /quarantine:yes /enablesidhistory:no"}]},
-            {"step": 2, "priority": "normal", "icon": "bi-diagram-3", "title": "Isolate Tier 0 admin accounts per domain",
-             "detail": "Each domain should have its own set of dedicated admin accounts with no membership in privileged groups of other domains.",
-             "commands": []},
+            {"step": 2, "priority": "normal", "icon": "bi-diagram-3", "title": "Isoler les comptes admin Tier 0 par domaine",
+             "detail": "Chaque domaine doit avoir ses propres comptes admin d\u00e9di\u00e9s. Supprimer les appartenances crois\u00e9es entre domaines. V\u00e9rifier qu'aucun Foreign Security Principal n'est dans des groupes privil\u00e9gi\u00e9s.",
+             "commands": [{"label": "PowerShell \u2014 Foreign Security Principals dans les groupes Tier 0", "code": "@('Domain Admins','Enterprise Admins','Schema Admins','Administrators') | ForEach-Object {\n    $grp = $_\n    try {\n        Get-ADGroupMember $grp | Where-Object { $_.objectClass -eq 'foreignSecurityPrincipal' } |\n        ForEach-Object {\n            $fsp = Get-ADObject -Identity $_.DistinguishedName -Properties objectSid -ErrorAction SilentlyContinue\n            [pscustomobject]@{\n                Group = $grp\n                FSP   = $fsp.Name\n                SID   = $fsp.objectSid\n                DN    = $fsp.DistinguishedName\n            }\n        }\n    } catch {}\n}\n\n# Supprimer un FSP d'un groupe privil\u00e9gi\u00e9 :\n# Remove-ADGroupMember -Identity 'Domain Admins' -Members 'CN=S-1-5-21-...,CN=ForeignSecurityPrincipals,...' -Confirm:$false"}]},
         ]
     ),
     "krb_last_change": (
@@ -712,9 +718,9 @@ _INDICATOR_META = {
             {"step": 1, "priority": "normal", "icon": "bi-people", "title": "Review and reduce Domain Admin membership",
              "detail": "Best practice: fewer than 5 Domain Admin accounts. Ideally, only dedicated 'break-glass' accounts.",
              "commands": [{"label": "PowerShell", "code": "Get-ADGroupMember -Identity 'Domain Admins' -Recursive | Select-Object Name, SamAccountName, objectClass"}]},
-            {"step": 2, "priority": "normal", "icon": "bi-clock-history", "title": "Implement Just-In-Time (JIT) privileged access",
-             "detail": "Use Microsoft Privileged Identity Management (PIM) or a PAM solution to grant DA rights on-demand with time limitation and approval workflow.",
-             "commands": []},
+            {"step": 2, "priority": "normal", "icon": "bi-clock-history", "title": "Impl\u00e9menter l'acc\u00e8s privil\u00e9gi\u00e9 Just-In-Time (JIT)",
+             "detail": "Utiliser Microsoft PIM (Entra ID P2) ou implanter du JIT on-premises avec appartenance temporaire et expiration automatique. Les droits DA ne doivent \u00eatre accord\u00e9s que sur demande approuv\u00e9e avec dur\u00e9e limit\u00e9e.",
+             "commands": [{"label": "PowerShell \u2014 JIT on-premises (appartenance temporaire \u00e0 dur\u00e9e limit\u00e9e)", "code": "# Fonction d'acc\u00e8s DA temporaire (2h par d\u00e9faut) :\nfunction Grant-TempDA {\n    param([string]$User, [int]$Hours = 2)\n    Add-ADGroupMember -Identity 'Domain Admins' -Members $User\n    $expiry = (Get-Date).AddHours($Hours).ToString('HH:mm')\n    Write-EventLog -LogName Application -Source 'JIT-Admin' -EventId 1000 -EntryType Information `\n        -Message \"JIT DA granted to $User for $Hours hours (expires $expiry)\"\n    Start-Job -Name \"Revoke-DA-$User\" -ScriptBlock {\n        param($u, $h)\n        Start-Sleep -Seconds ($h * 3600)\n        Remove-ADGroupMember -Identity 'Domain Admins' -Members $u -Confirm:$false\n        Write-EventLog -LogName Application -Source 'JIT-Admin' -EventId 1001 -EntryType Information `\n            -Message \"JIT DA revoked for $u (TTL expired)\"\n    } -ArgumentList $User, $Hours | Out-Null\n    Write-Host \"[JIT] $User ajout\u00e9 \u00e0 Domain Admins pour $Hours heure(s). Expiration : $expiry\"\n}\n# Exemple : Grant-TempDA -User 'john.doe' -Hours 2"}]},
         ]
     ),
     "empty_groups": (
@@ -722,9 +728,12 @@ _INDICATOR_META = {
         "Security groups with no members (may indicate orphaned groups).",
         "Misc",
         [
-            {"step": 1, "priority": "normal", "icon": "bi-trash3", "title": "Remove or archive empty security groups",
-             "detail": "Empty groups can be exploited if an attacker gains WriteMember rights. They should be deleted or moved to an archive OU.",
-             "commands": [{"label": "PowerShell — list empty groups", "code": "Get-ADGroup -Filter * -Properties Members | Where-Object {$_.Members.Count -eq 0} | Select-Object Name, DistinguishedName"}]},
+            {"step": 1, "priority": "normal", "icon": "bi-search", "title": "Identifier les groupes vides et auditer leurs ACLs",
+             "detail": "Les groupes vides avec des ACE non-h\u00e9rit\u00e9es (GenericAll, AddMember) sont exploitables : un attaquant qui les contr\u00f4le peut y ajouter des comptes. Identifier les groupes vides ET v\u00e9rifier leurs permissions.",
+             "commands": [{"label": "PowerShell \u2014 groupes vides avec ACLs dangereuses", "code": "$empty = Get-ADGroup -Filter * -Properties Members | Where-Object { $_.Members.Count -eq 0 }\nforeach ($g in $empty) {\n    $acl = Get-Acl \"AD:$($g.DistinguishedName)\"\n    $dangerous = $acl.Access | Where-Object {\n        $_.ActiveDirectoryRights -match 'GenericAll|WriteProperty|WriteDacl|WriteOwner' -and\n        $_.AccessControlType -eq 'Allow' -and\n        $_.IsInherited -eq $false\n    }\n    if ($dangerous) {\n        Write-Host \"[!] $($g.Name) a des ACE non-h\u00e9rit\u00e9es :\"\n        $dangerous | Select-Object IdentityReference, ActiveDirectoryRights\n    }\n}\n$empty | Select-Object Name, DistinguishedName | Export-Csv empty_groups.csv -NoTypeInformation"}]},
+            {"step": 2, "priority": "normal", "icon": "bi-trash3", "title": "Supprimer ou archiver les groupes vides",
+             "detail": "Apr\u00e8s confirmation qu'ils ne sont pas utilis\u00e9s, supprimer les groupes vides. Si incertain, les d\u00e9placer dans une OU Archive avec des permissions restreintes pendant une p\u00e9riode de gr\u00e2ce de 30 jours.",
+             "commands": [{"label": "PowerShell \u2014 d\u00e9placer vers OU Archive", "code": "$archiveOU = 'OU=Archive_Groups,DC=domain,DC=com'\n$empty = Get-ADGroup -Filter * -Properties Members | Where-Object { $_.Members.Count -eq 0 }\nforeach ($g in $empty) {\n    Move-ADObject -Identity $g.DistinguishedName -TargetPath $archiveOU\n    Write-Host \"D\u00e9plac\u00e9 : $($g.Name)\"\n}\n\n# Apr\u00e8s la p\u00e9riode de gr\u00e3ce, supprimer :\n# Get-ADGroup -SearchBase $archiveOU -Filter * | Remove-ADGroup -Confirm:$false"}]},
         ]
     ),
     "empty_ous": (
@@ -732,9 +741,12 @@ _INDICATOR_META = {
         "Organizational Units with no objects.",
         "Misc",
         [
-            {"step": 1, "priority": "normal", "icon": "bi-folder-x", "title": "Remove or consolidate empty OUs",
-             "detail": "Empty OUs clutter the directory and can expose unnecessary delegation targets.",
-             "commands": [{"label": "PowerShell", "code": "Get-ADOrganizationalUnit -Filter * -Properties * | Where-Object {\n    -not (Get-ADObject -Filter * -SearchBase $_.DistinguishedName -SearchScope OneLevel)\n} | Select-Object Name, DistinguishedName"}]},
+            {"step": 1, "priority": "normal", "icon": "bi-search", "title": "Identifier les OUs vides et leurs d\u00e9l\u00e9gations",
+             "detail": "Les OUs vides avec des permissions d\u00e9l\u00e9gu\u00e9es sont un vecteur d'attaque : un attaquant qui les contr\u00f4le peut y cr\u00e9er des objets ou lier des GPOs malveillantes. Identifier ET auditer les ACLs.",
+             "commands": [{"label": "PowerShell \u2014 OUs vides avec d\u00e9l\u00e9gations non-h\u00e9rit\u00e9es", "code": "$emptyOUs = Get-ADOrganizationalUnit -Filter * | Where-Object {\n    -not (Get-ADObject -Filter * -SearchBase $_.DistinguishedName -SearchScope OneLevel -ErrorAction SilentlyContinue)\n}\nforeach ($ou in $emptyOUs) {\n    $acl = Get-Acl \"AD:$($ou.DistinguishedName)\"\n    $delegated = $acl.Access | Where-Object { $_.IsInherited -eq $false -and $_.AccessControlType -eq 'Allow' }\n    if ($delegated) {\n        Write-Host \"[!] OU vide avec d\u00e9l\u00e9gations : $($ou.DistinguishedName)\"\n        $delegated | Select-Object IdentityReference, ActiveDirectoryRights\n    }\n}\n$emptyOUs | Select-Object Name, DistinguishedName | Export-Csv empty_ous.csv -NoTypeInformation"}]},
+            {"step": 2, "priority": "normal", "icon": "bi-folder-x", "title": "Supprimer les d\u00e9l\u00e9gations et effacer les OUs vides",
+             "detail": "Retirer les ACE non-standard avant suppression. D\u00e9sactiver la protection contre la suppression accidentelle si active, puis supprimer ou consolider les OUs.",
+             "commands": [{"label": "PowerShell \u2014 supprimer les OUs vides (apr\u00e8s v\u00e9rification)", "code": "$emptyOUs = Get-ADOrganizationalUnit -Filter * | Where-Object {\n    -not (Get-ADObject -Filter * -SearchBase $_.DistinguishedName -SearchScope OneLevel -ErrorAction SilentlyContinue)\n}\n# ATTENTION : v\u00e9rifier la liste ci-dessous avant d'ex\u00e9cuter la suppression !\n$emptyOUs | Select-Object Name, DistinguishedName\n\n# Supprimer chaque OU vide :\nforeach ($ou in $emptyOUs) {\n    Set-ADOrganizationalUnit -Identity $ou.DistinguishedName -ProtectedFromAccidentalDeletion $false\n    Remove-ADOrganizationalUnit -Identity $ou.DistinguishedName -Confirm:$false\n    Write-Host \"Supprim\u00e9 : $($ou.Name)\"\n}"}]},
         ]
     ),
     "computers_list_of_rdp_users": (
@@ -884,6 +896,7 @@ def parse_adminer_data_json(filepath: str) -> dict:
             "affected_count":  count,
             "details":         "[]",
             "remediation":     json.dumps(remediation_steps),
+            "indicator_key":   key,
         })
 
     # Sort findings: CRITICAL first
