@@ -493,76 +493,81 @@
   </div>
 </div>
 
-{# ── Charts JS ────────────────────────────────────────────────────────────── #}
-{% if findings %}
+{% endblock %}
+
+{# ── Charts JS (after Chart.js is loaded) ─────────────────────────────────── #}
+{% block scripts %}
 <script>
 (function () {
-  const labels = {{ sev_labels | safe }};
-  const counts = {{ sev_counts | safe }};
-  const colors = {{ sev_colors | safe }};
-  const nonZero = labels.filter((_, i) => counts[i] > 0);
-  const nzCounts = counts.filter(c => c > 0);
-  const nzColors = colors.filter((_, i) => counts[i] > 0);
-
-  // Donut chart — findings by severity
-  new Chart(document.getElementById('sevDonut'), {
-    type: 'doughnut',
-    data: {
-      labels: nonZero,
-      datasets: [{
-        data: nzCounts,
-        backgroundColor: nzColors,
-        borderWidth: 2,
-        borderColor: 'rgba(0,0,0,0.3)',
-      }],
-    },
-    options: {
-      responsive: true,
-      cutout: '62%',
-      plugins: {
-        legend: { position: 'bottom', labels: { color: '#adb5bd', font: { size: 11 } } },
-        tooltip: { callbacks: { label: ctx => ` ${ctx.parsed} finding(s)` } },
+  // Bar chart — AD object inventory (always rendered)
+  const barEl = document.getElementById('objBar');
+  if (barEl) {
+    const barData = {
+      labels: ['DCs', 'DA', 'Users', 'Groups', 'Computers', 'ADCS', 'Kerberoastable', 'AS-REP'],
+      values: [
+        {{ ad.dc_count }}, {{ ad.domain_admin_count }},
+        {{ ad.user_count }}, {{ ad.group_count }},
+        {{ ad.computer_count }}, {{ ad.adcs_count }},
+        {{ ad.kerberoastable_count }}, {{ ad.asreproastable_count }},
+      ],
+      bgColors: [
+        '#0d6efd','#dc3545','#0dcaf0','#ffc107',
+        '#6c757d','#d63384','#fd7e14','#dc3545',
+      ],
+    };
+    new Chart(barEl, {
+      type: 'bar',
+      data: {
+        labels: barData.labels,
+        datasets: [{
+          data: barData.values,
+          backgroundColor: barData.bgColors.map(c => c + 'cc'),
+          borderColor: barData.bgColors,
+          borderWidth: 1,
+          borderRadius: 4,
+        }],
       },
-    },
-  });
-
-  // Bar chart — AD object inventory
-  const barData = {
-    labels: ['DCs', 'DA', 'Users', 'Groups', 'Computers', 'ADCS', 'Kerberoastable', 'AS-REP'],
-    values: [
-      {{ ad.dc_count }}, {{ ad.domain_admin_count }},
-      {{ ad.user_count }}, {{ ad.group_count }},
-      {{ ad.computer_count }}, {{ ad.adcs_count }},
-      {{ ad.kerberoastable_count }}, {{ ad.asreproastable_count }},
-    ],
-    bgColors: [
-      '#0d6efd','#dc3545','#0dcaf0','#ffc107',
-      '#6c757d','#d63384','#fd7e14','#dc3545',
-    ],
-  };
-  new Chart(document.getElementById('objBar'), {
-    type: 'bar',
-    data: {
-      labels: barData.labels,
-      datasets: [{
-        data: barData.values,
-        backgroundColor: barData.bgColors.map(c => c + 'cc'),
-        borderColor: barData.bgColors,
-        borderWidth: 1,
-        borderRadius: 4,
-      }],
-    },
-    options: {
-      responsive: true,
-      plugins: { legend: { display: false } },
-      scales: {
-        x: { ticks: { color: '#adb5bd', font: { size: 11 } }, grid: { color: 'rgba(255,255,255,.06)' } },
-        y: { ticks: { color: '#adb5bd', stepSize: 1 }, grid: { color: 'rgba(255,255,255,.06)' }, beginAtZero: true },
+      options: {
+        responsive: true,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { ticks: { color: '#adb5bd', font: { size: 11 } }, grid: { color: 'rgba(255,255,255,.06)' } },
+          y: { ticks: { color: '#adb5bd', stepSize: 1 }, grid: { color: 'rgba(255,255,255,.06)' }, beginAtZero: true },
+        },
       },
-    },
-  });
+    });
+  }
+
+  // Donut chart — findings by severity (only if canvas exists)
+  const donutEl = document.getElementById('sevDonut');
+  if (donutEl) {
+    const labels = {{ sev_labels | safe }};
+    const counts = {{ sev_counts | safe }};
+    const colors = {{ sev_colors | safe }};
+    const nonZero  = labels.filter((_, i) => counts[i] > 0);
+    const nzCounts = counts.filter(c => c > 0);
+    const nzColors = colors.filter((_, i) => counts[i] > 0);
+    new Chart(donutEl, {
+      type: 'doughnut',
+      data: {
+        labels: nonZero,
+        datasets: [{
+          data: nzCounts,
+          backgroundColor: nzColors,
+          borderWidth: 2,
+          borderColor: 'rgba(0,0,0,0.3)',
+        }],
+      },
+      options: {
+        responsive: true,
+        cutout: '62%',
+        plugins: {
+          legend: { position: 'bottom', labels: { color: '#adb5bd', font: { size: 11 } } },
+          tooltip: { callbacks: { label: ctx => ` ${ctx.parsed} finding(s)` } },
+        },
+      },
+    });
+  }
 })();
 </script>
-{% endif %}
-
 {% endblock %}
