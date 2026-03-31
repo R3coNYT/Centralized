@@ -128,6 +128,7 @@ def upload_sharphound(client_id):
             description    = fd["description"],
             affected_count = fd["affected_count"],
             details        = fd["details"],
+            remediation    = fd.get("remediation", "[]"),
         ))
 
     db.session.commit()
@@ -343,6 +344,7 @@ def upload_adminer(client_id):
                     description    = fd["description"],
                     affected_count = fd["affected_count"],
                     details        = fd["details"],
+                    remediation    = fd.get("remediation", "[]"),
                 ))
 
             db.session.commit()

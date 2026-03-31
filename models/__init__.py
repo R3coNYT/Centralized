@@ -443,6 +443,7 @@ class ADFinding(db.Model):
     description    = db.Column(db.Text)
     affected_count = db.Column(db.Integer, default=0)
     details        = db.Column(db.Text)                          # JSON list of affected object names (max 200)
+    remediation    = db.Column(db.Text)                          # JSON list of remediation steps
     created_at     = db.Column(db.DateTime, default=utcnow)
 
     def __repr__(self):
