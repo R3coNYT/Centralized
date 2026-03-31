@@ -224,7 +224,7 @@ Set-Location '$InstallDir'
 if ((Test-Path `$log) -and (Get-Item `$log).Length -gt 2MB) {
     Move-Item `$log "`$log.bak" -Force
 }
-& '$VenvPython' -m waitress --port=$AppPort --call app:create_app *>> `$log
+& '$VenvPython' -m waitress --port=$AppPort --call app:create_app >> `$log 2>> `$log
 "@
     Set-Content -Path $WrapperPs1 -Value $wrapper -Encoding UTF8
 
