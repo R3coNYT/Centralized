@@ -245,7 +245,10 @@
   </div>
 </div>
 
-{# ── Mini donut chart JS ─────────────────────────────────────────────────── #}
+{% endblock %}
+
+{# ── Mini donut chart JS — dans block scripts pour être après Chart.js ── #}
+{% block scripts %}
 {% if client.ad_data and client.ad_data.findings.count() > 0 %}
 {% set ad = client.ad_data %}
 {% set sev_data = [
@@ -277,5 +280,4 @@
 })();
 </script>
 {% endif %}
-
 {% endblock %}
