@@ -382,16 +382,19 @@
         </h2>
         <div id="finding-{{ finding.id }}" class="accordion-collapse collapse"
              data-bs-parent="#findingsAccordion">
-          <div class="accordion-body">
-            <p class="text-muted mb-3">{{ finding.description }}</p>
+          <div class="accordion-body pt-2 pb-3">
+
+            {# Description #}
+            <p class="text-muted small mb-3">{{ finding.description }}</p>
+
+            {# Affected objects #}
             {% if finding.details %}
-              {% set names = finding.details | tojson | replace('"', '') | replace('[', '') | replace(']', '') %}
               {% set details_list = finding.details | from_json %}
               {% if details_list %}
-              <div>
-                <div class="text-muted small mb-2">
-                  Affected objects
-                  {% if details_list|length == 200 %}(first 200 shown){% endif %}:
+              <div class="mb-4">
+                <div class="text-muted small mb-2 fw-semibold">
+                  <i class="bi bi-hdd-network me-1"></i>Affected objects
+                  {% if details_list|length == 200 %}<span class="fw-normal">(first 200)</span>{% endif %}
                 </div>
                 <div class="d-flex flex-wrap gap-1">
                   {% for name in details_list %}
@@ -402,6 +405,62 @@
               </div>
               {% endif %}
             {% endif %}
+
+            {# Remediation steps #}
+            <div class="mt-2">
+              <div class="fw-semibold small text-muted mb-3">
+                <i class="bi bi-wrench-adjustable me-2"></i>How to fix this finding
+              </div>
+              {% set rem_steps = finding.remediation | from_json if finding.remediation else [] %}
+              {% if rem_steps %}
+              <div class="d-flex flex-column gap-3">
+                {% for s in rem_steps %}
+                {% set p_cls = 'danger' if s.priority == 'critical' else ('warning' if s.priority == 'high' else 'info') %}
+                {% set badge_cls = 'bg-danger' if s.priority == 'critical' else ('bg-warning text-dark' if s.priority == 'high' else 'bg-info text-dark') %}
+                <div class="p-3 rounded" style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.08)">
+                  <div class="d-flex gap-3 align-items-start">
+                    <div class="flex-shrink-0">
+                      <span class="badge rounded-pill {{ badge_cls }}"
+                            style="min-width:26px;height:26px;font-size:.75rem;display:inline-flex;align-items:center;justify-content:center">
+                        {{ s.step }}
+                      </span>
+                    </div>
+                    <div class="flex-grow-1" style="min-width:0">
+                      <div class="fw-semibold small mb-1">
+                        <i class="bi {{ s.icon | default('bi-check-circle') }} me-2 text-{{ p_cls }}"></i>
+                        {{ s.title }}
+                      </div>
+                      <div class="text-muted small mb-0" style="line-height:1.5">{{ s.detail }}</div>
+                      {% if s.commands %}
+                      <div class="mt-3 d-flex flex-column gap-2">
+                        {% for cmd in s.commands %}
+                        <div class="rounded overflow-hidden" style="border:1px solid rgba(255,255,255,.15)">
+                          <div class="d-flex justify-content-between align-items-center px-3 py-1"
+                               style="background:rgba(255,255,255,.07)">
+                            <span class="small fw-semibold text-muted font-monospace">{{ cmd.label }}</span>
+                            <button class="btn btn-sm btn-link p-0 text-muted" title="Copy"
+                                    onclick="copyAdBlock(this)">
+                              <i class="bi bi-clipboard"></i>
+                            </button>
+                          </div>
+                          <pre class="mb-0 px-3 py-2 small text-success"
+                               style="background:#0d1117;overflow-x:auto;white-space:pre;line-height:1.6"><code>{{ cmd.code }}</code></pre>
+                        </div>
+                        {% endfor %}
+                      </div>
+                      {% endif %}
+                    </div>
+                  </div>
+                </div>
+                {% endfor %}
+              </div>
+              {% else %}
+              <div class="text-muted small">
+                Apply the principle of least privilege and follow Microsoft's AD security best practices for this indicator.
+              </div>
+              {% endif %}
+            </div>
+
           </div>
         </div>
       </div>
@@ -493,76 +552,91 @@
   </div>
 </div>
 
-{# ── Charts JS ────────────────────────────────────────────────────────────── #}
-{% if findings %}
+{% endblock %}
+
+{# ── Charts JS (after Chart.js is loaded) ─────────────────────────────────── #}
+{% block scripts %}
+<script>
+function copyAdBlock(btn) {
+  var code = btn.closest('.rounded').querySelector('code');
+  if (!code) return;
+  navigator.clipboard.writeText(code.innerText).then(function () {
+    btn.innerHTML = '<i class="bi bi-check"></i>';
+    setTimeout(function () { btn.innerHTML = '<i class="bi bi-clipboard"></i>'; }, 1500);
+  });
+}
+</script>
 <script>
 (function () {
-  const labels = {{ sev_labels | safe }};
-  const counts = {{ sev_counts | safe }};
-  const colors = {{ sev_colors | safe }};
-  const nonZero = labels.filter((_, i) => counts[i] > 0);
-  const nzCounts = counts.filter(c => c > 0);
-  const nzColors = colors.filter((_, i) => counts[i] > 0);
-
-  // Donut chart — findings by severity
-  new Chart(document.getElementById('sevDonut'), {
-    type: 'doughnut',
-    data: {
-      labels: nonZero,
-      datasets: [{
-        data: nzCounts,
-        backgroundColor: nzColors,
-        borderWidth: 2,
-        borderColor: 'rgba(0,0,0,0.3)',
-      }],
-    },
-    options: {
-      responsive: true,
-      cutout: '62%',
-      plugins: {
-        legend: { position: 'bottom', labels: { color: '#adb5bd', font: { size: 11 } } },
-        tooltip: { callbacks: { label: ctx => ` ${ctx.parsed} finding(s)` } },
+  // Bar chart — AD object inventory (always rendered)
+  const barEl = document.getElementById('objBar');
+  if (barEl) {
+    const barData = {
+      labels: ['DCs', 'DA', 'Users', 'Groups', 'Computers', 'ADCS', 'Kerberoastable', 'AS-REP'],
+      values: [
+        {{ ad.dc_count }}, {{ ad.domain_admin_count }},
+        {{ ad.user_count }}, {{ ad.group_count }},
+        {{ ad.computer_count }}, {{ ad.adcs_count }},
+        {{ ad.kerberoastable_count }}, {{ ad.asreproastable_count }},
+      ],
+      bgColors: [
+        '#0d6efd','#dc3545','#0dcaf0','#ffc107',
+        '#6c757d','#d63384','#fd7e14','#dc3545',
+      ],
+    };
+    new Chart(barEl, {
+      type: 'bar',
+      data: {
+        labels: barData.labels,
+        datasets: [{
+          data: barData.values,
+          backgroundColor: barData.bgColors.map(c => c + 'cc'),
+          borderColor: barData.bgColors,
+          borderWidth: 1,
+          borderRadius: 4,
+        }],
       },
-    },
-  });
-
-  // Bar chart — AD object inventory
-  const barData = {
-    labels: ['DCs', 'DA', 'Users', 'Groups', 'Computers', 'ADCS', 'Kerberoastable', 'AS-REP'],
-    values: [
-      {{ ad.dc_count }}, {{ ad.domain_admin_count }},
-      {{ ad.user_count }}, {{ ad.group_count }},
-      {{ ad.computer_count }}, {{ ad.adcs_count }},
-      {{ ad.kerberoastable_count }}, {{ ad.asreproastable_count }},
-    ],
-    bgColors: [
-      '#0d6efd','#dc3545','#0dcaf0','#ffc107',
-      '#6c757d','#d63384','#fd7e14','#dc3545',
-    ],
-  };
-  new Chart(document.getElementById('objBar'), {
-    type: 'bar',
-    data: {
-      labels: barData.labels,
-      datasets: [{
-        data: barData.values,
-        backgroundColor: barData.bgColors.map(c => c + 'cc'),
-        borderColor: barData.bgColors,
-        borderWidth: 1,
-        borderRadius: 4,
-      }],
-    },
-    options: {
-      responsive: true,
-      plugins: { legend: { display: false } },
-      scales: {
-        x: { ticks: { color: '#adb5bd', font: { size: 11 } }, grid: { color: 'rgba(255,255,255,.06)' } },
-        y: { ticks: { color: '#adb5bd', stepSize: 1 }, grid: { color: 'rgba(255,255,255,.06)' }, beginAtZero: true },
+      options: {
+        responsive: true,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { ticks: { color: '#adb5bd', font: { size: 11 } }, grid: { color: 'rgba(255,255,255,.06)' } },
+          y: { ticks: { color: '#adb5bd', stepSize: 1 }, grid: { color: 'rgba(255,255,255,.06)' }, beginAtZero: true },
+        },
       },
-    },
-  });
+    });
+  }
+
+  // Donut chart — findings by severity (only if canvas exists)
+  const donutEl = document.getElementById('sevDonut');
+  if (donutEl) {
+    const labels = {{ sev_labels | safe }};
+    const counts = {{ sev_counts | safe }};
+    const colors = {{ sev_colors | safe }};
+    const nonZero  = labels.filter((_, i) => counts[i] > 0);
+    const nzCounts = counts.filter(c => c > 0);
+    const nzColors = colors.filter((_, i) => counts[i] > 0);
+    new Chart(donutEl, {
+      type: 'doughnut',
+      data: {
+        labels: nonZero,
+        datasets: [{
+          data: nzCounts,
+          backgroundColor: nzColors,
+          borderWidth: 2,
+          borderColor: 'rgba(0,0,0,0.3)',
+        }],
+      },
+      options: {
+        responsive: true,
+        cutout: '62%',
+        plugins: {
+          legend: { position: 'bottom', labels: { color: '#adb5bd', font: { size: 11 } } },
+          tooltip: { callbacks: { label: ctx => ` ${ctx.parsed} finding(s)` } },
+        },
+      },
+    });
+  }
 })();
 </script>
-{% endif %}
-
 {% endblock %}

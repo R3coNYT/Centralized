@@ -20,63 +20,736 @@ _COLOR_TO_SEV = {
     "grey":   None,   # skip
 }
 
-# ── Human-readable titles and descriptions per indicator key ──────────────────
+# ── Human-readable titles, descriptions, category and remediation steps per indicator key ─────
+# Format: (title, description, category, remediation_steps)
+# remediation_steps is a list of dicts: {step, priority, icon, title, detail, commands: [{label, code}]}
 _INDICATOR_META = {
     # RED - Immediate risk
-    "dc_impersonation":                        ("DC Impersonation (Shadow Credentials)", "Domain Controllers vulnerable to shadow credentials attacks, allowing impersonation.", "Credentials / Authentication"),
-    "up_to_date_admincount":                   ("Inadequate AdminCount Settings", "Objects with AdminCount=1 that should not have it, or vice versa.", "Permissions"),
-    "dangerous_paths":                         ("Dangerous Attack Paths", "Attack paths leading to high-value targets (Domain Admins, DCs, etc.).", "Attack Paths"),
-    "can_dcsync":                              ("DCSync Privilege",  "Non-DC accounts with replication rights allowing DCSync attacks.", "Permissions"),
-    "ldap_configuration":                      ("LDAP Servers Configuration", "LDAP servers with insecure configuration (unsigned/unsigned LDAP binding).", "Network"),
-    "objects_to_operators_member":             ("Paths to Operators Groups", "Objects with a path to built-in operator groups (Backup, Account, Print, etc.).", "Attack Paths"),
-    "graph_path_objects_to_ou_handlers":       ("Paths to Organizational Units (OU)", "Objects that can modify GPOs or OUs affecting privileged accounts.", "Attack Paths"),
-    "anomaly_acl":                             ("ACL Anomalies", "Abnormal or dangerous ACE entries on sensitive AD objects.", "Permissions"),
+    "dc_impersonation": (
+        "DC Impersonation (Shadow Credentials)",
+        "Domain Controllers vulnerable to shadow credentials attacks, allowing impersonation.",
+        "Credentials / Authentication",
+        [
+            {"step": 1, "priority": "critical", "icon": "bi-search", "title": "Identify affected Domain Controllers",
+             "detail": "List DCs with unauthorized msDS-KeyCredentialLink attributes set.",
+             "commands": [{"label": "PowerShell (RSAT)", "code": "Get-ADComputer -Filter {PrimaryGroupID -eq 516} -Properties msDS-KeyCredentialLink | Where-Object {$_.msDS-KeyCredentialLink} | Select-Object Name, msDS-KeyCredentialLink"}]},
+            {"step": 2, "priority": "critical", "icon": "bi-trash3", "title": "Remove unauthorized Shadow Credentials",
+             "detail": "Clear the msDS-KeyCredentialLink attribute on affected DCs unless explicitly configured via Windows Hello for Business.",
+             "commands": [{"label": "PowerShell", "code": "Set-ADComputer -Identity <DC_NAME> -Clear msDS-KeyCredentialLink"}]},
+            {"step": 3, "priority": "normal", "icon": "bi-shield-lock", "title": "Enable Protected Users and credential guard",
+             "detail": "Add DC machine accounts to the Protected Users group and enable Credential Guard to prevent credential extraction.",
+             "commands": []},
+        ]
+    ),
+    "up_to_date_admincount": (
+        "Inadequate AdminCount Settings",
+        "Objects with AdminCount=1 that should not have it, or vice versa.",
+        "Permissions",
+        [
+            {"step": 1, "priority": "critical", "icon": "bi-search", "title": "Enumerate objects with incorrect AdminCount",
+             "detail": "Find non-privileged accounts or groups with AdminCount=1 that are no longer members of protected groups.",
+             "commands": [{"label": "PowerShell", "code": 'Get-ADObject -Filter {AdminCount -eq 1} -Properties AdminCount,MemberOf | Where-Object {$_.objectClass -eq "user"} | Select-Object Name, DistinguishedName'}]},
+            {"step": 2, "priority": "critical", "icon": "bi-pencil-square", "title": "Reset AdminCount and restore inheritance",
+             "detail": "Reset AdminCount to 0 and restore permission inheritance on objects that should not be protected.",
+             "commands": [{"label": "PowerShell", "code": "Set-ADObject -Identity <DN> -Replace @{AdminCount=0}\n# Restore ACL inheritance via ADSI:\n$acl = Get-Acl 'AD:<DN>'; $acl.SetAccessRuleProtection($false, $true); Set-Acl 'AD:<DN>' $acl"}]},
+            {"step": 3, "priority": "normal", "icon": "bi-arrow-repeat", "title": "Let SDProp reprocess AdminSDHolder",
+             "detail": "SDProp runs every 60 minutes and will propagate the correct ACL to protected objects. You can force it manually.",
+             "commands": [{"label": "PowerShell (force SDProp)", "code": "Invoke-Command -ComputerName <PDC> { $fixup = [adsi]'LDAP://CN=Directory Service,CN=Windows NT,CN=Services,CN=Configuration,DC=domain,DC=com'; $fixup.Put('fixupInheritance', 1); $fixup.SetInfo() }"}]},
+        ]
+    ),
+    "dangerous_paths": (
+        "Dangerous Attack Paths",
+        "Attack paths leading to high-value targets (Domain Admins, DCs, etc.).",
+        "Attack Paths",
+        [
+            {"step": 1, "priority": "critical", "icon": "bi-binoculars", "title": "Review attack paths in BloodHound/AD-Miner",
+             "detail": "Use the AD-Miner interactive graph to identify the shortest paths from regular users to Domain Admins. Focus on GenericAll, WriteDACL, and Owns edges.",
+             "commands": []},
+            {"step": 2, "priority": "critical", "icon": "bi-scissors", "title": "Break the most critical path segments",
+             "detail": "Remove dangerous ACEs on the objects identified in the paths. Prioritize edges leading directly to DCs and privileged groups.",
+             "commands": [{"label": "PowerShell — remove a specific ACE", "code": "$acl = Get-Acl 'AD:CN=target,DC=domain,DC=com'\n$ace = $acl.Access | Where-Object {$_.IdentityReference -eq 'DOMAIN\\user' -and $_.ActiveDirectoryRights -match 'GenericAll'}\n$acl.RemoveAccessRule($ace)\nSet-Acl 'AD:CN=target,DC=domain,DC=com' $acl"}]},
+            {"step": 3, "priority": "normal", "icon": "bi-people", "title": "Apply the principle of least privilege",
+             "detail": "Audit group memberships, remove users from Tier 0/1 groups when not required, and enforce role-based access control (RBAC).",
+             "commands": []},
+            {"step": 4, "priority": "normal", "icon": "bi-shield-check", "title": "Implement AD Tiering model",
+             "detail": "Adopt Microsoft's Active Directory Tiering model (Tier 0 = DCs, Tier 1 = Servers, Tier 2 = Workstations) to contain lateral movement.",
+             "commands": []},
+        ]
+    ),
+    "can_dcsync": (
+        "DCSync Privilege",
+        "Non-DC accounts with replication rights allowing DCSync attacks.",
+        "Permissions",
+        [
+            {"step": 1, "priority": "critical", "icon": "bi-search", "title": "Identify accounts with DCSync rights",
+             "detail": "Find accounts with DS-Replication-Get-Changes and DS-Replication-Get-Changes-All rights on the domain root.",
+             "commands": [{"label": "PowerShell", "code": "(Get-Acl 'AD:DC=domain,DC=com').Access | Where-Object {\n    $_.ObjectType -eq '1131f6aa-9c07-11d1-f79f-00c04fc2dcd2' -or\n    $_.ObjectType -eq '1131f6ab-9c07-11d1-f79f-00c04fc2dcd2'\n} | Select-Object IdentityReference, ActiveDirectoryRights"}]},
+            {"step": 2, "priority": "critical", "icon": "bi-x-circle", "title": "Remove replication rights from non-DC accounts",
+             "detail": "Only SYSTEM, Domain Controllers, and certain AD sync accounts (e.g. Azure AD Connect) should have these rights.",
+             "commands": [{"label": "PowerShell", "code": "$dn = 'DC=domain,DC=com'\n$acl = Get-Acl \"AD:$dn\"\n# Remove the specific ACE (replace <IDENTITY>)\n$ace = $acl.Access | Where-Object {$_.IdentityReference -eq '<IDENTITY>' -and $_.ObjectType -eq '1131f6aa-9c07-11d1-f79f-00c04fc2dcd2'}\n$acl.RemoveAccessRule($ace)\nSet-Acl \"AD:$dn\" $acl"}]},
+            {"step": 3, "priority": "normal", "icon": "bi-bell", "title": "Set up monitoring for DCSync activity",
+             "detail": "Enable auditing on the domain root and alert on Event ID 4662 with replication GUIDs from non-DC accounts.",
+             "commands": []},
+        ]
+    ),
+    "ldap_configuration": (
+        "LDAP Servers Configuration",
+        "LDAP servers with insecure configuration (unsigned/unsigned LDAP binding).",
+        "Network",
+        [
+            {"step": 1, "priority": "critical", "icon": "bi-shield-fill-exclamation", "title": "Enable LDAP signing on Domain Controllers",
+             "detail": "Configure DCs to require LDAP signing. This prevents LDAP relay and man-in-the-middle attacks.",
+             "commands": [{"label": "GPO setting (registry)", "code": "# Via GPO: Computer Config > Windows Settings > Security Settings > Local Policies > Security Options\n# 'Domain controller: LDAP server signing requirements' = Require signing\n\n# Or via registry on each DC:\nSet-ItemProperty -Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Services\\NTDS\\Parameters' -Name 'LDAPServerIntegrity' -Value 2"}]},
+            {"step": 2, "priority": "critical", "icon": "bi-lock-fill", "title": "Enable LDAP Channel Binding",
+             "detail": "Require LDAP channel binding to prevent LDAP relay attacks. Enable via Group Policy or registry.",
+             "commands": [{"label": "Registry", "code": "Set-ItemProperty -Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Services\\NTDS\\Parameters' -Name 'LdapEnforceChannelBinding' -Value 2"}]},
+            {"step": 3, "priority": "normal", "icon": "bi-plug-fill", "title": "Audit LDAP clients for compatibility",
+             "detail": "Before enforcing, check for legacy applications that may use unsigned LDAP. Enable Event ID 2886/2887 audit logging to identify them.",
+             "commands": [{"label": "Registry — enable LDAP audit logging", "code": "Set-ItemProperty -Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Services\\NTDS\\Diagnostics' -Name '16 LDAP Interface Events' -Value 2"}]},
+        ]
+    ),
+    "objects_to_operators_member": (
+        "Paths to Operators Groups",
+        "Objects with a path to built-in operator groups (Backup, Account, Print, etc.).",
+        "Attack Paths",
+        [
+            {"step": 1, "priority": "critical", "icon": "bi-people-fill", "title": "Audit membership of Operator groups",
+             "detail": "Review all members of Backup Operators, Account Operators, Print Operators, and Server Operators. These groups have dangerous privileges.",
+             "commands": [{"label": "PowerShell", "code": "@('Backup Operators','Account Operators','Print Operators','Server Operators') | ForEach-Object {\n    Write-Host \"=== $_ ===\"\n    Get-ADGroupMember -Identity $_ -Recursive | Select-Object Name, SamAccountName, objectClass\n}"}]},
+            {"step": 2, "priority": "critical", "icon": "bi-person-dash", "title": "Remove unauthorized members",
+             "detail": "Remove all accounts that do not strictly require membership. These groups are Tier 0 equivalent and should have minimal or no members.",
+             "commands": [{"label": "PowerShell", "code": "Remove-ADGroupMember -Identity 'Backup Operators' -Members 'DOMAIN\\user' -Confirm:$false"}]},
+            {"step": 3, "priority": "normal", "icon": "bi-diagram-3", "title": "Break attack path segments leading to these groups",
+             "detail": "Use BloodHound/AD-Miner to trace which objects have paths to these groups and remove the connecting ACEs.",
+             "commands": []},
+        ]
+    ),
+    "graph_path_objects_to_ou_handlers": (
+        "Paths to Organizational Units (OU)",
+        "Objects that can modify GPOs or OUs affecting privileged accounts.",
+        "Attack Paths",
+        [
+            {"step": 1, "priority": "critical", "icon": "bi-folder2-open", "title": "Audit OU and GPO write permissions",
+             "detail": "Identify accounts with WriteDACL, GenericAll, or GPLink permissions on OUs containing privileged accounts.",
+             "commands": [{"label": "PowerShell — OU ACL", "code": "Get-GPPermission -All -DomainName domain.com | Where-Object {$_.Permission -eq 'GpoEditDeleteModifySecurity'}"}]},
+            {"step": 2, "priority": "critical", "icon": "bi-x-circle", "title": "Remove excessive GPO and OU permissions",
+             "detail": "Delegate only the minimum required permissions. Remove direct GenericAll/WriteDACL from non-admin accounts.",
+             "commands": []},
+            {"step": 3, "priority": "normal", "icon": "bi-eye", "title": "Enable GPO change auditing",
+             "detail": "Audit all changes to Group Policy Objects with Event ID 5136.",
+             "commands": []},
+        ]
+    ),
+    "anomaly_acl": (
+        "ACL Anomalies",
+        "Abnormal or dangerous ACE entries on sensitive AD objects.",
+        "Permissions",
+        [
+            {"step": 1, "priority": "critical", "icon": "bi-search", "title": "Identify dangerous ACEs on sensitive objects",
+             "detail": "Use BloodHound/AD-Miner or the following commands to find GenericAll, WriteDACL, WriteOwner on sensitive objects.",
+             "commands": [{"label": "PowerShell", "code": "Import-Module ActiveDirectory\nGet-ADObject -Filter {adminCount -eq 1} | ForEach-Object {\n    $acl = Get-Acl \"AD:$($_.DistinguishedName)\"\n    $acl.Access | Where-Object {\n        $_.ActiveDirectoryRights -match 'GenericAll|WriteDacl|WriteOwner'\n        -and $_.AccessControlType -eq 'Allow'\n        -and $_.IsInherited -eq $false\n    } | Select-Object @{N='Object';E={$_}}, IdentityReference, ActiveDirectoryRights\n}"}]},
+            {"step": 2, "priority": "critical", "icon": "bi-trash3", "title": "Remove anomalous ACEs",
+             "detail": "For each ACE identified, verify if it is legitimate. Remove those that are not.",
+             "commands": [{"label": "PowerShell", "code": "$dn = 'CN=target,DC=domain,DC=com'\n$acl = Get-Acl \"AD:$dn\"\n$ace = $acl.Access | Where-Object {$_.IdentityReference -eq 'DOMAIN\\user' -and $_.ActiveDirectoryRights -match 'GenericAll'}\n$acl.RemoveAccessRule($ace)\nSet-Acl \"AD:$dn\" $acl"}]},
+            {"step": 3, "priority": "normal", "icon": "bi-clipboard-check", "title": "Establish an ACL baseline",
+             "detail": "Use Microsoft's AD ACL Scanner to establish a baseline and detect future anomalies.",
+             "commands": []},
+        ]
+    ),
     # ORANGE - Alerts
-    "rid_singularities":                       ("RID Singularities", "Accounts with suspicious RID values that may indicate legacy or rogue accounts.", "Misc"),
-    "graph_path_objects_to_da":                ("Paths to Domain Admins", "Non-privileged objects with a direct or indirect path to Domain Admin privileges.", "Attack Paths"),
-    "smb_signing":                             ("SMB Signing Disabled", "Computers without SMB signing enabled, vulnerable to relay attacks.", "Network"),
-    "privileged_accounts_outside_Protected_Users": ("Privileged Accounts Outside Protected Users", "Privileged accounts not in the Protected Users group, reducing their protection.", "Credentials / Authentication"),
-    "server_users_could_be_admin":             ("Users Who Could Become Admin on Servers", "Non-admin users who could escalate to admin on servers via misconfiguration.", "Permissions"),
-    "users_admin_of_computers":                ("Non-Admin Users with Local Admin Rights", "Standard users holding local administrator rights on workstations or servers.", "Permissions"),
+    "rid_singularities": (
+        "RID Singularities",
+        "Accounts with suspicious RID values that may indicate legacy or rogue accounts.",
+        "Misc",
+        [
+            {"step": 1, "priority": "high", "icon": "bi-search", "title": "Identify accounts with abnormal RIDs",
+             "detail": "Accounts with RIDs below 1000 are built-in. Accounts with RIDs matching those from other domains may indicate SID injection.",
+             "commands": [{"label": "PowerShell", "code": "Get-ADUser -Filter * -Properties SID | Where-Object {($_.SID.Value -split '-')[-1] -lt 1000} | Select-Object Name, SID"}]},
+            {"step": 2, "priority": "high", "icon": "bi-question-circle", "title": "Investigate and disable suspicious accounts",
+             "detail": "If a non-built-in account has an unusually low or unusual RID, investigate its origin and disable or delete it if illegitimate.",
+             "commands": [{"label": "PowerShell", "code": "Disable-ADAccount -Identity <samAccountName>"}]},
+        ]
+    ),
+    "graph_path_objects_to_da": (
+        "Paths to Domain Admins",
+        "Non-privileged objects with a direct or indirect path to Domain Admin privileges.",
+        "Attack Paths",
+        [
+            {"step": 1, "priority": "high", "icon": "bi-binoculars", "title": "Map all paths to Domain Admins",
+             "detail": "Use AD-Miner or BloodHound to visualize the full attack graph. Focus on the shortest paths and choke points.",
+             "commands": []},
+            {"step": 2, "priority": "high", "icon": "bi-scissors", "title": "Break privilege escalation paths",
+             "detail": "Remove unnecessary ACEs (GenericAll, WriteDACL, etc.) on the intermediate objects in the attack path.",
+             "commands": []},
+            {"step": 3, "priority": "normal", "icon": "bi-people", "title": "Reduce Domain Admins group membership",
+             "detail": "Keep Domain Admins membership to an absolute minimum. Use Just-In-Time (JIT) privileged access for administrative tasks.",
+             "commands": [{"label": "PowerShell — list DA members", "code": "Get-ADGroupMember -Identity 'Domain Admins' -Recursive | Select-Object Name, SamAccountName, objectClass"}]},
+        ]
+    ),
+    "smb_signing": (
+        "SMB Signing Disabled",
+        "Computers without SMB signing enabled, vulnerable to relay attacks.",
+        "Network",
+        [
+            {"step": 1, "priority": "high", "icon": "bi-shield-fill-exclamation", "title": "Enable SMB signing via GPO",
+             "detail": "Deploy a GPO to require SMB signing on all workstations and servers. This prevents NTLM relay attacks (e.g. Responder, PetitPotam).",
+             "commands": [{"label": "GPO path", "code": "Computer Configuration > Policies > Windows Settings > Security Settings > Local Policies > Security Options\n\n'Microsoft network server: Digitally sign communications (always)' = Enabled\n'Microsoft network client: Digitally sign communications (always)' = Enabled"}]},
+            {"step": 2, "priority": "normal", "icon": "bi-check2-all", "title": "Verify SMB signing status on all hosts",
+             "detail": "Audit all machines to confirm SMB signing is enforced.",
+             "commands": [{"label": "PowerShell", "code": "Get-SmbServerConfiguration | Select-Object RequireSecuritySignature, EnableSecuritySignature\n# Or remotely:\nInvoke-Command -ComputerName <host> {Get-SmbServerConfiguration | Select-Object RequireSecuritySignature}"}]},
+        ]
+    ),
+    "privileged_accounts_outside_Protected_Users": (
+        "Privileged Accounts Outside Protected Users",
+        "Privileged accounts not in the Protected Users group, reducing their protection.",
+        "Credentials / Authentication",
+        [
+            {"step": 1, "priority": "high", "icon": "bi-shield-plus", "title": "Add privileged accounts to Protected Users group",
+             "detail": "All Tier 0 accounts (Domain Admins, Enterprise Admins, Schema Admins, etc.) should be in the Protected Users security group.",
+             "commands": [{"label": "PowerShell", "code": "# Add all Domain Admins to Protected Users:\nGet-ADGroupMember 'Domain Admins' | ForEach-Object {\n    Add-ADGroupMember -Identity 'Protected Users' -Members $_.DistinguishedName\n}"}]},
+            {"step": 2, "priority": "normal", "icon": "bi-info-circle", "title": "Understand Protected Users restrictions",
+             "detail": "Protected Users cannot use NTLM, DES, RC4, unconstrained delegation, or cached credentials. Verify applications do not require these before adding accounts.",
+             "commands": []},
+        ]
+    ),
+    "server_users_could_be_admin": (
+        "Users Who Could Become Admin on Servers",
+        "Non-admin users who could escalate to admin on servers via misconfiguration.",
+        "Permissions",
+        [
+            {"step": 1, "priority": "high", "icon": "bi-search", "title": "Identify misconfigured server permissions",
+             "detail": "Find local admin rights, service misconfigurations, or ACE paths that allow standard users to escalate on servers.",
+             "commands": []},
+            {"step": 2, "priority": "high", "icon": "bi-x-circle", "title": "Remove unnecessary local admin rights",
+             "detail": "Audit local Administrators groups on all servers and remove any non-admin user accounts.",
+             "commands": [{"label": "PowerShell (remote)", "code": "Invoke-Command -ComputerName <server> {\n    $members = net localgroup Administrators | Where-Object {$_ -and $_ -notmatch 'Alias|Members|-'}\n    $members\n}"}]},
+            {"step": 3, "priority": "normal", "icon": "bi-shield-lock", "title": "Enable Local Admin Password Solution (LAPS)",
+             "detail": "Deploy LAPS to randomize local administrator passwords on all servers, preventing lateral movement via pass-the-hash.",
+             "commands": []},
+        ]
+    ),
+    "users_admin_of_computers": (
+        "Non-Admin Users with Local Admin Rights",
+        "Standard users holding local administrator rights on workstations or servers.",
+        "Permissions",
+        [
+            {"step": 1, "priority": "high", "icon": "bi-search", "title": "Enumerate all local admin assignments",
+             "detail": "Audit the local Administrators group on workstations and servers to find non-admin domain accounts.",
+             "commands": [{"label": "PowerShell (via GPO Restricted Groups audit)", "code": "# Or use a tool like PingCastle / BloodHound SharpHound\n# On individual machines:\nInvoke-Command -ComputerName <host> { net localgroup Administrators }"}]},
+            {"step": 2, "priority": "high", "icon": "bi-person-dash", "title": "Remove non-admin users from local Administrators",
+             "detail": "Use GPO Restricted Groups or GPO Preferences to enforce the local Administrators group membership.",
+             "commands": [{"label": "GPO path", "code": "Computer Configuration > Preferences > Control Panel Settings > Local Users and Groups\nAction: Update, Group: Administrators\nRemove non-admin members, keep only BUILTIN\\Administrator and designated admin accounts"}]},
+            {"step": 3, "priority": "normal", "icon": "bi-laptop", "title": "Deploy LAPS for workstations",
+             "detail": "Use Microsoft LAPS v2 (Windows LAPS in Windows Server 2022 / Windows 11) to manage local admin passwords.",
+             "commands": []},
+        ]
+    ),
     # YELLOW - Minor risk
-    "computers_without_laps":                  ("Computers Without LAPS", "Computers not managed by Local Administrator Password Solution.", "Credentials / Authentication"),
-    "computers_last_connexion":                ("Stale Computer Accounts", "Computer accounts that have not connected in more than 90 days.", "Misc"),
-    "dormants_accounts":                       ("Dormant User Accounts", "User accounts inactive for more than 90 days but still enabled.", "Misc"),
-    "never_expires":                           ("Passwords That Never Expire", "User accounts with password set to never expire.", "Credentials / Authentication"),
-    "pre_windows_2000_compatible_access_group": ("Pre-Windows 2000 Compatible Access Group", "Members of the legacy 'Pre-Windows 2000 Compatible Access' group with broad read rights.", "Permissions"),
-    "users_pwd_not_changed_since":             ("Passwords Not Changed in 1+ Year", "User accounts whose password has not been changed for over a year.", "Credentials / Authentication"),
-    # Less common indicators (may be green but map them anyway)
-    "kerberoastables":                         ("Kerberoastable Accounts", "Service accounts with SPNs vulnerable to offline Kerberos ticket cracking.", "Kerberos"),
-    "as_rep":                                  ("AS-REP Roastable Accounts", "Accounts with Kerberos pre-authentication disabled, vulnerable to AS-REP Roasting.", "Kerberos"),
-    "non-dc_with_unconstrained_delegations":   ("Unconstrained Delegation (non-DC)", "Non-DC computers configured with unconstrained Kerberos delegation.", "Kerberos"),
-    "users_constrained_delegations":           ("Constrained Delegation Users", "Users configured with constrained Kerberos delegation.", "Kerberos"),
-    "has_sid_history":                         ("SID History Present", "Accounts with SID history that could be used for privilege escalation.", "Misc"),
-    "vuln_permissions_adminsdholder":          ("AdminSDHolder Permission Anomalies", "Unexpected permissions on the AdminSDHolder container.", "Permissions"),
-    "vuln_functional_level":                   ("Outdated Domain Functional Level", "Domain or forest functional level is below the current recommended standard.", "Misc"),
-    "computers_os_obsolete":                   ("Obsolete Operating Systems", "Computers running end-of-life operating systems.", "Misc"),
-    "can_read_laps":                           ("Unauthorized LAPS Password Readers", "Non-admin accounts that can read LAPS passwords.", "Credentials / Authentication"),
-    "users_rdp_access":                        ("Excessive RDP Access", "Users with RDP access to systems they should not have access to.", "Network"),
-    "unpriv_to_dnsadmins":                     ("Path to DNSAdmins", "Unprivileged accounts with a path to the DNSAdmins group.", "Attack Paths"),
-    "dom_admin_on_non_dc":                     ("Domain Admins Logged On Non-DC", "Domain admin sessions detected on non-domain-controller machines.", "Credentials / Authentication"),
-    "users_pwd_cleartext":                     ("Passwords in Cleartext", "Accounts storing or transmitting passwords in cleartext.", "Credentials / Authentication"),
-    "empty_groups":                            ("Empty Groups", "Security groups with no members (may indicate orphaned groups).", "Misc"),
-    "empty_ous":                               ("Empty OUs", "Organizational Units with no objects.", "Misc"),
-    "computers_list_of_rdp_users":             ("RDP Users on Servers", "User accounts with RDP rights on servers.", "Network"),
-    "guest_accounts":                          ("Active Guest Accounts", "Guest accounts that are enabled.", "Credentials / Authentication"),
-    "users_password_not_required":             ("Accounts Without Password Requirement", "Accounts where a password is not required to log in.", "Credentials / Authentication"),
-    "objects_to_adcs":                         ("Paths to ADCS", "Objects with paths to Active Directory Certificate Services.", "Attack Paths"),
-    "cross_domain_admin_privileges":           ("Cross-Domain Admin Privileges", "Accounts with administrative privileges spanning multiple domains.", "Permissions"),
-    "users_shadow_credentials":                ("Shadow Credentials on Users", "Users with shadow credentials set, allowing impersonation.", "Credentials / Authentication"),
-    "users_shadow_credentials_to_non_admins":  ("Shadow Credentials Targeting Non-Admins", "Shadow credentials set on non-privileged accounts.", "Credentials / Authentication"),
-    "can_read_gmsapassword_of_adm":            ("Unauthorized gMSA Password Readers", "Accounts that can read the gMSA password of privileged accounts.", "Credentials / Authentication"),
-    "users_GPO_access":                        ("Excessive GPO Write Access", "Users with write access to Group Policy Objects.", "Permissions"),
-    "computers_members_high_privilege":        ("Computers in High-Privilege Groups", "Computer accounts that are members of high-privilege groups.", "Permissions"),
-    "graph_list_objects_rbcd":                 ("Resource-Based Constrained Delegation (RBCD)", "Objects configured with RBCD that could allow privilege escalation.", "Kerberos"),
-    "computer_admin_of_computers":             ("Computer Accounts Admin of Computers", "Computer accounts with admin rights on other computers.", "Permissions"),
-    "da_to_da":                                ("DA-to-DA Trust Paths", "Paths between Domain Admin accounts across domains.", "Attack Paths"),
-    "krb_last_change":                         ("Stale KRBTGT Password", "KRBTGT account password not changed in over 180 days.", "Kerberos"),
-    "fgpp":                                    ("Fine-Grained Password Policies", "Fine-grained password policies configured in the domain.", "Credentials / Authentication"),
-    "nb_domain_admins":                        ("Number of Domain Admins", "Total count of Domain Admin accounts.", "Misc"),
+    "computers_without_laps": (
+        "Computers Without LAPS",
+        "Computers not managed by Local Administrator Password Solution.",
+        "Credentials / Authentication",
+        [
+            {"step": 1, "priority": "normal", "icon": "bi-download", "title": "Deploy Windows LAPS (v2)",
+             "detail": "Windows LAPS is built-in since Windows Server 2022 and Windows 11 22H2. For older systems, use Microsoft LAPS v1.",
+             "commands": [{"label": "PowerShell — extend AD schema (LAPS v2)", "code": "# Requires Domain Admin\nUpdate-LapsADSchema\nSet-LapsADComputerSelfPermission -Identity 'OU=Workstations,DC=domain,DC=com'"}]},
+            {"step": 2, "priority": "normal", "icon": "bi-gear", "title": "Configure LAPS via GPO",
+             "detail": "Create a GPO to enable LAPS and set the password complexity and rotation interval.",
+             "commands": [{"label": "GPO path (Windows LAPS)", "code": "Computer Configuration > Administrative Templates > System > LAPS\n- Enable LAPS: Enabled\n- Password Complexity: Large letters + small letters + numbers + special characters\n- Password Age: 30 days"}]},
+            {"step": 3, "priority": "normal", "icon": "bi-check2-all", "title": "Verify LAPS deployment",
+             "detail": "Confirm that all machines have the LAPS attribute populated in AD.",
+             "commands": [{"label": "PowerShell", "code": "Get-ADComputer -Filter * -Properties ms-Mcs-AdmPwdExpirationTime | Where-Object {!$_.'ms-Mcs-AdmPwdExpirationTime'} | Select-Object Name"}]},
+        ]
+    ),
+    "computers_last_connexion": (
+        "Stale Computer Accounts",
+        "Computer accounts that have not connected in more than 90 days.",
+        "Misc",
+        [
+            {"step": 1, "priority": "normal", "icon": "bi-search", "title": "Identify stale computer accounts",
+             "detail": "List computer accounts where lastLogonDate is older than 90 days.",
+             "commands": [{"label": "PowerShell", "code": "$cutoff = (Get-Date).AddDays(-90)\nGet-ADComputer -Filter {LastLogonDate -lt $cutoff -and Enabled -eq $true} -Properties LastLogonDate | Select-Object Name, LastLogonDate | Sort-Object LastLogonDate"}]},
+            {"step": 2, "priority": "normal", "icon": "bi-ban", "title": "Disable then delete stale accounts",
+             "detail": "Disable accounts first to allow time to detect issues, then delete after a grace period (e.g. 30 days).",
+             "commands": [{"label": "PowerShell — bulk disable", "code": "$cutoff = (Get-Date).AddDays(-90)\nGet-ADComputer -Filter {LastLogonDate -lt $cutoff -and Enabled -eq $true} | Disable-ADAccount"}]},
+        ]
+    ),
+    "dormants_accounts": (
+        "Dormant User Accounts",
+        "User accounts inactive for more than 90 days but still enabled.",
+        "Misc",
+        [
+            {"step": 1, "priority": "normal", "icon": "bi-search", "title": "Identify dormant user accounts",
+             "detail": "Find user accounts with no logon activity for over 90 days.",
+             "commands": [{"label": "PowerShell", "code": "$cutoff = (Get-Date).AddDays(-90)\nGet-ADUser -Filter {LastLogonDate -lt $cutoff -and Enabled -eq $true} -Properties LastLogonDate, Department | Select-Object Name, SamAccountName, LastLogonDate, Department | Sort-Object LastLogonDate"}]},
+            {"step": 2, "priority": "normal", "icon": "bi-person-x", "title": "Disable inactive accounts",
+             "detail": "Disable dormant accounts after confirming they are not service accounts or shared accounts. Move them to a dedicated OU.",
+             "commands": [{"label": "PowerShell", "code": "Disable-ADAccount -Identity <samAccountName>\nMove-ADObject -Identity <DN> -TargetPath 'OU=Disabled,DC=domain,DC=com'"}]},
+            {"step": 3, "priority": "normal", "icon": "bi-calendar-check", "title": "Implement automated account lifecycle management",
+             "detail": "Create a recurring process (script or IDM tool) to automatically disable accounts after a defined inactivity period.",
+             "commands": []},
+        ]
+    ),
+    "never_expires": (
+        "Passwords That Never Expire",
+        "User accounts with password set to never expire.",
+        "Credentials / Authentication",
+        [
+            {"step": 1, "priority": "normal", "icon": "bi-search", "title": "List accounts with non-expiring passwords",
+             "detail": "Find all user accounts where PasswordNeverExpires is set to True.",
+             "commands": [{"label": "PowerShell", "code": "Get-ADUser -Filter {PasswordNeverExpires -eq $true -and Enabled -eq $true} -Properties PasswordNeverExpires, PasswordLastSet | Select-Object Name, SamAccountName, PasswordLastSet | Sort-Object PasswordLastSet"}]},
+            {"step": 2, "priority": "normal", "icon": "bi-calendar2-x", "title": "Remove the PasswordNeverExpires flag",
+             "detail": "Enforce a password expiration policy. Exceptions should be limited to documented service accounts with strong, unique passwords.",
+             "commands": [{"label": "PowerShell — bulk", "code": "Get-ADUser -Filter {PasswordNeverExpires -eq $true} | Set-ADUser -PasswordNeverExpires $false"}]},
+            {"step": 3, "priority": "normal", "icon": "bi-lock", "title": "Configure a domain password policy or Fine-Grained Password Policy",
+             "detail": "Set a maximum password age of 90 days (or shorter for privileged accounts). Use Fine-Grained Password Policies (FGPP) for service accounts.",
+             "commands": [{"label": "PowerShell — set domain default policy", "code": "Set-ADDefaultDomainPasswordPolicy -MaxPasswordAge '90.00:00:00' -Identity 'domain.com'"}]},
+        ]
+    ),
+    "pre_windows_2000_compatible_access_group": (
+        "Pre-Windows 2000 Compatible Access Group",
+        "Members of the legacy 'Pre-Windows 2000 Compatible Access' group with broad read rights.",
+        "Permissions",
+        [
+            {"step": 1, "priority": "normal", "icon": "bi-search", "title": "Check membership of this legacy group",
+             "detail": "This group grants Everyone or Authenticated Users broad read access to AD objects. Membership of 'Everyone' or 'ANONYMOUS LOGON' is critical.",
+             "commands": [{"label": "PowerShell", "code": "Get-ADGroupMember -Identity 'Pre-Windows 2000 Compatible Access' | Select-Object Name, objectClass, SID"}]},
+            {"step": 2, "priority": "normal", "icon": "bi-person-dash", "title": "Remove 'Everyone' and 'ANONYMOUS LOGON'",
+             "detail": "If 'Everyone' or 'ANONYMOUS LOGON' is a member, remove them immediately. This is a legacy setting that should no longer be required.",
+             "commands": [{"label": "PowerShell", "code": "Remove-ADGroupMember -Identity 'Pre-Windows 2000 Compatible Access' -Members 'S-1-1-0' -Confirm:$false  # Everyone\nRemove-ADGroupMember -Identity 'Pre-Windows 2000 Compatible Access' -Members 'S-1-5-7' -Confirm:$false  # ANONYMOUS LOGON"}]},
+        ]
+    ),
+    "users_pwd_not_changed_since": (
+        "Passwords Not Changed in 1+ Year",
+        "User accounts whose password has not been changed for over a year.",
+        "Credentials / Authentication",
+        [
+            {"step": 1, "priority": "normal", "icon": "bi-search", "title": "Identify accounts with old passwords",
+             "detail": "Find users who have not changed their password in more than 365 days.",
+             "commands": [{"label": "PowerShell", "code": "$cutoff = (Get-Date).AddDays(-365)\nGet-ADUser -Filter {PasswordLastSet -lt $cutoff -and Enabled -eq $true -and PasswordNeverExpires -eq $false} -Properties PasswordLastSet | Select-Object Name, SamAccountName, PasswordLastSet | Sort-Object PasswordLastSet"}]},
+            {"step": 2, "priority": "normal", "icon": "bi-key", "title": "Force password reset at next login",
+             "detail": "Force affected users to change their password at next logon.",
+             "commands": [{"label": "PowerShell — bulk", "code": "Get-ADUser -Filter {PasswordLastSet -lt $cutoff -and Enabled -eq $true} | Set-ADUser -ChangePasswordAtLogon $true"}]},
+            {"step": 3, "priority": "normal", "icon": "bi-envelope", "title": "Notify users and enforce policy",
+             "detail": "Send advance notifications before forcing password resets. Implement a domain password policy to automatically expire passwords.",
+             "commands": []},
+        ]
+    ),
+    "kerberoastables": (
+        "Kerberoastable Accounts",
+        "Service accounts with SPNs vulnerable to offline Kerberos ticket cracking.",
+        "Kerberos",
+        [
+            {"step": 1, "priority": "high", "icon": "bi-search", "title": "Enumerate Kerberoastable accounts",
+             "detail": "List all user accounts with Service Principal Names (SPNs) set.",
+             "commands": [{"label": "PowerShell", "code": "Get-ADUser -Filter {ServicePrincipalName -ne '$null' -and Enabled -eq $true} -Properties ServicePrincipalName, PasswordLastSet | Select-Object Name, SamAccountName, ServicePrincipalName, PasswordLastSet"}]},
+            {"step": 2, "priority": "high", "icon": "bi-star-fill", "title": "Migrate service accounts to gMSA",
+             "detail": "Group Managed Service Accounts (gMSA) have 240-character auto-rotating passwords and are immune to Kerberoasting.",
+             "commands": [{"label": "PowerShell — create gMSA", "code": "New-ADServiceAccount -Name 'svc_app' -DNSHostName 'svc_app.domain.com' -PrincipalsAllowedToRetrieveManagedPassword 'server$'\nAdd-ADComputerServiceAccount -Identity <server> -ServiceAccount 'svc_app'"}]},
+            {"step": 3, "priority": "normal", "icon": "bi-key-fill", "title": "Set strong passwords (if gMSA not possible)",
+             "detail": "If gMSA cannot be used, set passwords of at least 30+ random characters and rotate them regularly.",
+             "commands": []},
+            {"step": 4, "priority": "normal", "icon": "bi-bell", "title": "Monitor for Kerberoasting attempts",
+             "detail": "Alert on Event ID 4769 with encryption type 0x17 (RC4) for service ticket requests.",
+             "commands": []},
+        ]
+    ),
+    "as_rep": (
+        "AS-REP Roastable Accounts",
+        "Accounts with Kerberos pre-authentication disabled, vulnerable to AS-REP Roasting.",
+        "Kerberos",
+        [
+            {"step": 1, "priority": "high", "icon": "bi-search", "title": "Identify accounts without pre-authentication",
+             "detail": "Find accounts where DONT_REQUIRE_PREAUTH (0x400000) flag is set.",
+             "commands": [{"label": "PowerShell", "code": "Get-ADUser -Filter {DoesNotRequirePreAuth -eq $true -and Enabled -eq $true} -Properties DoesNotRequirePreAuth | Select-Object Name, SamAccountName"}]},
+            {"step": 2, "priority": "high", "icon": "bi-toggle-on", "title": "Re-enable Kerberos pre-authentication",
+             "detail": "Unless there is a specific and documented reason (legacy app), re-enable pre-authentication on all accounts.",
+             "commands": [{"label": "PowerShell — bulk fix", "code": "Get-ADUser -Filter {DoesNotRequirePreAuth -eq $true} | Set-ADAccountControl -DoesNotRequirePreAuth $false"}]},
+        ]
+    ),
+    "non-dc_with_unconstrained_delegations": (
+        "Unconstrained Delegation (non-DC)",
+        "Non-DC computers configured with unconstrained Kerberos delegation.",
+        "Kerberos",
+        [
+            {"step": 1, "priority": "high", "icon": "bi-search", "title": "Identify computers with unconstrained delegation",
+             "detail": "Find non-DC machines with TrustedForDelegation set.",
+             "commands": [{"label": "PowerShell", "code": "Get-ADComputer -Filter {TrustedForDelegation -eq $true} -Properties TrustedForDelegation | Where-Object {$_.Name -notlike '*DC*'} | Select-Object Name, DNSHostName"}]},
+            {"step": 2, "priority": "high", "icon": "bi-x-circle", "title": "Remove unconstrained delegation",
+             "detail": "Disable unconstrained delegation and replace with constrained or resource-based constrained delegation.",
+             "commands": [{"label": "PowerShell", "code": "Set-ADComputer -Identity <computer> -TrustedForDelegation $false"}]},
+            {"step": 3, "priority": "normal", "icon": "bi-check2-square", "title": "Use constrained delegation instead",
+             "detail": "Configure the machine to use constrained delegation (msDS-AllowedToDelegateTo) limited to specific services only.",
+             "commands": []},
+        ]
+    ),
+    "users_constrained_delegations": (
+        "Constrained Delegation Users",
+        "Users configured with constrained Kerberos delegation.",
+        "Kerberos",
+        [
+            {"step": 1, "priority": "normal", "icon": "bi-search", "title": "Review constrained delegation assignments",
+             "detail": "List all users with constrained delegation configured and verify each is legitimate.",
+             "commands": [{"label": "PowerShell", "code": "Get-ADUser -Filter {msDS-AllowedToDelegateTo -ne '$null'} -Properties msDS-AllowedToDelegateTo | Select-Object Name, SamAccountName, msDS-AllowedToDelegateTo"}]},
+            {"step": 2, "priority": "normal", "icon": "bi-diagram-2", "title": "Migrate to resource-based constrained delegation (RBCD)",
+             "detail": "RBCD is safer as the target service controls which accounts can delegate to it, rather than relying on the source object.",
+             "commands": []},
+        ]
+    ),
+    "has_sid_history": (
+        "SID History Present",
+        "Accounts with SID history that could be used for privilege escalation.",
+        "Misc",
+        [
+            {"step": 1, "priority": "normal", "icon": "bi-search", "title": "Enumerate accounts with SID history",
+             "detail": "SID History is used during domain migrations. After migration is complete, it should be removed.",
+             "commands": [{"label": "PowerShell", "code": "Get-ADUser -Filter {SIDHistory -ne '$null'} -Properties SIDHistory | Select-Object Name, SamAccountName, SIDHistory"}]},
+            {"step": 2, "priority": "normal", "icon": "bi-trash3", "title": "Clear SID History after domain migration",
+             "detail": "Once domain migration is validated, remove SID History from accounts to eliminate the potential escalation path.",
+             "commands": [{"label": "PowerShell", "code": "# Requires domain migration tools or specific permissions\nGet-ADUser -Filter {SIDHistory -ne '$null'} | Set-ADUser -Remove @{SIDHistory = (Get-ADUser <user> -Properties SIDHistory).SIDHistory}"}]},
+        ]
+    ),
+    "vuln_permissions_adminsdholder": (
+        "AdminSDHolder Permission Anomalies",
+        "Unexpected permissions on the AdminSDHolder container.",
+        "Permissions",
+        [
+            {"step": 1, "priority": "high", "icon": "bi-search", "title": "Audit AdminSDHolder ACL",
+             "detail": "The AdminSDHolder object's ACL is propagated to all protected accounts every 60 min by SDProp. Any unauthorized ACE here is critical.",
+             "commands": [{"label": "PowerShell", "code": "$asdh = 'CN=AdminSDHolder,CN=System,DC=domain,DC=com'\n(Get-Acl \"AD:$asdh\").Access | Where-Object {\n    $_.AccessControlType -eq 'Allow' -and\n    $_.ActiveDirectoryRights -match 'GenericAll|WriteDacl|WriteOwner'\n} | Select-Object IdentityReference, ActiveDirectoryRights"}]},
+            {"step": 2, "priority": "high", "icon": "bi-trash3", "title": "Remove unauthorized ACEs from AdminSDHolder",
+             "detail": "Remove any ACE that is not from Domain Admins, Enterprise Admins, or SYSTEM. These ACEs will propagate to ALL protected accounts.",
+             "commands": [{"label": "PowerShell", "code": "$dn = 'CN=AdminSDHolder,CN=System,DC=domain,DC=com'\n$acl = Get-Acl \"AD:$dn\"\n$ace = $acl.Access | Where-Object {$_.IdentityReference -eq 'DOMAIN\\baduser'}\n$acl.RemoveAccessRule($ace)\nSet-Acl \"AD:$dn\" $acl"}]},
+        ]
+    ),
+    "vuln_functional_level": (
+        "Outdated Domain Functional Level",
+        "Domain or forest functional level is below the current recommended standard.",
+        "Misc",
+        [
+            {"step": 1, "priority": "normal", "icon": "bi-info-circle", "title": "Check current functional levels",
+             "detail": "Identify the current domain and forest functional levels.",
+             "commands": [{"label": "PowerShell", "code": "(Get-ADDomain).DomainMode\n(Get-ADForest).ForestMode"}]},
+            {"step": 2, "priority": "normal", "icon": "bi-arrow-up-circle", "title": "Plan functional level upgrade",
+             "detail": "Before raising, ensure all DCs run an OS version compatible with the target functional level, and no legacy applications require the old level.",
+             "commands": [{"label": "PowerShell — raise domain FL", "code": "Set-ADDomainMode -Identity 'domain.com' -DomainMode Windows2016Domain"}]},
+        ]
+    ),
+    "computers_os_obsolete": (
+        "Obsolete Operating Systems",
+        "Computers running end-of-life operating systems.",
+        "Misc",
+        [
+            {"step": 1, "priority": "high", "icon": "bi-search", "title": "Inventory obsolete OS versions",
+             "detail": "Identify all machines running end-of-life systems (Windows 7, Server 2008, XP, etc.).",
+             "commands": [{"label": "PowerShell", "code": "Get-ADComputer -Filter {Enabled -eq $true} -Properties OperatingSystem | Where-Object {\n    $_.OperatingSystem -match '2003|2008|XP|Vista|Windows 7|Windows 8|2012'\n} | Select-Object Name, OperatingSystem | Sort-Object OperatingSystem"}]},
+            {"step": 2, "priority": "high", "icon": "bi-box-arrow-up", "title": "Upgrade or isolate end-of-life systems",
+             "detail": "Upgrade to a supported OS. If upgrade is not possible, isolate the machine in a dedicated VLAN with strict firewall rules.",
+             "commands": []},
+            {"step": 3, "priority": "normal", "icon": "bi-shield-slash", "title": "Apply micro-segmentation",
+             "detail": "Use host-based firewalls and network segmentation to limit attack surface from EOL systems.",
+             "commands": []},
+        ]
+    ),
+    "can_read_laps": (
+        "Unauthorized LAPS Password Readers",
+        "Non-admin accounts that can read LAPS passwords.",
+        "Credentials / Authentication",
+        [
+            {"step": 1, "priority": "normal", "icon": "bi-search", "title": "Audit LAPS read permissions",
+             "detail": "Find all accounts with the ability to read the ms-Mcs-AdmPwd or msLAPS-Password attributes.",
+             "commands": [{"label": "PowerShell (LAPS v1)", "code": "# Requires LAPS PowerShell module\nFind-AdmPwdExtendedRights -Identity 'OU=Workstations,DC=domain,DC=com'"}]},
+            {"step": 2, "priority": "normal", "icon": "bi-x-circle", "title": "Remove unauthorized read access",
+             "detail": "Remove LAPS read permissions from any account that does not strictly require it.",
+             "commands": [{"label": "PowerShell (LAPS v1)", "code": "Set-AdmPwdReadPasswordPermission -OrgUnit 'OU=Workstations,DC=domain,DC=com' -AllowedPrincipals '<approved_group>'"}]},
+        ]
+    ),
+    "users_rdp_access": (
+        "Excessive RDP Access",
+        "Users with RDP access to systems they should not have access to.",
+        "Network",
+        [
+            {"step": 1, "priority": "normal", "icon": "bi-search", "title": "Audit Remote Desktop Users group membership",
+             "detail": "Review the Remote Desktop Users local group on all servers and workstations.",
+             "commands": [{"label": "PowerShell", "code": "Invoke-Command -ComputerName <server> { net localgroup 'Remote Desktop Users' }"}]},
+            {"step": 2, "priority": "normal", "icon": "bi-person-dash", "title": "Remove unauthorized RDP access",
+             "detail": "Only users who explicitly need RDP access should be in this group. Remove all others.",
+             "commands": []},
+            {"step": 3, "priority": "normal", "icon": "bi-shield-lock", "title": "Restrict RDP via GPO and NLA",
+             "detail": "Enforce Network Level Authentication (NLA) for RDP and restrict RDP access via GPO to specific groups only.",
+             "commands": [{"label": "GPO", "code": "Computer Configuration > Administrative Templates > Windows Components > Remote Desktop Services > Remote Desktop Session Host > Security\n'Require user authentication for remote connections by using NLA' = Enabled"}]},
+        ]
+    ),
+    "unpriv_to_dnsadmins": (
+        "Path to DNSAdmins",
+        "Unprivileged accounts with a path to the DNSAdmins group.",
+        "Attack Paths",
+        [
+            {"step": 1, "priority": "high", "icon": "bi-search", "title": "Audit DNSAdmins group membership",
+             "detail": "DNSAdmins members can execute code on DCs by loading a malicious DLL via DNS Server. Review membership strictly.",
+             "commands": [{"label": "PowerShell", "code": "Get-ADGroupMember -Identity 'DnsAdmins' -Recursive | Select-Object Name, SamAccountName, objectClass"}]},
+            {"step": 2, "priority": "high", "icon": "bi-person-dash", "title": "Remove unnecessary members from DNSAdmins",
+             "detail": "This group should have minimal members (ideally only dedicated DNS admin accounts, not service desk staff).",
+             "commands": [{"label": "PowerShell", "code": "Remove-ADGroupMember -Identity 'DnsAdmins' -Members 'DOMAIN\\user' -Confirm:$false"}]},
+            {"step": 3, "priority": "normal", "icon": "bi-scissors", "title": "Break attack paths to DNSAdmins",
+             "detail": "Remove ACEs or group memberships that allow unprivileged accounts to reach DNSAdmins.",
+             "commands": []},
+        ]
+    ),
+    "dom_admin_on_non_dc": (
+        "Domain Admins Logged On Non-DC",
+        "Domain admin sessions detected on non-domain-controller machines.",
+        "Credentials / Authentication",
+        [
+            {"step": 1, "priority": "high", "icon": "bi-exclamation-triangle", "title": "Identify DA accounts used on non-DC systems",
+             "detail": "Credential exposure on workstations/servers is a major risk — credentials can be extracted with tools like Mimikatz.",
+             "commands": [{"label": "PowerShell — check recent logons", "code": "Get-WinEvent -ComputerName <server> -FilterHashtable @{LogName='Security'; Id=4624} | Where-Object {$_.Message -match 'Domain Admins'}"}]},
+            {"step": 2, "priority": "high", "icon": "bi-diagram-3", "title": "Enforce AD Tiering — no DA logon outside Tier 0",
+             "detail": "Domain Admin accounts must ONLY log on to Domain Controllers. Use dedicated admin workstations (PAWs) for administrative tasks.",
+             "commands": []},
+            {"step": 3, "priority": "normal", "icon": "bi-pc-display-horizontal", "title": "Deploy Privileged Access Workstations (PAWs)",
+             "detail": "Use hardened, dedicated workstations for all Tier 0 administration. Block internet access and limit installed software.",
+             "commands": []},
+        ]
+    ),
+    "users_pwd_cleartext": (
+        "Passwords in Cleartext",
+        "Accounts storing or transmitting passwords in cleartext.",
+        "Credentials / Authentication",
+        [
+            {"step": 1, "priority": "critical", "icon": "bi-search", "title": "Identify Reversible Encryption accounts",
+             "detail": "Find accounts with 'Store password using reversible encryption' enabled.",
+             "commands": [{"label": "PowerShell", "code": "Get-ADUser -Filter {AllowReversiblePasswordEncryption -eq $true} -Properties AllowReversiblePasswordEncryption | Select-Object Name, SamAccountName"}]},
+            {"step": 2, "priority": "critical", "icon": "bi-toggle-off", "title": "Disable reversible encryption and force password reset",
+             "detail": "Disable the reversible encryption flag and immediately force a password reset for affected accounts.",
+             "commands": [{"label": "PowerShell", "code": "Get-ADUser -Filter {AllowReversiblePasswordEncryption -eq $true} | Set-ADUser -AllowReversiblePasswordEncryption $false\n# Force password reset:\nSet-ADUser <user> -ChangePasswordAtLogon $true"}]},
+        ]
+    ),
+    "guest_accounts": (
+        "Active Guest Accounts",
+        "Guest accounts that are enabled.",
+        "Credentials / Authentication",
+        [
+            {"step": 1, "priority": "normal", "icon": "bi-person-x", "title": "Disable all guest accounts",
+             "detail": "Guest accounts should be disabled on all systems. They provide unauthenticated access and are a common attack vector.",
+             "commands": [{"label": "PowerShell — domain guest", "code": "Disable-ADAccount -Identity 'Guest'\n# Also check local guest accounts on all machines via GPO:\n# Computer Config > Windows Settings > Security Settings > Local Policies > Security Options\n# 'Accounts: Guest account status' = Disabled"}]},
+        ]
+    ),
+    "users_password_not_required": (
+        "Accounts Without Password Requirement",
+        "Accounts where a password is not required to log in.",
+        "Credentials / Authentication",
+        [
+            {"step": 1, "priority": "high", "icon": "bi-search", "title": "Enumerate accounts with PASSWD_NOTREQD flag",
+             "detail": "Find accounts where the PASSWD_NOTREQD flag is set (UAC flag 0x0020).",
+             "commands": [{"label": "PowerShell", "code": "Get-ADUser -Filter {PasswordNotRequired -eq $true -and Enabled -eq $true} -Properties PasswordNotRequired | Select-Object Name, SamAccountName"}]},
+            {"step": 2, "priority": "high", "icon": "bi-key-fill", "title": "Set strong passwords and remove the flag",
+             "detail": "Set a strong password and clear the PASSWD_NOTREQD flag. If it is a service account, migrate to gMSA.",
+             "commands": [{"label": "PowerShell", "code": "Set-ADUser <user> -PasswordNotRequired $false\n# Set a new strong temporary password:\nSet-ADAccountPassword <user> -Reset -NewPassword (ConvertTo-SecureString 'NewP@ssw0rd!' -AsPlainText -Force)"}]},
+        ]
+    ),
+    "objects_to_adcs": (
+        "Paths to ADCS",
+        "Objects with paths to Active Directory Certificate Services.",
+        "Attack Paths",
+        [
+            {"step": 1, "priority": "high", "icon": "bi-search", "title": "Audit ADCS permissions and templates",
+             "detail": "Review Enrollment Agent templates, vulnerable template configurations (ESC1-ESC8), and CA permissions.",
+             "commands": [{"label": "Certify (from attacker perspective)", "code": "# Use Certipy or Certify to enumerate vulnerable templates:\n# certify.exe find /vulnerable\n# certipy find -u user@domain.com -p password -dc-ip <dc_ip>"}]},
+            {"step": 2, "priority": "high", "icon": "bi-shield-lock", "title": "Harden ADCS templates and CA",
+             "detail": "Remove 'Enrollee Supplies Subject' from templates unless explicitly required. Restrict enrollment permissions to specific groups.",
+             "commands": []},
+            {"step": 3, "priority": "normal", "icon": "bi-graph-up", "title": "Implement Certificate Authority Web Enrollment hardening",
+             "detail": "Disable NTLM authentication on the CA web enrollment endpoint and enable EPA (Extended Protection for Authentication).",
+             "commands": []},
+        ]
+    ),
+    "cross_domain_admin_privileges": (
+        "Cross-Domain Admin Privileges",
+        "Accounts with administrative privileges spanning multiple domains.",
+        "Permissions",
+        [
+            {"step": 1, "priority": "high", "icon": "bi-search", "title": "Audit cross-domain admin memberships",
+             "detail": "Find accounts from one domain that are members of privileged groups in other domains.",
+             "commands": []},
+            {"step": 2, "priority": "high", "icon": "bi-x-circle", "title": "Remove unnecessary cross-domain privileges",
+             "detail": "Cross-domain admin rights should be extremely limited. Use trusts with SID filtering to prevent privilege escalation across domains.",
+             "commands": [{"label": "PowerShell — enable SID filtering on trust", "code": "netdom trust <TrustingDomain> /domain:<TrustedDomain> /quarantine:yes"}]},
+        ]
+    ),
+    "users_shadow_credentials": (
+        "Shadow Credentials on Users",
+        "Users with shadow credentials set, allowing impersonation.",
+        "Credentials / Authentication",
+        [
+            {"step": 1, "priority": "critical", "icon": "bi-search", "title": "List users with msDS-KeyCredentialLink set",
+             "detail": "Shadow credentials allow an attacker to obtain a TGT for the account without knowing its password.",
+             "commands": [{"label": "PowerShell", "code": "Get-ADUser -Filter * -Properties msDS-KeyCredentialLink | Where-Object {$_.'msDS-KeyCredentialLink'} | Select-Object Name, SamAccountName, 'msDS-KeyCredentialLink'"}]},
+            {"step": 2, "priority": "critical", "icon": "bi-trash3", "title": "Clear unauthorized shadow credentials",
+             "detail": "Remove the msDS-KeyCredentialLink attribute from all accounts where it was not explicitly configured by a legitimate MFA/WHfB solution.",
+             "commands": [{"label": "PowerShell", "code": "Set-ADUser -Identity <user> -Clear msDS-KeyCredentialLink"}]},
+        ]
+    ),
+    "users_shadow_credentials_to_non_admins": (
+        "Shadow Credentials Targeting Non-Admins",
+        "Shadow credentials set on non-privileged accounts.",
+        "Credentials / Authentication",
+        [
+            {"step": 1, "priority": "high", "icon": "bi-trash3", "title": "Clear unauthorized shadow credentials on user accounts",
+             "detail": "Even on non-admin accounts, shadow credentials can be used as stepping stones in an attack path.",
+             "commands": [{"label": "PowerShell", "code": "Get-ADUser -Filter * -Properties msDS-KeyCredentialLink | Where-Object {$_.'msDS-KeyCredentialLink'} | Set-ADUser -Clear msDS-KeyCredentialLink"}]},
+        ]
+    ),
+    "can_read_gmsapassword_of_adm": (
+        "Unauthorized gMSA Password Readers",
+        "Accounts that can read the gMSA password of privileged accounts.",
+        "Credentials / Authentication",
+        [
+            {"step": 1, "priority": "high", "icon": "bi-search", "title": "Audit gMSA PrincipalsAllowedToRetrieveManagedPassword",
+             "detail": "Find gMSA accounts where unauthorized principals can retrieve the managed password.",
+             "commands": [{"label": "PowerShell", "code": "Get-ADServiceAccount -Filter * -Properties PrincipalsAllowedToRetrieveManagedPassword | Select-Object Name, PrincipalsAllowedToRetrieveManagedPassword"}]},
+            {"step": 2, "priority": "high", "icon": "bi-x-circle", "title": "Restrict gMSA password retrieval",
+             "detail": "Only the server(s) that need to use the gMSA should be in PrincipalsAllowedToRetrieveManagedPassword.",
+             "commands": [{"label": "PowerShell", "code": "Set-ADServiceAccount -Identity <gMSA> -PrincipalsAllowedToRetrieveManagedPassword @('<server1>$', '<server2>$')"}]},
+        ]
+    ),
+    "users_GPO_access": (
+        "Excessive GPO Write Access",
+        "Users with write access to Group Policy Objects.",
+        "Permissions",
+        [
+            {"step": 1, "priority": "high", "icon": "bi-search", "title": "Audit GPO modify permissions",
+             "detail": "List all non-admin accounts with GPO edit rights.",
+             "commands": [{"label": "PowerShell", "code": "Get-GPO -All | ForEach-Object {\n    $perm = Get-GPPermission -Guid $_.Id -All\n    $perm | Where-Object {$_.Permission -eq 'GpoEdit' -or $_.Permission -eq 'GpoEditDeleteModifySecurity'} | Select-Object @{N='GPO';E={$_.DisplayName}}, Trustee, Permission\n}"}]},
+            {"step": 2, "priority": "high", "icon": "bi-x-circle", "title": "Remove unauthorized GPO write permissions",
+             "detail": "Only designated Group Policy administrators should have edit rights on GPOs.",
+             "commands": [{"label": "PowerShell", "code": "Set-GPPermission -Guid <GPO_ID> -TargetName 'DOMAIN\\user' -TargetType User -PermissionLevel None"}]},
+        ]
+    ),
+    "computers_members_high_privilege": (
+        "Computers in High-Privilege Groups",
+        "Computer accounts that are members of high-privilege groups.",
+        "Permissions",
+        [
+            {"step": 1, "priority": "high", "icon": "bi-search", "title": "Identify computer accounts in privileged groups",
+             "detail": "Computer accounts in Domain Admins, Enterprise Admins, or similar groups are extreme privilege escalation risks.",
+             "commands": [{"label": "PowerShell", "code": "@('Domain Admins','Enterprise Admins','Schema Admins') | ForEach-Object {\n    Get-ADGroupMember $_ -Recursive | Where-Object {$_.objectClass -eq 'computer'} | Select-Object @{N='Group';E={$_}}, Name\n}"}]},
+            {"step": 2, "priority": "high", "icon": "bi-person-dash", "title": "Remove computer accounts from privileged groups",
+             "detail": "Computer accounts should never be in privileged groups.",
+             "commands": [{"label": "PowerShell", "code": "Remove-ADGroupMember -Identity 'Domain Admins' -Members '<computer>$' -Confirm:$false"}]},
+        ]
+    ),
+    "graph_list_objects_rbcd": (
+        "Resource-Based Constrained Delegation (RBCD)",
+        "Objects configured with RBCD that could allow privilege escalation.",
+        "Kerberos",
+        [
+            {"step": 1, "priority": "high", "icon": "bi-search", "title": "Enumerate RBCD configurations",
+             "detail": "Find all objects with msDS-AllowedToActOnBehalfOfOtherIdentity set.",
+             "commands": [{"label": "PowerShell", "code": "Get-ADComputer -Filter * -Properties msDS-AllowedToActOnBehalfOfOtherIdentity | Where-Object {$_.'msDS-AllowedToActOnBehalfOfOtherIdentity'} | Select-Object Name"}]},
+            {"step": 2, "priority": "high", "icon": "bi-x-circle", "title": "Remove unauthorized RBCD entries",
+             "detail": "Clear RBCD configurations that were not explicitly and legitimately set.",
+             "commands": [{"label": "PowerShell", "code": "Set-ADComputer -Identity <computer> -Clear msDS-AllowedToActOnBehalfOfOtherIdentity"}]},
+        ]
+    ),
+    "computer_admin_of_computers": (
+        "Computer Accounts Admin of Computers",
+        "Computer accounts with admin rights on other computers.",
+        "Permissions",
+        [
+            {"step": 1, "priority": "high", "icon": "bi-search", "title": "Identify computer-to-computer admin paths",
+             "detail": "A compromised machine can leverage this to move laterally to other systems.",
+             "commands": []},
+            {"step": 2, "priority": "high", "icon": "bi-x-circle", "title": "Remove computer accounts from local admin groups",
+             "detail": "Computer accounts should not be members of local Administrators on other computers.",
+             "commands": [{"label": "PowerShell", "code": "Invoke-Command -ComputerName <target> {\n    Remove-LocalGroupMember -Group 'Administrators' -Member '<source_computer>$'\n}"}]},
+        ]
+    ),
+    "da_to_da": (
+        "DA-to-DA Trust Paths",
+        "Paths between Domain Admin accounts across domains.",
+        "Attack Paths",
+        [
+            {"step": 1, "priority": "high", "icon": "bi-shield-fill-exclamation", "title": "Enable SID filtering on forest trusts",
+             "detail": "SID filtering (quarantine) prevents SID history abuse across domain trusts.",
+             "commands": [{"label": "Command", "code": "netdom trust <TrustingDomain> /domain:<TrustedDomain> /quarantine:yes /enablesidhistory:no"}]},
+            {"step": 2, "priority": "normal", "icon": "bi-diagram-3", "title": "Isolate Tier 0 admin accounts per domain",
+             "detail": "Each domain should have its own set of dedicated admin accounts with no membership in privileged groups of other domains.",
+             "commands": []},
+        ]
+    ),
+    "krb_last_change": (
+        "Stale KRBTGT Password",
+        "KRBTGT account password not changed in over 180 days.",
+        "Kerberos",
+        [
+            {"step": 1, "priority": "high", "icon": "bi-key-fill", "title": "Reset KRBTGT password (twice, 10+ hours apart)",
+             "detail": "The KRBTGT password must be reset TWICE to invalidate all existing Golden Tickets. Wait at least 10 hours between resets to allow replication.",
+             "commands": [{"label": "PowerShell", "code": "# Use Microsoft's New-KrbtgtKeys.ps1 script (safer than manual reset)\n# https://github.com/microsoft/New-KrbtgtKeys.ps1\n. .\\New-KrbtgtKeys.ps1\nInvoke-KrbtgtReset -Domain 'domain.com' -DomainController '<PDC>' -Scope AllDCs"}]},
+            {"step": 2, "priority": "normal", "icon": "bi-calendar2-check", "title": "Schedule regular KRBTGT rotation",
+             "detail": "Rotate the KRBTGT password at least every 180 days as recommended by Microsoft.",
+             "commands": []},
+        ]
+    ),
+    "fgpp": (
+        "Fine-Grained Password Policies",
+        "Fine-grained password policies configured in the domain.",
+        "Credentials / Authentication",
+        [
+            {"step": 1, "priority": "normal", "icon": "bi-search", "title": "Review existing Fine-Grained Password Policies",
+             "detail": "List all PSOs (Password Settings Objects) and verify they enforce adequate complexity and length.",
+             "commands": [{"label": "PowerShell", "code": "Get-ADFineGrainedPasswordPolicy -Filter * | Select-Object Name, Precedence, MinPasswordLength, PasswordHistoryCount, MaxPasswordAge, LockoutThreshold"}]},
+            {"step": 2, "priority": "normal", "icon": "bi-shield-plus", "title": "Apply FGPP to privileged accounts",
+             "detail": "Apply stricter password policies (25+ chars for service accounts, 20+ for admins) using PSOs targeting specific groups.",
+             "commands": [{"label": "PowerShell", "code": "New-ADFineGrainedPasswordPolicy -Name 'PSO-Admins' -Precedence 10 -MinPasswordLength 20 -PasswordHistoryCount 24 -MaxPasswordAge '90.00:00:00' -ComplexityEnabled $true -ReversibleEncryptionEnabled $false\nAdd-ADFineGrainedPasswordPolicySubject 'PSO-Admins' -Subjects 'Domain Admins'"}]},
+        ]
+    ),
+    "nb_domain_admins": (
+        "Number of Domain Admins",
+        "Total count of Domain Admin accounts.",
+        "Misc",
+        [
+            {"step": 1, "priority": "normal", "icon": "bi-people", "title": "Review and reduce Domain Admin membership",
+             "detail": "Best practice: fewer than 5 Domain Admin accounts. Ideally, only dedicated 'break-glass' accounts.",
+             "commands": [{"label": "PowerShell", "code": "Get-ADGroupMember -Identity 'Domain Admins' -Recursive | Select-Object Name, SamAccountName, objectClass"}]},
+            {"step": 2, "priority": "normal", "icon": "bi-clock-history", "title": "Implement Just-In-Time (JIT) privileged access",
+             "detail": "Use Microsoft Privileged Identity Management (PIM) or a PAM solution to grant DA rights on-demand with time limitation and approval workflow.",
+             "commands": []},
+        ]
+    ),
+    "empty_groups": (
+        "Empty Groups",
+        "Security groups with no members (may indicate orphaned groups).",
+        "Misc",
+        [
+            {"step": 1, "priority": "normal", "icon": "bi-trash3", "title": "Remove or archive empty security groups",
+             "detail": "Empty groups can be exploited if an attacker gains WriteMember rights. They should be deleted or moved to an archive OU.",
+             "commands": [{"label": "PowerShell — list empty groups", "code": "Get-ADGroup -Filter * -Properties Members | Where-Object {$_.Members.Count -eq 0} | Select-Object Name, DistinguishedName"}]},
+        ]
+    ),
+    "empty_ous": (
+        "Empty OUs",
+        "Organizational Units with no objects.",
+        "Misc",
+        [
+            {"step": 1, "priority": "normal", "icon": "bi-folder-x", "title": "Remove or consolidate empty OUs",
+             "detail": "Empty OUs clutter the directory and can expose unnecessary delegation targets.",
+             "commands": [{"label": "PowerShell", "code": "Get-ADOrganizationalUnit -Filter * -Properties * | Where-Object {\n    -not (Get-ADObject -Filter * -SearchBase $_.DistinguishedName -SearchScope OneLevel)\n} | Select-Object Name, DistinguishedName"}]},
+        ]
+    ),
+    "computers_list_of_rdp_users": (
+        "RDP Users on Servers",
+        "User accounts with RDP rights on servers.",
+        "Network",
+        [
+            {"step": 1, "priority": "normal", "icon": "bi-search", "title": "Audit Remote Desktop Users on all servers",
+             "detail": "Review membership of the Remote Desktop Users group on all servers.",
+             "commands": [{"label": "PowerShell (multi-server)", "code": "$servers = Get-ADComputer -Filter {OperatingSystem -like '*Server*'} | Select-Object -ExpandProperty Name\nforeach ($s in $servers) {\n    try { $m = Invoke-Command -ComputerName $s {net localgroup 'Remote Desktop Users'} } catch { $m = 'unreachable' }\n    [pscustomobject]@{Server=$s; Members=$m}\n}"}]},
+            {"step": 2, "priority": "normal", "icon": "bi-person-dash", "title": "Remove unnecessary RDP access",
+             "detail": "Remove standard users from the Remote Desktop Users group on servers where they should not have access.",
+             "commands": []},
+        ]
+    ),
 }
 
 
@@ -195,20 +868,22 @@ def parse_adminer_data_json(filepath: str) -> dict:
 
         meta = _INDICATOR_META.get(key)
         if meta:
-            title, description, category = meta
+            title, description, category, remediation_steps = meta
         else:
             # Fallback: prettify key name
-            title       = key.replace("_", " ").replace("-", " ").title()
-            description = f"AD-Miner indicator: {key}"
-            category    = "Misc"
+            title              = key.replace("_", " ").replace("-", " ").title()
+            description        = f"AD-Miner indicator: {key}"
+            category           = "Misc"
+            remediation_steps  = []
 
         findings.append({
-            "category":       category,
-            "title":          title,
-            "severity":       sev,
-            "description":    description,
-            "affected_count": count,
-            "details":        "[]",
+            "category":        category,
+            "title":           title,
+            "severity":        sev,
+            "description":     description,
+            "affected_count":  count,
+            "details":         "[]",
+            "remediation":     json.dumps(remediation_steps),
         })
 
     # Sort findings: CRITICAL first
