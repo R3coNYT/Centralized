@@ -460,7 +460,9 @@ def finding_remediation(client_id, finding_id):
     if finding.remediation_web_fetched and finding.remediation_web:
         try:
             data = json.loads(finding.remediation_web)
-            return jsonify({"fetched": True, "data": data})
+            # Only use cache if it actually has sources — otherwise re-fetch
+            if data.get("sources"):
+                return jsonify({"fetched": True, "data": data})
         except Exception:
             pass
 
