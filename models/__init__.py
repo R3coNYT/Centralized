@@ -412,6 +412,11 @@ class ADData(db.Model):
     risk_rating            = db.Column(db.String(20), default="INFO")   # CRITICAL/HIGH/MEDIUM/LOW/INFO
     risk_score             = db.Column(db.Float, default=0.0)
     adminer_folder_path    = db.Column(db.String(500))                  # relative path under UPLOAD_FOLDER
+    # AD-Miner data.json fields
+    render_name            = db.Column(db.String(200))                  # render_name from AD-Miner data.json
+    adminer_report_date    = db.Column(db.String(50))                   # datetime string from AD-Miner data.json
+    adminer_raw_values     = db.Column(db.Text)                         # JSON: full "value" dict from AD-Miner
+    adminer_color_category = db.Column(db.Text)                         # JSON: full "color_category" dict
     created_at             = db.Column(db.DateTime, default=utcnow)
     updated_at             = db.Column(db.DateTime, default=utcnow, onupdate=utcnow)
 
@@ -431,7 +436,8 @@ class ADFinding(db.Model):
 
     id             = db.Column(db.Integer, primary_key=True)
     ad_data_id     = db.Column(db.Integer, db.ForeignKey("ad_data.id"), nullable=False)
-    category       = db.Column(db.String(100))                   # kerberoastable / asreproastable / …
+    source         = db.Column(db.String(20), default="adminer")  # adminer / sharphound
+    category       = db.Column(db.String(100))                   # Attack Paths / Permissions / …
     title          = db.Column(db.String(500), nullable=False)
     severity       = db.Column(db.String(20), default="MEDIUM")  # CRITICAL/HIGH/MEDIUM/LOW/INFO
     description    = db.Column(db.Text)
