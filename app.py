@@ -38,6 +38,7 @@ def create_app():
     from routes.admin import admin_bp
     from routes.autorecon_results import autorecon_results_bp
     from routes.autorecon_launch import autorecon_launch_bp
+    from routes.ad_miner import ad_miner_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(dashboard_bp)
@@ -51,9 +52,19 @@ def create_app():
     app.register_blueprint(admin_bp)
     app.register_blueprint(autorecon_results_bp)
     app.register_blueprint(autorecon_launch_bp)
+    app.register_blueprint(ad_miner_bp)
 
     # Inject theme CSS and tool availability into every template
     from routes.admin import get_all_settings, build_theme_css
+
+    # Custom Jinja2 filters
+    import json as _json
+    @app.template_filter("from_json")
+    def from_json_filter(value):
+        try:
+            return _json.loads(value) if value else []
+        except Exception:
+            return []
 
     @app.context_processor
     def inject_globals():
