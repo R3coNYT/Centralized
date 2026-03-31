@@ -1,0 +1,470 @@
+{% extends "base.html" %}
+{% block title %}Active Directory — {{ client.name }}{% endblock %}
+{% block page_title %}
+  <span class="text-muted fw-normal small me-2">{{ client.name }}</span>
+  <i class="bi bi-chevron-right text-muted small me-2"></i>
+  <i class="bi bi-diagram-3-fill me-2 text-danger"></i>Active Directory Data
+{% endblock %}
+
+{% block topbar_actions %}
+<a href="{{ url_for('clients.detail', client_id=client.id) }}" class="btn btn-sm btn-outline-secondary">
+  <i class="bi bi-arrow-left me-1"></i>Back to Client
+</a>
+<button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#shModal">
+  <i class="bi bi-filetype-json me-1"></i>SharpHound
+</button>
+<button class="btn btn-sm btn-danger" data-bs-toggle="modal" data-bs-target="#adminerModal">
+  <i class="bi bi-graph-up-arrow me-1"></i>AD-Miner
+  {% if adminer_available %}<span class="badge bg-success ms-1" style="font-size:.6rem">●</span>{% endif %}
+</button>
+{% endblock %}
+
+{% block content %}
+
+{# ── Risk banner ──────────────────────────────────────────────────────────── #}
+<div class="card mb-4 border-0" style="
+  background: linear-gradient(135deg,
+    {% if ad.risk_rating == 'CRITICAL' %}#3d0d0d,#5a1010
+    {% elif ad.risk_rating == 'HIGH' %}#3d1e00,#5a2e00
+    {% elif ad.risk_rating == 'MEDIUM' %}#3d3000,#5a4800
+    {% elif ad.risk_rating == 'LOW' %}#00303d,#00485a
+    {% else %}#1a1a2e,#16213e{% endif %}
+  );">
+  <div class="card-body py-3">
+    <div class="row align-items-center g-3">
+      <div class="col-auto">
+        <div class="fw-bold text-white fs-5">
+          <i class="bi bi-shield-exclamation me-2"></i>
+          {% if ad.domain_name %}{{ ad.domain_name }}{% else %}Active Directory{% endif %}
+        </div>
+        <div class="text-white-50 small">
+          {{ ad.domain_count }} domain{% if ad.domain_count != 1 %}s{% endif %} &nbsp;·&nbsp;
+          Last updated {{ ad.updated_at.strftime('%Y-%m-%d %H:%M') if ad.updated_at else '—' }}
+        </div>
+      </div>
+      <div class="col-auto ms-auto text-end">
+        <div class="text-white-50 small mb-1">Overall Risk</div>
+        <span class="badge fs-6 px-3 py-2
+          {% if ad.risk_rating == 'CRITICAL' %}sev-critical
+          {% elif ad.risk_rating == 'HIGH' %}sev-high
+          {% elif ad.risk_rating == 'MEDIUM' %}sev-medium
+          {% elif ad.risk_rating == 'LOW' %}sev-low
+          {% else %}sev-info{% endif %}">
+          {{ ad.risk_rating }}
+        </span>
+        <div class="mt-2" style="width:160px">
+          <div class="d-flex justify-content-between text-white-50" style="font-size:.7rem">
+            <span>Risk Score</span><span>{{ ad.risk_score }}/100</span>
+          </div>
+          <div class="progress" style="height:6px; background:rgba(255,255,255,.15);">
+            <div class="progress-bar
+              {% if ad.risk_score >= 60 %}bg-danger
+              {% elif ad.risk_score >= 35 %}bg-warning
+              {% elif ad.risk_score >= 15 %}bg-info
+              {% else %}bg-secondary{% endif %}"
+              style="width:{{ ad.risk_score }}%"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# ── Stats cards ──────────────────────────────────────────────────────────── #}
+<div class="row g-3 mb-4">
+  {% set stats = [
+    ('bi-hdd-network-fill',  'text-primary',  ad.dc_count,                'Domain Controllers'),
+    ('bi-person-fill-lock',  'text-danger',   ad.domain_admin_count,      'Domain Admins'),
+    ('bi-people-fill',       'text-info',     ad.user_count,              'Users'),
+    ('bi-person-check-fill', 'text-success',  ad.enabled_user_count,      'Enabled Users'),
+    ('bi-diagram-3-fill',    'text-warning',  ad.group_count,             'Groups'),
+    ('bi-pc-display-horizontal','text-secondary', ad.computer_count,      'Computers'),
+    ('bi-award-fill',        'text-danger',   ad.adcs_count,              'ADCS / CAs'),
+    ('bi-key-fill',          'text-warning',  ad.kerberoastable_count,    'Kerberoastable'),
+    ('bi-exclamation-triangle-fill','text-danger', ad.asreproastable_count,'AS-REP Roastable'),
+    ('bi-arrow-repeat',      'text-warning',  ad.unconstrained_deleg_count,'Unconstrained Deleg.'),
+  ] %}
+  {% for icon, color, value, label in stats %}
+  <div class="col-6 col-md-4 col-xl-2">
+    <div class="card h-100">
+      <div class="card-body text-center py-3">
+        <i class="bi {{ icon }} {{ color }} fs-4 mb-2 d-block"></i>
+        <div class="fw-bold fs-4">{{ value }}</div>
+        <div class="text-muted" style="font-size:.72rem">{{ label }}</div>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+{# ── AD-Miner Report accordion ─────────────────────────────────────────────── #}
+{% if adminer_available %}
+<div class="accordion mb-4" id="adminerAccordion">
+  <div class="accordion-item border-danger">
+    <h2 class="accordion-header">
+      <button class="accordion-button collapsed fw-semibold" type="button"
+              data-bs-toggle="collapse" data-bs-target="#adminerPane">
+        <i class="bi bi-graph-up-arrow text-danger me-2"></i>
+        AD-Miner Interactive Report
+        <span class="badge bg-danger ms-2" style="font-size:.65rem">LIVE</span>
+      </button>
+    </h2>
+    <div id="adminerPane" class="accordion-collapse collapse" data-bs-parent="#adminerAccordion">
+      <div class="accordion-body p-0">
+        <iframe
+          id="adminer-iframe"
+          src="{{ url_for('ad_miner.serve_adminer', client_id=client.id, filename='index.html') }}"
+          width="100%"
+          height="870"
+          frameborder="0"
+          style="border: none; border-radius: 0 0 .375rem .375rem; background:#fff;"
+          title="AD-Miner Report">
+        </iframe>
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+{# ── Charts row ───────────────────────────────────────────────────────────── #}
+<div class="row g-4 mb-4">
+  <div class="col-md-5">
+    <div class="card h-100">
+      <div class="card-header fw-semibold">
+        <i class="bi bi-pie-chart-fill me-2 text-warning"></i>Findings by Severity
+      </div>
+      <div class="card-body d-flex align-items-center justify-content-center">
+        {% if findings %}
+          <div style="max-width:280px; width:100%;">
+            <canvas id="sevDonut" height="260"></canvas>
+          </div>
+        {% else %}
+          <div class="text-muted small">No findings to display.</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  <div class="col-md-7">
+    <div class="card h-100">
+      <div class="card-header fw-semibold">
+        <i class="bi bi-bar-chart-fill me-2 text-info"></i>AD Object Inventory
+      </div>
+      <div class="card-body d-flex align-items-center justify-content-center">
+        <div style="width:100%;">
+          <canvas id="objBar" height="220"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# ── Attack Scenarios ─────────────────────────────────────────────────────── #}
+{% set scenarios = [] %}
+{% if ad.kerberoastable_count > 0 %}
+  {% set _ = scenarios.append({
+    'title': 'Kerberoasting → Privilege Escalation',
+    'severity': 'HIGH',
+    'icon': 'bi-key-fill',
+    'steps': [
+      ('Identify SPNs', 'bi-search', 'Any domain user enumerates accounts with SPNs'),
+      ('Request TGS', 'bi-ticket-detailed-fill', 'StGetServiceTicket for each SPN — no privileges needed'),
+      ('Offline Crack', 'bi-cpu-fill', 'Crack RC4/AES hash offline with Hashcat/JtR'),
+      ('Account Access', 'bi-person-fill-lock', 'Authenticate as service account — may have admin rights'),
+    ]
+  }) %}
+{% endif %}
+{% if ad.asreproastable_count > 0 %}
+  {% set _ = scenarios.append({
+    'title': 'AS-REP Roasting → Credential Theft',
+    'severity': 'HIGH',
+    'icon': 'bi-exclamation-triangle-fill',
+    'steps': [
+      ('Enumerate Targets', 'bi-search', 'Find accounts with "Do not require Kerberos preauthentication"'),
+      ('AS-REP Request', 'bi-envelope-fill', 'Send AS-REQ without PA-ENC-TIMESTAMP — get AS-REP blob'),
+      ('Offline Crack', 'bi-cpu-fill', 'Crack krb5asrep hash offline — no authentication needed'),
+      ('Initial Access', 'bi-door-open-fill', 'Log in as target user — potential pivot point'),
+    ]
+  }) %}
+{% endif %}
+{% if ad.unconstrained_deleg_count > 0 %}
+  {% set _ = scenarios.append({
+    'title': 'Unconstrained Delegation → DC Compromise',
+    'severity': 'HIGH',
+    'icon': 'bi-arrow-repeat',
+    'steps': [
+      ('Compromise Machine', 'bi-pc-display-horizontal', 'Exploit RCE or stolen creds to own a machine with unconstrained delegation'),
+      ('Coerce DC Auth', 'bi-telephone-fill', 'Use PrinterBug / PetitPotam to force DC→machine authentication'),
+      ('TGT theft', 'bi-ticket-fill', 'Extract DC\'s TGT from LSASS memory'),
+      ('DCSync / Golden Ticket', 'bi-trophy-fill', 'Full domain compromise via DCSync or Golden Ticket'),
+    ]
+  }) %}
+{% endif %}
+
+{% if scenarios %}
+<div class="card mb-4">
+  <div class="card-header fw-semibold">
+    <i class="bi bi-signpost-split-fill me-2 text-danger"></i>Attack Scenarios
+    <span class="badge bg-secondary ms-2" style="font-size:.65rem">derived from SharpHound data</span>
+  </div>
+  <div class="card-body">
+    {% for scenario in scenarios %}
+    <div class="mb-{% if not loop.last %}4{% else %}0{% endif %}">
+      <div class="d-flex align-items-center gap-2 mb-3">
+        <i class="bi {{ scenario.icon }}
+          {% if scenario.severity == 'CRITICAL' %}text-danger
+          {% elif scenario.severity == 'HIGH' %}text-warning
+          {% else %}text-info{% endif %} fs-5"></i>
+        <span class="fw-semibold">{{ scenario.title }}</span>
+        <span class="badge
+          {% if scenario.severity == 'CRITICAL' %}sev-critical
+          {% elif scenario.severity == 'HIGH' %}sev-high
+          {% else %}sev-medium{% endif %} ms-auto">{{ scenario.severity }}</span>
+      </div>
+      <div class="d-flex flex-wrap gap-2 align-items-center">
+        {% for label, icon, desc in scenario.steps %}
+        <div class="d-flex flex-column align-items-center text-center"
+             style="min-width:130px; max-width:160px;">
+          <div class="rounded-3 px-3 py-2 w-100"
+               style="background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.12);"
+               title="{{ desc }}">
+            <i class="bi {{ icon }} text-warning d-block mb-1"></i>
+            <div style="font-size:.72rem" class="fw-semibold">{{ label }}</div>
+            <div class="text-muted" style="font-size:.65rem; line-height:1.3">{{ desc }}</div>
+          </div>
+        </div>
+        {% if not loop.last %}
+        <i class="bi bi-arrow-right text-muted" style="font-size:1.2rem"></i>
+        {% endif %}
+        {% endfor %}
+      </div>
+    </div>
+    {% if not loop.last %}<hr class="my-4 opacity-25">{% endif %}
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+{# ── Findings list ────────────────────────────────────────────────────────── #}
+<div class="card mb-4">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span class="fw-semibold">
+      <i class="bi bi-list-check me-2 text-danger"></i>
+      Findings ({{ findings|length }}) — sorted by severity
+    </span>
+  </div>
+  <div class="card-body p-0">
+    {% if findings %}
+    <div class="accordion accordion-flush" id="findingsAccordion">
+      {% for finding in findings %}
+      <div class="accordion-item"
+           style="border-left:4px solid
+             {% if finding.severity == 'CRITICAL' %}#dc3545
+             {% elif finding.severity == 'HIGH' %}#fd7e14
+             {% elif finding.severity == 'MEDIUM' %}#ffc107
+             {% elif finding.severity == 'LOW' %}#0dcaf0
+             {% else %}#6c757d{% endif %};">
+        <h2 class="accordion-header">
+          <button class="accordion-button collapsed py-3" type="button"
+                  data-bs-toggle="collapse"
+                  data-bs-target="#finding-{{ finding.id }}">
+            <div class="d-flex align-items-center gap-3 w-100 me-3">
+              <span class="badge
+                {% if finding.severity == 'CRITICAL' %}sev-critical
+                {% elif finding.severity == 'HIGH' %}sev-high
+                {% elif finding.severity == 'MEDIUM' %}sev-medium
+                {% elif finding.severity == 'LOW' %}sev-low
+                {% else %}sev-info{% endif %}"
+                style="min-width:70px;">{{ finding.severity }}</span>
+              <span class="fw-semibold flex-grow-1">{{ finding.title }}</span>
+              <span class="badge bg-secondary ms-auto">
+                {{ finding.affected_count }} affected
+              </span>
+            </div>
+          </button>
+        </h2>
+        <div id="finding-{{ finding.id }}" class="accordion-collapse collapse"
+             data-bs-parent="#findingsAccordion">
+          <div class="accordion-body">
+            <p class="text-muted mb-3">{{ finding.description }}</p>
+            {% if finding.details %}
+              {% set names = finding.details | tojson | replace('"', '') | replace('[', '') | replace(']', '') %}
+              {% set details_list = finding.details | from_json %}
+              {% if details_list %}
+              <div>
+                <div class="text-muted small mb-2">
+                  Affected objects
+                  {% if details_list|length == 200 %}(first 200 shown){% endif %}:
+                </div>
+                <div class="d-flex flex-wrap gap-1">
+                  {% for name in details_list %}
+                  <span class="badge bg-dark text-light border border-secondary"
+                        style="font-size:.7rem; font-family:monospace">{{ name }}</span>
+                  {% endfor %}
+                </div>
+              </div>
+              {% endif %}
+            {% endif %}
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="text-center text-muted py-5">
+      <i class="bi bi-check-circle fs-1 text-success d-block mb-2"></i>
+      No findings detected.
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+{# ── Modals ───────────────────────────────────────────────────────────────── #}
+
+{# SharpHound re-upload modal #}
+<div class="modal fade" id="shModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-filetype-json me-2"></i>Upload SharpHound Data</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <form action="{{ url_for('ad_miner.upload_sharphound', client_id=client.id) }}"
+            method="POST" enctype="multipart/form-data">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+        <div class="modal-body">
+          <p class="text-muted small mb-3">
+            Upload individual SharpHound <code>.json</code> files
+            (<code>users.json</code>, <code>computers.json</code>, <code>groups.json</code>…)
+            or a single <code>.zip</code> containing them all.<br>
+            <strong>Re-importing will replace existing AD data.</strong>
+          </p>
+          <div class="mb-3">
+            <label class="form-label">SharpHound files</label>
+            <input type="file" name="sh_files" class="form-control"
+                   accept=".json,.zip" multiple required/>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-primary">
+            <i class="bi bi-upload me-1"></i>Import
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+{# AD-Miner zip upload modal #}
+<div class="modal fade" id="adminerModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-graph-up-arrow me-2 text-danger"></i>Upload AD-Miner Report</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <form action="{{ url_for('ad_miner.upload_adminer', client_id=client.id) }}"
+            method="POST" enctype="multipart/form-data">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+        <div class="modal-body">
+          <p class="text-muted small mb-3">
+            Upload the <strong>complete AD-Miner output folder</strong> as a ZIP archive.<br>
+            The ZIP must contain <code>index.html</code> at its root (or inside a single top-level folder).<br>
+            The report will be served interactively inside this page.
+          </p>
+          {% if adminer_available %}
+          <div class="alert alert-warning py-2 small">
+            <i class="bi bi-exclamation-triangle me-1"></i>
+            An AD-Miner report is already integrated. Uploading will replace it.
+          </div>
+          {% endif %}
+          <div class="mb-3">
+            <label class="form-label">AD-Miner ZIP archive</label>
+            <input type="file" name="adminer_zip" class="form-control"
+                   accept=".zip" required/>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-danger">
+            <i class="bi bi-upload me-1"></i>Integrate Report
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+{# ── Charts JS ────────────────────────────────────────────────────────────── #}
+{% if findings %}
+<script>
+(function () {
+  const labels = {{ sev_labels | safe }};
+  const counts = {{ sev_counts | safe }};
+  const colors = {{ sev_colors | safe }};
+  const nonZero = labels.filter((_, i) => counts[i] > 0);
+  const nzCounts = counts.filter(c => c > 0);
+  const nzColors = colors.filter((_, i) => counts[i] > 0);
+
+  // Donut chart — findings by severity
+  new Chart(document.getElementById('sevDonut'), {
+    type: 'doughnut',
+    data: {
+      labels: nonZero,
+      datasets: [{
+        data: nzCounts,
+        backgroundColor: nzColors,
+        borderWidth: 2,
+        borderColor: 'rgba(0,0,0,0.3)',
+      }],
+    },
+    options: {
+      responsive: true,
+      cutout: '62%',
+      plugins: {
+        legend: { position: 'bottom', labels: { color: '#adb5bd', font: { size: 11 } } },
+        tooltip: { callbacks: { label: ctx => ` ${ctx.parsed} finding(s)` } },
+      },
+    },
+  });
+
+  // Bar chart — AD object inventory
+  const barData = {
+    labels: ['DCs', 'DA', 'Users', 'Groups', 'Computers', 'ADCS', 'Kerberoastable', 'AS-REP'],
+    values: [
+      {{ ad.dc_count }}, {{ ad.domain_admin_count }},
+      {{ ad.user_count }}, {{ ad.group_count }},
+      {{ ad.computer_count }}, {{ ad.adcs_count }},
+      {{ ad.kerberoastable_count }}, {{ ad.asreproastable_count }},
+    ],
+    bgColors: [
+      '#0d6efd','#dc3545','#0dcaf0','#ffc107',
+      '#6c757d','#d63384','#fd7e14','#dc3545',
+    ],
+  };
+  new Chart(document.getElementById('objBar'), {
+    type: 'bar',
+    data: {
+      labels: barData.labels,
+      datasets: [{
+        data: barData.values,
+        backgroundColor: barData.bgColors.map(c => c + 'cc'),
+        borderColor: barData.bgColors,
+        borderWidth: 1,
+        borderRadius: 4,
+      }],
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { color: '#adb5bd', font: { size: 11 } }, grid: { color: 'rgba(255,255,255,.06)' } },
+        y: { ticks: { color: '#adb5bd', stepSize: 1 }, grid: { color: 'rgba(255,255,255,.06)' }, beginAtZero: true },
+      },
+    },
+  });
+})();
+</script>
+{% endif %}
+
+{% endblock %}

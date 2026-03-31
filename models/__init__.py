@@ -385,3 +385,59 @@ class CveRemediationCache(db.Model):
 
     def __repr__(self):
         return f"<CveRemediationCache {self.cve_id} expires={self.expires_at}>"
+
+
+# ---------------------------------------------------------------------------
+# Active Directory — SharpHound / AD-Miner integration
+# ---------------------------------------------------------------------------
+
+class ADData(db.Model):
+    """Parsed SharpHound statistics for a client (one row per client)."""
+    __tablename__ = "ad_data"
+
+    id                     = db.Column(db.Integer, primary_key=True)
+    client_id              = db.Column(db.Integer, db.ForeignKey("clients.id"), unique=True, nullable=False)
+    domain_name            = db.Column(db.String(200))
+    domain_count           = db.Column(db.Integer, default=0)
+    dc_count               = db.Column(db.Integer, default=0)
+    user_count             = db.Column(db.Integer, default=0)
+    enabled_user_count     = db.Column(db.Integer, default=0)
+    group_count            = db.Column(db.Integer, default=0)
+    computer_count         = db.Column(db.Integer, default=0)
+    adcs_count             = db.Column(db.Integer, default=0)
+    domain_admin_count     = db.Column(db.Integer, default=0)
+    kerberoastable_count   = db.Column(db.Integer, default=0)
+    asreproastable_count   = db.Column(db.Integer, default=0)
+    unconstrained_deleg_count = db.Column(db.Integer, default=0)
+    risk_rating            = db.Column(db.String(20), default="INFO")   # CRITICAL/HIGH/MEDIUM/LOW/INFO
+    risk_score             = db.Column(db.Float, default=0.0)
+    adminer_folder_path    = db.Column(db.String(500))                  # relative path under UPLOAD_FOLDER
+    created_at             = db.Column(db.DateTime, default=utcnow)
+    updated_at             = db.Column(db.DateTime, default=utcnow, onupdate=utcnow)
+
+    client   = db.relationship(
+        "Client",
+        backref=db.backref("ad_data", uselist=False, cascade="all, delete-orphan", single_parent=True),
+    )
+    findings = db.relationship("ADFinding", backref="ad_data", lazy="dynamic", cascade="all, delete-orphan")
+
+    def __repr__(self):
+        return f"<ADData client_id={self.client_id} domain={self.domain_name}>"
+
+
+class ADFinding(db.Model):
+    """Individual security finding extracted from SharpHound data."""
+    __tablename__ = "ad_findings"
+
+    id             = db.Column(db.Integer, primary_key=True)
+    ad_data_id     = db.Column(db.Integer, db.ForeignKey("ad_data.id"), nullable=False)
+    category       = db.Column(db.String(100))                   # kerberoastable / asreproastable / …
+    title          = db.Column(db.String(500), nullable=False)
+    severity       = db.Column(db.String(20), default="MEDIUM")  # CRITICAL/HIGH/MEDIUM/LOW/INFO
+    description    = db.Column(db.Text)
+    affected_count = db.Column(db.Integer, default=0)
+    details        = db.Column(db.Text)                          # JSON list of affected object names (max 200)
+    created_at     = db.Column(db.DateTime, default=utcnow)
+
+    def __repr__(self):
+        return f"<ADFinding {self.title}>"
