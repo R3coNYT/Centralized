@@ -190,8 +190,8 @@ def parse_adminer_data_json(filepath: str) -> dict:
             continue
 
         count = int(values.get(key, 0))
-        if count == 0:
-            continue  # Only report active indicators
+        # Keep indicator even if count==0: AD-Miner assigns the color independently
+        # of the raw count (e.g. a configuration risk with no affected objects).
 
         meta = _INDICATOR_META.get(key)
         if meta:

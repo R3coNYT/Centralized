@@ -63,7 +63,7 @@
       <div class="col-md-6">
         <div class="row g-2">
           {% for label, val, color in [
-            ('Domain Controllers', ad.dc_count, 'text-primary'),
+            ('DC', ad.dc_count, 'text-primary'),
             ('Domain Admins', ad.domain_admin_count, 'text-danger'),
             ('Kerberoastable', ad.kerberoastable_count, 'text-warning'),
             ('AS-REP Roastable', ad.asreproastable_count, 'text-danger'),
@@ -71,9 +71,9 @@
             ('Computers', ad.computer_count, 'text-secondary'),
           ] %}
           <div class="col-6">
-            <div class="d-flex justify-content-between">
-              <span class="text-muted small">{{ label }}</span>
+            <div class="d-flex align-items-center gap-1">
               <span class="fw-semibold small {{ color }}">{{ val }}</span>
+              <span class="text-muted small">{{ label }}</span>
             </div>
           </div>
           {% endfor %}
