@@ -35,10 +35,13 @@
       <div class="col-auto">
         <div class="fw-bold text-white fs-5">
           <i class="bi bi-shield-exclamation me-2"></i>
-          {% if ad.domain_name %}{{ ad.domain_name }}{% else %}Active Directory{% endif %}
+          {% if ad.render_name %}{{ ad.render_name }}{% elif ad.domain_name %}{{ ad.domain_name }}{% else %}Active Directory{% endif %}
         </div>
         <div class="text-white-50 small">
           {{ ad.domain_count }} domain{% if ad.domain_count != 1 %}s{% endif %} &nbsp;·&nbsp;
+          {% if ad.adminer_report_date %}
+            Report date: {{ ad.adminer_report_date }} &nbsp;·&nbsp;
+          {% endif %}
           Last updated {{ ad.updated_at.strftime('%Y-%m-%d %H:%M') if ad.updated_at else '—' }}
         </div>
       </div>
@@ -157,6 +160,101 @@
     </div>
   </div>
 </div>
+
+{# ── All Indicators Breakdown ─────────────────────────────────────────────── #}
+{% if raw_values %}
+<div class="card mb-4">
+  <div class="card-header fw-semibold d-flex align-items-center gap-2">
+    <i class="bi bi-clipboard2-data-fill text-info"></i>
+    All Indicators
+    <span class="badge bg-secondary ms-1" style="font-size:.65rem">from AD-Miner</span>
+    <span class="ms-auto d-flex gap-2 align-items-center" style="font-size:.72rem">
+      {% set red_count    = namespace(n=0) %}
+      {% set orange_count = namespace(n=0) %}
+      {% set yellow_count = namespace(n=0) %}
+      {% set green_count  = namespace(n=0) %}
+      {% for g in groups_order %}{% for ind in indicators_grouped[g] %}
+        {% if ind.color == 'red'    and ind.value > 0 %}{% set red_count.n    = red_count.n    + 1 %}{% endif %}
+        {% if ind.color == 'orange' and ind.value > 0 %}{% set orange_count.n = orange_count.n + 1 %}{% endif %}
+        {% if ind.color == 'yellow' and ind.value > 0 %}{% set yellow_count.n = yellow_count.n + 1 %}{% endif %}
+        {% if ind.color == 'green' %}{% set green_count.n = green_count.n + 1 %}{% endif %}
+      {% endfor %}{% endfor %}
+      <span class="badge" style="background:#dc354550">&#9679; {{ red_count.n }} Immediate</span>
+      <span class="badge" style="background:#fd7e1450">&#9679; {{ orange_count.n }} Potential</span>
+      <span class="badge" style="background:#ffc10750">&#9679; {{ yellow_count.n }} Minor</span>
+      <span class="badge" style="background:#19875450">&#9679; {{ green_count.n }} Handled</span>
+    </span>
+  </div>
+  <div class="card-body p-0">
+    <div class="accordion accordion-flush" id="indicatorsAccordion">
+      {% for group in groups_order %}
+      {% set group_indicators = indicators_grouped[group] %}
+      {% if group_indicators %}
+      <div class="accordion-item">
+        <h2 class="accordion-header">
+          <button class="accordion-button py-2 collapsed" type="button"
+                  data-bs-toggle="collapse"
+                  data-bs-target="#indGroup-{{ loop.index }}">
+            <span class="fw-semibold me-3">{{ group }}</span>
+            {% set red_g    = group_indicators | selectattr('color', 'eq', 'red')    | selectattr('value', 'gt', 0) | list | length %}
+            {% set orange_g = group_indicators | selectattr('color', 'eq', 'orange') | selectattr('value', 'gt', 0) | list | length %}
+            {% set yellow_g = group_indicators | selectattr('color', 'eq', 'yellow') | selectattr('value', 'gt', 0) | list | length %}
+            {% if red_g or orange_g or yellow_g %}
+              {% if red_g %}<span class="badge sev-critical me-1" style="font-size:.6rem">{{ red_g }}</span>{% endif %}
+              {% if orange_g %}<span class="badge sev-high me-1" style="font-size:.6rem">{{ orange_g }}</span>{% endif %}
+              {% if yellow_g %}<span class="badge sev-medium" style="font-size:.6rem">{{ yellow_g }}</span>{% endif %}
+            {% else %}
+              <span class="badge bg-success" style="font-size:.6rem">All clear</span>
+            {% endif %}
+          </button>
+        </h2>
+        <div id="indGroup-{{ loop.index }}" class="accordion-collapse collapse">
+          <div class="accordion-body p-0">
+            <table class="table table-sm table-hover mb-0" style="font-size:.82rem">
+              <thead style="background:rgba(255,255,255,.04)">
+                <tr>
+                  <th style="width:38%">Indicator</th>
+                  <th style="width:42%">Description</th>
+                  <th class="text-center" style="width:10%">Count</th>
+                  <th class="text-center" style="width:10%">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for ind in group_indicators %}
+                <tr>
+                  <td class="fw-semibold">{{ ind.title }}</td>
+                  <td class="text-muted" style="font-size:.75rem">{{ ind.description }}</td>
+                  <td class="text-center fw-bold
+                    {% if ind.color == 'red' %}text-danger
+                    {% elif ind.color == 'orange' %}text-warning
+                    {% elif ind.color == 'yellow' %}text-info
+                    {% else %}text-success{% endif %}">{{ ind.value }}</td>
+                  <td class="text-center">
+                    {% if ind.color == 'red' %}
+                      <span class="badge sev-critical" style="font-size:.6rem">CRITICAL</span>
+                    {% elif ind.color == 'orange' %}
+                      <span class="badge sev-high" style="font-size:.6rem">HIGH</span>
+                    {% elif ind.color == 'yellow' %}
+                      <span class="badge sev-medium" style="font-size:.6rem">MEDIUM</span>
+                    {% elif ind.color == 'green' %}
+                      <span class="badge bg-success" style="font-size:.6rem">OK</span>
+                    {% else %}
+                      <span class="badge bg-secondary" style="font-size:.6rem">N/A</span>
+                    {% endif %}
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      {% endif %}
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% endif %}
 
 {# ── Attack Scenarios ─────────────────────────────────────────────────────── #}
 {% set scenarios = [] %}
