@@ -461,6 +461,51 @@
               {% endif %}
             </div>
 
+            {# ── Web Documentation (lazy-loaded) ─────────────────────────── #}
+            <div class="mt-4 web-rem-section"
+                 data-finding-id="{{ finding.id }}"
+                 data-url="{{ url_for('ad_miner.finding_remediation', client_id=client.id, finding_id=finding.id) }}"
+                 data-fetched="{{ 'true' if finding.remediation_web_fetched else 'false' }}">
+              <div class="d-flex align-items-center gap-2 mb-3">
+                <i class="bi bi-globe2 text-info"></i>
+                <span class="fw-semibold small text-muted">Web Documentation</span>
+                <span class="web-rem-badge badge bg-secondary ms-auto" style="font-size:.65rem"></span>
+              </div>
+              <div class="web-rem-body">
+                {% if finding.remediation_web_fetched and finding.remediation_web %}
+                  {# Already fetched — render inline #}
+                  {% set web_data = finding.remediation_web | from_json %}
+                  {% if web_data and web_data.sources %}
+                    <div class="d-flex flex-column gap-3">
+                      {% for src in web_data.sources %}
+                      <div class="p-3 rounded" style="background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.07)">
+                        <div class="d-flex justify-content-between align-items-start gap-2 mb-2">
+                          <div>
+                            <a href="{{ src.url }}" target="_blank" rel="noopener noreferrer"
+                               class="fw-semibold small text-info text-decoration-none">
+                              <i class="bi bi-box-arrow-up-right me-1" style="font-size:.7rem"></i>{{ src.title }}
+                            </a>
+                          </div>
+                          <span class="badge bg-dark border border-secondary flex-shrink-0"
+                                style="font-size:.65rem">{{ src.source_label }}</span>
+                        </div>
+                        <p class="text-muted small mb-0" style="line-height:1.5;font-size:.8rem">{{ src.excerpt }}</p>
+                      </div>
+                      {% endfor %}
+                    </div>
+                  {% else %}
+                    <div class="text-muted small">No web sources found for this finding.</div>
+                  {% endif %}
+                {% else %}
+                  {# Not yet fetched — show loader, JS will populate #}
+                  <div class="web-rem-loader d-flex align-items-center gap-2 text-muted small py-2">
+                    <div class="spinner-border spinner-border-sm text-info" role="status"></div>
+                    <span>Searching documentation…</span>
+                  </div>
+                {% endif %}
+              </div>
+            </div>
+
           </div>
         </div>
       </div>
@@ -565,6 +610,85 @@ function copyAdBlock(btn) {
     setTimeout(function () { btn.innerHTML = '<i class="bi bi-clipboard"></i>'; }, 1500);
   });
 }
+
+// ── Web remediation lazy-loader ───────────────────────────────────────────────
+(function () {
+  function renderSources(sources) {
+    if (!sources || !sources.length) {
+      return '<div class="text-muted small">No web documentation found for this finding.</div>';
+    }
+    return sources.map(function (src) {
+      return '<div class="p-3 rounded mb-2" style="background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.07)">' +
+        '<div class="d-flex justify-content-between align-items-start gap-2 mb-2">' +
+          '<a href="' + src.url + '" target="_blank" rel="noopener noreferrer" ' +
+             'class="fw-semibold small text-info text-decoration-none" style="word-break:break-word">' +
+            '<i class="bi bi-box-arrow-up-right me-1" style="font-size:.7rem"></i>' +
+            escHtml(src.title) +
+          '</a>' +
+          '<span class="badge bg-dark border border-secondary flex-shrink-0" style="font-size:.65rem">' +
+            escHtml(src.source_label) +
+          '</span>' +
+        '</div>' +
+        '<p class="text-muted mb-0" style="font-size:.8rem;line-height:1.5">' + escHtml(src.excerpt) + '</p>' +
+      '</div>';
+    }).join('');
+  }
+
+  function escHtml(str) {
+    if (!str) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function loadWebRem(section) {
+    var url     = section.dataset.url;
+    var fetched = section.dataset.fetched === 'true';
+    var body    = section.querySelector('.web-rem-body');
+    var badge   = section.querySelector('.web-rem-badge');
+    if (fetched) return; // already rendered server-side
+
+    fetch(url, { credentials: 'same-origin' })
+      .then(function (r) { return r.json(); })
+      .then(function (resp) {
+        if (resp.fetched && resp.data && resp.data.sources) {
+          var n = resp.data.sources.length;
+          body.innerHTML = renderSources(resp.data.sources);
+          badge.textContent = n + ' source' + (n > 1 ? 's' : '');
+          badge.className = 'web-rem-badge badge bg-info text-dark ms-auto';
+          section.dataset.fetched = 'true';
+        } else {
+          body.innerHTML = '<div class="text-muted small">Documentation not available yet — try refreshing.</div>';
+        }
+      })
+      .catch(function () {
+        body.innerHTML = '<div class="text-muted small"><i class="bi bi-exclamation-triangle me-1 text-warning"></i>Could not load documentation.</div>';
+      });
+  }
+
+  // Lazy-load: only fetch when the accordion panel is opened for the first time
+  document.querySelectorAll('.accordion-collapse').forEach(function (panel) {
+    panel.addEventListener('show.bs.collapse', function () {
+      var section = panel.querySelector('.web-rem-section');
+      if (section) loadWebRem(section);
+    }, { once: true });
+  });
+
+  // For any section already pre-fetched server-side, update badge count
+  document.querySelectorAll('.web-rem-section[data-fetched="true"]').forEach(function (section) {
+    var body  = section.querySelector('.web-rem-body');
+    var badge = section.querySelector('.web-rem-badge');
+    if (!body || !badge) return;
+    var cards = body.querySelectorAll('.p-3.rounded');
+    var n = cards.length;
+    if (n > 0) {
+      badge.textContent = n + ' source' + (n > 1 ? 's' : '');
+      badge.className = 'web-rem-badge badge bg-info text-dark ms-auto';
+    }
+  });
+})();
 </script>
 <script>
 (function () {

@@ -443,7 +443,11 @@ class ADFinding(db.Model):
     description    = db.Column(db.Text)
     affected_count = db.Column(db.Integer, default=0)
     details        = db.Column(db.Text)                          # JSON list of affected object names (max 200)
-    remediation    = db.Column(db.Text)                          # JSON list of remediation steps
+    remediation    = db.Column(db.Text)                          # JSON list of remediation steps (static)
+    indicator_key  = db.Column(db.String(200))                   # original AD-Miner indicator key
+    # Web-fetched remediation documentation (cached)
+    remediation_web         = db.Column(db.Text)                 # JSON blob: {fetched_at, sources:[{url,title,excerpt,source_label}]}
+    remediation_web_fetched = db.Column(db.Boolean, default=False)
     created_at     = db.Column(db.DateTime, default=utcnow)
 
     def __repr__(self):

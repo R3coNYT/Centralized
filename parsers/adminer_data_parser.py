@@ -896,6 +896,7 @@ def parse_adminer_data_json(filepath: str) -> dict:
             "affected_count":  count,
             "details":         "[]",
             "remediation":     json.dumps(remediation_steps),
+            "indicator_key":   key,
         })
 
     # Sort findings: CRITICAL first
