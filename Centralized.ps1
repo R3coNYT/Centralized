@@ -216,7 +216,8 @@ function Install-CentralizedTask {
     # Ensure logs directory exists
     New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
 
-    # Wrapper script: starts waitress and tee-s output to a rotating log
+    # Wrapper script: starts waitress and redirects stdout+stderr to a rotating log.
+    # Uses cmd /c so that 2>&1 correctly captures native-exe stderr in PowerShell 5.1.
     $wrapper = @"
 Set-Location '$InstallDir'
 `$log = '$LogDir\service.log'
@@ -224,7 +225,7 @@ Set-Location '$InstallDir'
 if ((Test-Path `$log) -and (Get-Item `$log).Length -gt 2MB) {
     Move-Item `$log "`$log.bak" -Force
 }
-& '$VenvPython' -m waitress --port=$AppPort --call app:create_app >> `$log 2>> `$log
+cmd /c "$VenvPython -m waitress --port=$AppPort --call app:create_app >> `$log 2>&1"
 "@
     Set-Content -Path $WrapperPs1 -Value $wrapper -Encoding UTF8
 
