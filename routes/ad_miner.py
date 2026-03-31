@@ -187,7 +187,7 @@ def ad_data(client_id):
         value = raw_values.get(key, 0)
         meta  = _INDICATOR_META.get(key)
         if meta:
-            title, description, group = meta
+            title, description, group = meta[0], meta[1], meta[2]
         else:
             title       = key.replace("_", " ").replace("-", " ").title()
             description = ""
