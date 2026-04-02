@@ -1,4 +1,4 @@
-from flask import Flask, send_from_directory, make_response
+from flask import Flask, send_from_directory, make_response, request
 import os
 import shutil
 from extensions import db, login_manager, csrf
@@ -89,6 +89,123 @@ def create_app():
         # application/x-x509-ca-cert prompts "install certificate" in most browsers/OS
         resp.headers['Content-Type']        = 'application/x-x509-ca-cert'
         resp.headers['Content-Disposition'] = 'attachment; filename="centralized-ca.crt"'
+        resp.headers['Cache-Control']       = 'no-store'
+        return resp
+
+    @app.route('/ssl/trust.ps1')
+    def pwa_trust_ps1():
+        """Serve a PowerShell script that imports the CA cert into Windows Trusted Root."""
+        import os as _os
+        cert_path = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), 'ssl', 'cert.pem')
+        if not _os.path.isfile(cert_path):
+            return '', 404
+        base_url = request.host_url.rstrip('/')
+        script = f"""# Centralized — Trust SSL certificate
+# Run this script as Administrator in PowerShell
+
+$CertUrl = "{base_url}/ssl/cert.pem"
+
+Write-Host "[*] Downloading certificate from $CertUrl ..."
+[System.Net.ServicePointManager]::ServerCertificateValidationCallback = {{ $true }}
+try {{
+    $pem = (New-Object System.Net.WebClient).DownloadString($CertUrl)
+}} finally {{
+    [System.Net.ServicePointManager]::ServerCertificateValidationCallback = $null
+}}
+
+$b64   = ($pem -replace '-----BEGIN CERTIFICATE-----', '' `
+               -replace '-----END CERTIFICATE-----', '' `
+               -replace '\\s', '')
+$bytes = [Convert]::FromBase64String($b64)
+$tmp   = Join-Path $env:TEMP 'centralized-ca.cer'
+[System.IO.File]::WriteAllBytes($tmp, $bytes)
+
+Write-Host "[*] Importing into Windows Trusted Root CA store ..."
+try {{
+    $cert = Import-Certificate -FilePath $tmp -CertStoreLocation Cert:\\LocalMachine\\Root -ErrorAction Stop
+    Write-Host "[+] Certificate trusted (thumbprint: $($cert.Thumbprint.Substring(0,8))...)"
+}} catch {{
+    Write-Error "[-] Import failed: $_"
+    Write-Host "    Manual fix: double-click centralized-ca.cer -> Install -> Trusted Root Certification Authorities"
+}} finally {{
+    Remove-Item $tmp -Force -ErrorAction SilentlyContinue
+}}
+
+Write-Host "[*] Done. Please restart Chrome / Edge."
+Read-Host  "Press Enter to close"
+"""
+        resp = make_response(script)
+        resp.headers['Content-Type']        = 'text/plain; charset=utf-8'
+        resp.headers['Content-Disposition'] = 'attachment; filename="trust-centralized.ps1"'
+        resp.headers['Cache-Control']       = 'no-store'
+        return resp
+
+    @app.route('/ssl/trust.sh')
+    def pwa_trust_sh():
+        """Serve a bash script that imports the CA cert into Linux system/Chrome NSS stores."""
+        import os as _os
+        cert_path = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), 'ssl', 'cert.pem')
+        if not _os.path.isfile(cert_path):
+            return '', 404
+        base_url = request.host_url.rstrip('/')
+        script = f"""#!/usr/bin/env bash
+# Centralized — Trust SSL certificate
+set -e
+
+CERT_URL="{base_url}/ssl/cert.pem"
+CERT="/tmp/centralized-ca.crt"
+
+echo "[*] Downloading certificate ..."
+curl -sk "$CERT_URL" -o "$CERT"
+
+# ── System CA store ────────────────────────────────────────────────────────
+if [ -d /usr/local/share/ca-certificates ]; then
+    echo "[*] Installing into system CA store (Debian/Ubuntu) ..."
+    sudo cp "$CERT" /usr/local/share/ca-certificates/centralized-local.crt
+    sudo update-ca-certificates
+elif [ -d /etc/pki/ca-trust/source/anchors ]; then
+    echo "[*] Installing into system CA store (RHEL/Fedora) ..."
+    sudo cp "$CERT" /etc/pki/ca-trust/source/anchors/centralized-local.crt
+    sudo update-ca-trust
+else
+    echo "[!] Unknown distro — skipping system CA store"
+fi
+
+# ── Chrome NSS database ────────────────────────────────────────────────────
+if ! command -v certutil &>/dev/null; then
+    echo "[*] Installing libnss3-tools ..."
+    if command -v apt-get &>/dev/null; then
+        sudo apt-get install -y -q libnss3-tools
+    elif command -v dnf &>/dev/null; then
+        sudo dnf install -y nss-tools
+    elif command -v yum &>/dev/null; then
+        sudo yum install -y nss-tools
+    fi
+fi
+
+if command -v certutil &>/dev/null; then
+    PASS="$(mktemp)"
+    printf '' > "$PASS"
+    for nssdb in "$HOME/.pki/nssdb" "$HOME/.local/share/pki/nssdb"; do
+        if [ ! -d "$nssdb" ]; then
+            echo "[*] Creating NSS db at $nssdb ..."
+            mkdir -p "$nssdb"
+            certutil -N -d "sql:$nssdb" --empty-password 2>/dev/null || true
+        fi
+        echo "[*] Importing into $nssdb ..."
+        certutil -d "sql:$nssdb" -D -n "Centralized" -f "$PASS" 2>/dev/null || true
+        certutil -d "sql:$nssdb" -A -n "Centralized" -t "CT,," -i "$CERT" -f "$PASS"
+    done
+    rm -f "$PASS"
+    echo "[+] Certificate trusted in Chrome NSS db"
+fi
+
+rm -f "$CERT"
+echo "[*] Done. Please restart Chrome."
+"""
+        resp = make_response(script)
+        resp.headers['Content-Type']        = 'text/plain; charset=utf-8'
+        resp.headers['Content-Disposition'] = 'attachment; filename="trust-centralized.sh"'
         resp.headers['Cache-Control']       = 'no-store'
         return resp
     # ────────────────────────────────────────────────────────────────────────

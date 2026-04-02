@@ -304,6 +304,24 @@ function Start-CentralizedService {
     }
 }
 
+function Add-CertToTrustStore {
+    param([string]$CertPem)
+    try {
+        $raw   = [System.IO.File]::ReadAllText($CertPem)
+        $b64   = ($raw -replace '-----BEGIN CERTIFICATE-----','' `
+                       -replace '-----END CERTIFICATE-----','' `
+                       -replace '\s','')
+        $bytes = [Convert]::FromBase64String($b64)
+        $tmp   = [System.IO.Path]::GetTempFileName() + '.cer'
+        [System.IO.File]::WriteAllBytes($tmp, $bytes)
+        $imported = Import-Certificate -FilePath $tmp -CertStoreLocation Cert:\LocalMachine\Root -ErrorAction Stop
+        Remove-Item $tmp -Force -ErrorAction SilentlyContinue
+        Write-Ok "Certificate trusted by Windows / Chrome (thumbprint: $($imported.Thumbprint.Substring(0,8))...)"
+    } catch {
+        Write-Warn "Could not auto-import certificate: $_"
+    }
+}
+
 # -- SSL certificate check / renewal -----------------------------------------
 
 function Update-Ssl {
@@ -319,6 +337,7 @@ function Update-Ssl {
             $cert = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($CertPem)
             if ($cert.NotAfter -gt (Get-Date).AddDays(30)) {
                 Write-Ok "SSL certificate valid until $($cert.NotAfter.ToString('yyyy-MM-dd'))"
+                Add-CertToTrustStore -CertPem $CertPem
                 return
             }
             Write-Warn "SSL certificate expires $($cert.NotAfter.ToString('yyyy-MM-dd')) — regenerating"
@@ -374,6 +393,7 @@ subjectAltName = $San
 
     if ((Test-Path $CertPem) -and (Test-Path $KeyPem)) {
         Write-Ok "SSL certificate generated (365 days)"
+        Add-CertToTrustStore -CertPem $CertPem
     } else {
         Write-Warn "SSL certificate generation failed"
     }
