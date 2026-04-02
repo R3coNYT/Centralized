@@ -246,6 +246,14 @@
       });
   });
 })();
+
+/* ── Trust certificate script download ── */
+function downloadTrustScript() {
+  var isWindows = (navigator.userAgentData
+    ? navigator.userAgentData.platform === 'Windows'
+    : /Windows/i.test(navigator.userAgent));
+  window.location.href = isWindows ? '/ssl/trust.ps1' : '/ssl/trust.sh';
+}
 </script>
 
 <!-- ── PWA — SSL certificate trust toast ──────────────────────────────────── -->
@@ -255,17 +263,18 @@
     <div class="d-flex">
       <div class="toast-body" style="font-size:.85rem">
         <i class="bi bi-shield-exclamation me-1"></i>
-        <strong>Certificat SSL non approuvé.</strong><br>
-        Pour activer le PWA, installez le certificat comme autorité de confiance :
-        <a href="/ssl/cert.pem" class="btn btn-sm btn-dark mt-1 d-block" download="centralized-ca.crt">
-          <i class="bi bi-download me-1"></i>Télécharger centralized-ca.crt
-        </a>
+        <strong>Untrusted SSL certificate.</strong><br>
+        To enable PWA install, download and run the trust script for your OS:
+        <button onclick="downloadTrustScript()" class="btn btn-sm btn-dark mt-1 d-block w-100">
+          <i class="bi bi-shield-check me-1"></i>Trust this certificate
+        </button>
         <small class="d-block mt-1 text-dark">
-          Windows : double-cliquer → Installer → <em>Autorités de certification racines de confiance</em>
+          Downloads <code>trust-centralized.ps1</code> (Windows) or <code>trust-centralized.sh</code> (Linux).<br>
+          Run it with admin/sudo rights, then restart Chrome.
         </small>
       </div>
       <button type="button" class="btn-close me-2 m-auto"
-              data-bs-dismiss="toast" aria-label="Fermer"></button>
+              data-bs-dismiss="toast" aria-label="Close"></button>
     </div>
   </div>
 </div>

@@ -413,6 +413,30 @@ Log "Certificate renewed"
     Write-Ok "SSL auto-renewal scheduled task registered (weekly check, Mondays 03:30)"
 }
 
+function Add-CertToTrustStore {
+    # Imports a PEM certificate into the Windows Trusted Root CA store.
+    # Chrome on Windows uses the OS store, so once imported the browser
+    # fully trusts the cert — service workers register without errors.
+    param([string]$CertPem)
+    try {
+        $raw   = [System.IO.File]::ReadAllText($CertPem)
+        $b64   = ($raw -replace '-----BEGIN CERTIFICATE-----','' `
+                       -replace '-----END CERTIFICATE-----','' `
+                       -replace '\s','')
+        $bytes = [Convert]::FromBase64String($b64)
+        $tmp   = [System.IO.Path]::GetTempFileName() + '.cer'
+        [System.IO.File]::WriteAllBytes($tmp, $bytes)
+        $imported = Import-Certificate -FilePath $tmp -CertStoreLocation Cert:\LocalMachine\Root -ErrorAction Stop
+        Remove-Item $tmp -Force -ErrorAction SilentlyContinue
+        Write-Ok "Certificate trusted by Windows / Chrome (thumbprint: $($imported.Thumbprint.Substring(0,8))...)"
+        return $true
+    } catch {
+        Write-Warn "Could not auto-import certificate: $_"
+        Write-Warn "PWA SSL fix: install ssl\cert.pem manually as a Trusted Root CA"
+        return $false
+    }
+}
+
 function Setup-Ssl {
     param([string]$InstallDir)
 
@@ -426,6 +450,7 @@ function Setup-Ssl {
             $cert = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($CertPem)
             if ($cert.NotAfter -gt (Get-Date).AddDays(30)) {
                 Write-Ok "SSL certificate valid until $($cert.NotAfter.ToString('yyyy-MM-dd'))"
+                Add-CertToTrustStore -CertPem $CertPem | Out-Null
                 return $true
             }
             Write-Warn "SSL certificate expires $($cert.NotAfter.ToString('yyyy-MM-dd')) — regenerating"
@@ -437,6 +462,7 @@ function Setup-Ssl {
 
     $ok = New-SslCertPem -SslDir $SslDir
     if ($ok) {
+        Add-CertToTrustStore -CertPem $CertPem | Out-Null
         New-SslRenewalTask -InstallDir $InstallDir
         return $true
     }

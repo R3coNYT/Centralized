@@ -232,6 +232,50 @@ $USER ALL=(ALL) NOPASSWD: $systemctl_path restart centralized"
     fi
 }
 
+# ── Trust SSL certificate in system + browser stores ───────────────────────────────
+
+trust_ssl_cert() {
+    local cert="$1"
+    [ -f "$cert" ] || return
+
+    if [ "$PLATFORM" = "linux" ]; then
+        if [ -d /usr/local/share/ca-certificates ]; then
+            $SUDO cp "$cert" /usr/local/share/ca-certificates/centralized-local.crt
+            $SUDO update-ca-certificates --fresh >/dev/null 2>&1 && \
+                ok "System CA store updated"
+        elif [ -d /etc/pki/ca-trust/source/anchors ]; then
+            $SUDO cp "$cert" /etc/pki/ca-trust/source/anchors/centralized-local.crt
+            $SUDO update-ca-trust extract >/dev/null 2>&1 && \
+                ok "System CA trust store updated"
+        fi
+    fi
+
+    if [ "$PLATFORM" = "linux" ] && ! need_cmd certutil; then
+        if need_cmd apt-get; then
+            $SUDO apt-get install -y -qq libnss3-tools >/dev/null 2>&1 || true
+        elif need_cmd dnf; then
+            $SUDO dnf install -y -q nss-tools >/dev/null 2>&1 || true
+        fi
+    fi
+
+    if need_cmd certutil; then
+        local nss_dirs=("$HOME/.pki/nssdb" "$HOME/.local/share/pki/nssdb")
+        local nss_pass
+        nss_pass="$(mktemp)"
+        printf '' > "$nss_pass"
+        for nssdb in "${nss_dirs[@]}"; do
+            if [ ! -d "$nssdb" ]; then
+                mkdir -p "$nssdb"
+                certutil -d "sql:$nssdb" -N --empty-password >/dev/null 2>&1 || continue
+            fi
+            certutil -d "sql:$nssdb" -D -n "Centralized" -f "$nss_pass" >/dev/null 2>&1 || true
+            certutil -d "sql:$nssdb" -A -n "Centralized" -t "CT,," -i "$cert" -f "$nss_pass" >/dev/null 2>&1 && \
+                ok "Certificate trusted in Chrome NSS db ($nssdb)"
+        done
+        rm -f "$nss_pass"
+    fi
+}
+
 # ── SSL certificate check / renewal ───────────────────────────────────────────────────
 
 ensure_ssl() {
@@ -245,6 +289,7 @@ ensure_ssl() {
             local expiry
             expiry="$(openssl x509 -enddate -noout -in "$ssl_dir/cert.pem" 2>/dev/null | cut -d= -f2)"
             ok "SSL certificate valid (expires: $expiry)"
+            trust_ssl_cert "$ssl_dir/cert.pem"
             return
         fi
         warn "SSL certificate expiring within 30 days"
@@ -301,6 +346,7 @@ SSLCNF
     rm -f "$cfg"
     chmod 600 "$ssl_dir/key.pem"
     ok "Self-signed certificate generated (365 days)"
+    trust_ssl_cert "$ssl_dir/cert.pem"
 }
 
 # ── Restart service ──────────────────────────────────────────────────────────

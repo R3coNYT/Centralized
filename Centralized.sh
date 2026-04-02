@@ -342,6 +342,69 @@ TMR
     fi
 }
 
+# ── Trust SSL certificate in system + browser stores ───────────────────────────────
+
+trust_ssl_cert() {
+    local cert="$1"
+    [ -f "$cert" ] || return
+
+    # ── 1. System CA store ─────────────────────────────────────────────────
+    if [ "$PLATFORM" = "linux" ]; then
+        if [ -d /usr/local/share/ca-certificates ]; then
+            # Debian / Ubuntu
+            $SUDO cp "$cert" /usr/local/share/ca-certificates/centralized-local.crt
+            $SUDO update-ca-certificates --fresh >/dev/null 2>&1 && \
+                ok "System CA store updated (Debian/Ubuntu)"
+        elif [ -d /etc/pki/ca-trust/source/anchors ]; then
+            # RHEL / CentOS / Fedora / Rocky
+            $SUDO cp "$cert" /etc/pki/ca-trust/source/anchors/centralized-local.crt
+            $SUDO update-ca-trust extract >/dev/null 2>&1 && \
+                ok "System CA trust store updated (RHEL/Fedora)"
+        fi
+    fi
+
+    # ── 2. Chrome / Chromium NSS database ──────────────────────────────────────
+    # Chrome on Linux reads ~/.pki/nssdb rather than the OS cert store;
+    # certutil is the only reliable way to make it trust a self-signed cert.
+    if [ "$PLATFORM" = "linux" ] && ! need_cmd certutil; then
+        if need_cmd apt-get; then
+            log "Installing certutil (libnss3-tools) for Chrome NSS trust"
+            $SUDO apt-get install -y -qq libnss3-tools >/dev/null 2>&1 || true
+        elif need_cmd dnf; then
+            $SUDO dnf install -y -q nss-tools >/dev/null 2>&1 || true
+        elif need_cmd yum; then
+            $SUDO yum install -y -q nss-tools >/dev/null 2>&1 || true
+        fi
+    fi
+
+    if need_cmd certutil; then
+        # Standard Chrome/Chromium path; also covers Brave, Edge on Linux
+        local nss_dirs=("$HOME/.pki/nssdb" "$HOME/.local/share/pki/nssdb")
+        local found=false
+        # Use an empty password file to avoid interactive prompts
+        local nss_pass
+        nss_pass="$(mktemp)"
+        printf '' > "$nss_pass"
+        for nssdb in "${nss_dirs[@]}"; do
+            # Create the NSS db if it doesn't exist yet (happens before first Chrome launch)
+            if [ ! -d "$nssdb" ]; then
+                mkdir -p "$nssdb"
+                certutil -d "sql:$nssdb" -N --empty-password >/dev/null 2>&1 || continue
+            fi
+            # Remove any previous import of this cert, then re-add
+            certutil -d "sql:$nssdb" -D -n "Centralized" -f "$nss_pass" >/dev/null 2>&1 || true
+            if certutil -d "sql:$nssdb" -A -n "Centralized" -t "CT,," -i "$cert" -f "$nss_pass" >/dev/null 2>&1; then
+                ok "Certificate trusted in Chrome NSS db ($nssdb)"
+                found=true
+            fi
+        done
+        rm -f "$nss_pass"
+        $found || warn "certutil: no NSS db found — open Chrome once, then re-run update.sh"
+    else
+        warn "certutil not available — Chrome may not trust the cert (restart Chrome after adding cert manually)"
+    fi
+}
+
 setup_ssl() {
     local ssl_dir="$INSTALL_DIR/ssl"
     mkdir -p "$ssl_dir"
@@ -351,6 +414,7 @@ setup_ssl() {
     if [ -f "$ssl_dir/cert.pem" ] && [ -f "$ssl_dir/key.pem" ]; then
         if openssl x509 -checkend 2592000 -noout -in "$ssl_dir/cert.pem" >/dev/null 2>&1; then
             ok "SSL certificate valid — $(openssl x509 -enddate -noout -in "$ssl_dir/cert.pem" 2>/dev/null | cut -d= -f2)"
+            trust_ssl_cert "$ssl_dir/cert.pem"
             SSL_ENABLED=true; return
         fi
         warn "SSL certificate expiring soon — will regenerate"
@@ -374,6 +438,7 @@ setup_ssl() {
 
     mkdir -p "$INSTALL_DIR/logs"
     _ssl_setup_renewal "$ssl_dir" "$mode" "${_SSL_DOMAIN:-}"
+    trust_ssl_cert "$ssl_dir/cert.pem"
     SSL_ENABLED=true
 }
 
