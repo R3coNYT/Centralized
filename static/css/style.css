@@ -46,7 +46,7 @@ body {
 }
 
 .sidebar .nav-link {
-  color: #c0c8d0;
+  color: #c0c8d0 !important;
   border-radius: 8px;
   padding: 8px 12px;
   font-size: .875rem;
@@ -56,12 +56,12 @@ body {
 .sidebar .nav-link:hover,
 .sidebar .nav-link.active {
   background-color: rgba(255, 255, 255, 0.08);
-  color: #fff;
+  color: #fff !important;
 }
 
 .sidebar .nav-link.active {
   background-color: rgba(13, 110, 253, 0.25);
-  color: #4d94ff;
+  color: #4d94ff !important;
 }
 
 .nav-section-label {
@@ -303,6 +303,18 @@ code {
   margin-left: var(--sidebar-collapsed-width);
 }
 
+/* ── btn-outline-secondary: accessible text on dark card backgrounds ── */
+
+.btn-outline-secondary {
+  color: #9da5ae !important;
+  border-color: #9da5ae !important;
+}
+.btn-outline-secondary:hover,
+.btn-outline-secondary:active,
+.btn-outline-secondary.active {
+  color: #fff !important;
+}
+
 /* ── Responsive ──────────────────────────────────────────── */
 
 @media (max-width: 768px) {
@@ -392,7 +404,7 @@ html[data-glass="1"] .sidebar .nav-link.active {
   border: 1px solid rgba(13,110,253,0.38) !important;
 }
 
-/* ── Glass: ensure sufficient contrast on btn-outline-secondary ── */
+/* ── Glass: btn-outline-secondary ── */
 html[data-glass="1"] .btn-outline-secondary {
   color: #c0c8d0 !important;
   border-color: rgba(192,200,208,0.55) !important;
@@ -459,14 +471,15 @@ html[data-glass="1"] .input-group-text {
 
 /* ── 7. Buttons ─────────────────────────────────────────────── */
 html[data-glass="1"] .btn-primary {
-  background: rgba(13,110,253,0.48) !important;
-  border-color: rgba(13,110,253,0.68) !important;
+  background: rgba(13,110,253,0.85) !important;
+  border-color: rgba(13,110,253,0.92) !important;
+  color: #fff !important;
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   box-shadow: 0 0 18px rgba(13,110,253,0.28) !important;
 }
 html[data-glass="1"] .btn-primary:hover {
-  background: rgba(13,110,253,0.65) !important;
+  background: rgba(13,110,253,0.95) !important;
   box-shadow: 0 0 24px rgba(13,110,253,0.42) !important;
 }
 html[data-glass="1"] .btn-secondary {
@@ -542,10 +555,10 @@ html[data-glass="1"] .badge {
   -webkit-backdrop-filter: blur(10px) saturate(160%);
   border: 1px solid rgba(255,255,255,0.20) !important;
 }
-html[data-glass="1"] .badge.bg-primary    { background: rgba(13,110,253,0.44) !important; }
+html[data-glass="1"] .badge.bg-primary    { background: rgba(13,110,253,0.88) !important; color: #fff !important; }
 html[data-glass="1"] .badge.bg-secondary  { background: rgba(108,117,125,0.38) !important; }
 html[data-glass="1"] .badge.bg-success    { background: rgba(25,135,84,0.46) !important; }
-html[data-glass="1"] .badge.bg-danger     { background: rgba(220,53,69,0.46) !important; }
+html[data-glass="1"] .badge.bg-danger     { background: rgba(220,53,69,0.88) !important; color: #fff !important; }
 html[data-glass="1"] .badge.bg-warning    { background: rgba(255,193,7,0.50) !important; }
 html[data-glass="1"] .badge.bg-info       { background: rgba(13,202,240,0.38) !important; }
 html[data-glass="1"] .badge.bg-dark       { background: rgba(33,37,41,0.50) !important; }
