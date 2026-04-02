@@ -148,6 +148,12 @@
     <h1 class="h5 mb-0 fw-semibold">{% block page_title %}{% endblock %}</h1>
     <div class="d-flex gap-2 align-items-center">
       {% block topbar_actions %}{% endblock %}
+      <!-- PWA install button — hidden until browser fires beforeinstallprompt -->
+      <button id="pwa-install-btn" type="button"
+              class="btn btn-sm btn-outline-secondary d-none"
+              title="Installer l'application">
+        <i class="bi bi-download me-1"></i>Installer
+      </button>
     </div>
   </div>
 
@@ -176,9 +182,38 @@
 <script src="{{ url_for('static', filename='js/app.js') }}"></script>
 {% block scripts %}{% endblock %}
 
-<!-- ── PWA — Service Worker registration ───────────────────────────────── -->
+<!-- ── PWA — Service Worker registration & install prompt ────────────── -->
 <script>
 (function () {
+  /* ── Install prompt ── */
+  var deferredPrompt = null;
+  var installBtn = document.getElementById('pwa-install-btn');
+
+  window.addEventListener('beforeinstallprompt', function (e) {
+    e.preventDefault();          /* stop the mini-infobar on mobile */
+    deferredPrompt = e;
+    if (installBtn) installBtn.classList.remove('d-none');
+  });
+
+  if (installBtn) {
+    installBtn.addEventListener('click', function () {
+      if (!deferredPrompt) return;
+      deferredPrompt.prompt();
+      deferredPrompt.userChoice.then(function (choice) {
+        console.debug('[PWA] Install choice:', choice.outcome);
+        deferredPrompt = null;
+        installBtn.classList.add('d-none');
+      });
+    });
+  }
+
+  /* Hide the button once already installed */
+  window.addEventListener('appinstalled', function () {
+    if (installBtn) installBtn.classList.add('d-none');
+    deferredPrompt = null;
+  });
+
+  /* ── Service Worker ── */
   if (!('serviceWorker' in navigator)) return;
   window.addEventListener('load', function () {
     navigator.serviceWorker.register('/sw.js', { scope: '/' })
@@ -190,7 +225,6 @@
           var newWorker = reg.installing;
           newWorker.addEventListener('statechange', function () {
             if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-              /* A new version is ready — show a non-intrusive toast if available */
               var toastEl = document.getElementById('pwa-update-toast');
               if (toastEl && window.bootstrap) {
                 new bootstrap.Toast(toastEl, { autohide: false }).show();
