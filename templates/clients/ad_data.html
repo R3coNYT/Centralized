@@ -96,7 +96,7 @@
       <div class="card-body text-center py-3">
         <i class="bi {{ icon }} {{ color }} fs-4 mb-2 d-block"></i>
         <div class="fw-bold fs-4">{{ value }}</div>
-        <div class="text-muted" style="font-size:.72rem">{{ label }}</div>
+        <div class="text-muted" style="font-size:.8rem">{{ label }}</div>
       </div>
     </div>
   </div>
@@ -171,7 +171,7 @@
     <i class="bi bi-clipboard2-data-fill text-info"></i>
     All Indicators
     <span class="badge bg-secondary ms-1" style="font-size:.65rem">from AD-Miner</span>
-    <span class="ms-auto d-flex gap-2 align-items-center" style="font-size:.72rem">
+    <span class="ms-auto d-flex gap-2 align-items-center" style="font-size:.8rem">
       {% set red_count    = namespace(n=0) %}
       {% set orange_count = namespace(n=0) %}
       {% set yellow_count = namespace(n=0) %}
@@ -329,8 +329,8 @@
                style="background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.12);"
                title="{{ desc }}">
             <i class="bi {{ icon }} text-warning d-block mb-1"></i>
-            <div style="font-size:.72rem" class="fw-semibold">{{ label }}</div>
-            <div class="text-muted" style="font-size:.65rem; line-height:1.3">{{ desc }}</div>
+            <div style="font-size:.8rem" class="fw-semibold">{{ label }}</div>
+            <div class="text-muted" style="font-size:.75rem; line-height:1.3">{{ desc }}</div>
           </div>
         </div>
         {% if not loop.last %}

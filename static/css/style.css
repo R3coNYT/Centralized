@@ -6,6 +6,7 @@
   --sidebar-width: 220px;
   --sidebar-collapsed-width: 56px;
   --topbar-height: 56px;
+  --text-muted-accessible: #9ba3af;
   --bg-card: #1a1d23;
   --bg-surface: #13161b;
   --border-color: rgba(255, 255, 255, 0.07);
@@ -45,7 +46,7 @@ body {
 }
 
 .sidebar .nav-link {
-  color: #adb5bd;
+  color: #c0c8d0;
   border-radius: 8px;
   padding: 8px 12px;
   font-size: .875rem;
@@ -68,7 +69,7 @@ body {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: .08em;
-  color: #495057;
+  color: #6e7d8f;
   margin-top: .25rem;
 }
 
@@ -166,7 +167,7 @@ body {
 /* ── Severity Badges ─────────────────────────────────────── */
 
 .sev-critical  { background-color: #dc3545 !important; color: #fff !important; }
-.sev-high      { background-color: #fd7e14 !important; color: #fff !important; }
+.sev-high      { background-color: #fd7e14 !important; color: #1a0900 !important; }
 .sev-medium    { background-color: #ffc107 !important; color: #212529 !important; }
 .sev-low       { background-color: #0dcaf0 !important; color: #212529 !important; }
 .sev-info      { background-color: #6c757d !important; color: #fff !important; }
@@ -389,6 +390,16 @@ html[data-glass="1"] .sidebar .nav-link:hover {
 html[data-glass="1"] .sidebar .nav-link.active {
   background: rgba(13,110,253,0.32) !important;
   border: 1px solid rgba(13,110,253,0.38) !important;
+}
+
+/* ── Glass: ensure sufficient contrast on btn-outline-secondary ── */
+html[data-glass="1"] .btn-outline-secondary {
+  color: #c0c8d0 !important;
+  border-color: rgba(192,200,208,0.55) !important;
+}
+html[data-glass="1"] .btn-outline-secondary:hover {
+  color: #fff !important;
+  background: rgba(192,200,208,0.18) !important;
 }
 
 /* ── 4. Tables ─────────────────────────────────────────────── */
