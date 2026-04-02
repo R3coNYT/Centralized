@@ -255,7 +255,7 @@ code {
 /* ── Sidebar Collapsed ───────────────────────────────────── */
 
 .sidebar-toggle-btn {
-  opacity: .55;
+  opacity: 1;
   line-height: 1;
   color: #ffffff;
 }
