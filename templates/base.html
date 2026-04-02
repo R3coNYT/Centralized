@@ -20,12 +20,12 @@
 <!-- Sidebar -->
 <div class="sidebar d-flex flex-column flex-shrink-0 p-3" id="sidebar">
   <div class="d-flex align-items-center mb-4">
-    <a href="{{ url_for('dashboard.index') }}" class="sidebar-brand d-flex align-items-center text-decoration-none flex-grow-1 overflow-hidden">
-      <i class="bi bi-shield-lock-fill text-primary fs-4 flex-shrink-0"></i>
-      <span class="fw-bold fs-5 ms-2 sidebar-brand-label">Centralized</span>
+    <a href="{{ url_for('dashboard.index') }}" class="sidebar-brand d-flex align-items-center text-decoration-none flex-grow-1 overflow-hidden" aria-label="Centralized">
+      <i class="bi bi-shield-lock-fill text-primary fs-4 flex-shrink-0" aria-hidden="true"></i>
+      <span class="fw-bold fs-5 ms-2 sidebar-brand-label" aria-hidden="true">Centralized</span>
     </a>
-    <button class="sidebar-toggle-btn btn btn-link p-0 ms-2 flex-shrink-0" id="sidebar-toggle-btn" title="Toggle sidebar">
-      <i class="bi bi-chevron-left sidebar-toggle-icon"></i>
+    <button class="sidebar-toggle-btn btn btn-link p-0 ms-2 flex-shrink-0" id="sidebar-toggle-btn" aria-label="Toggle sidebar">
+      <i class="bi bi-chevron-left sidebar-toggle-icon" aria-hidden="true"></i>
     </button>
   </div>
 
@@ -109,8 +109,8 @@
       <a href="{{ url_for('admin.update_page') }}"
          id="sidebar-update-link"
          class="nav-link d-flex align-items-center {% if request.endpoint == 'admin.update_page' %}active{% endif %}"
-         title="Update">
-        <i class="bi bi-arrow-repeat flex-shrink-0" id="sidebar-update-icon"></i><span class="nav-label ms-2">Update</span>
+         aria-label="Update">
+        <i class="bi bi-arrow-repeat flex-shrink-0" id="sidebar-update-icon" aria-hidden="true"></i><span class="nav-label ms-2" aria-hidden="true">Update</span>
         <span id="sidebar-update-badge"
               class="badge bg-warning text-dark ms-auto d-none nav-label"
               style="font-size:.65rem">!</span>
@@ -134,7 +134,7 @@
 </div>
 
 <!-- Main content -->
-<div class="main-content">
+<main class="main-content">
   <div class="topbar d-flex align-items-center justify-content-between px-4 py-2 mb-4">
     <h1 class="h5 mb-0 fw-semibold">{% block page_title %}{% endblock %}</h1>
     <div class="d-flex gap-2 align-items-center">
@@ -157,7 +157,7 @@
 
     {% block content %}{% endblock %}
   </div>
-</div>
+</main>
 
 <!-- Bootstrap JS -->
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
