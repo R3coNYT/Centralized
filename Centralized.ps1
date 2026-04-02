@@ -310,6 +310,15 @@ function New-SslCertPem {
 
     New-Item -ItemType Directory -Path $SslDir -Force | Out-Null
 
+    # Detect the machine's LAN IP to add to the certificate SAN so the
+    # site is reachable from other devices on the local network.
+    $LanIp = (Get-NetIPAddress -AddressFamily IPv4 |
+        Where-Object { $_.IPAddress -ne '127.0.0.1' -and $_.PrefixOrigin -ne 'WellKnown' } |
+        Sort-Object -Property InterfaceIndex |
+        Select-Object -First 1 -ExpandProperty IPAddress)
+    $San = "DNS:localhost,IP:127.0.0.1"
+    if ($LanIp) { $San = "$San,IP:$LanIp" }
+
     $CfgPath = Join-Path $env:TEMP "centralized_ssl.cnf"
     @"
 [req]
@@ -321,7 +330,7 @@ x509_extensions    = san
 CN = localhost
 O  = Centralized
 [san]
-subjectAltName = DNS:localhost,IP:127.0.0.1
+subjectAltName = $San
 "@ | Set-Content -Path $CfgPath -Encoding ASCII
 
     $KeyPem  = Join-Path $SslDir "key.pem"
@@ -334,7 +343,8 @@ subjectAltName = DNS:localhost,IP:127.0.0.1
     Remove-Item $CfgPath -Force -ErrorAction SilentlyContinue
 
     if ((Test-Path $KeyPem) -and (Test-Path $CertPem)) {
-        Write-Ok "Self-signed certificate generated (valid 365 days)"
+        $msg = if ($LanIp) { "(localhost + $LanIp, valid 365 days)" } else { "(localhost, valid 365 days)" }
+        Write-Ok "Self-signed certificate generated $msg"
         return $true
     }
     Write-Warn "Certificate generation failed — Centralized will run over HTTP"
@@ -368,18 +378,10 @@ try {
 } catch { Log "Could not read cert — regenerating" }
 
 `$cfg = `$env:TEMP + '\cent_ssl_renew.cnf'
-@'
-[req]
-default_bits=2048
-prompt=no
-distinguished_name=dn
-x509_extensions=san
-[dn]
-CN=localhost
-O=Centralized
-[san]
-subjectAltName=DNS:localhost,IP:127.0.0.1
-'@ | Set-Content -Path `$cfg -Encoding ASCII
+# Re-detect LAN IP at renewal time so the cert stays valid even after a network change
+`$lan = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { `$_.IPAddress -ne '127.0.0.1' -and `$_.PrefixOrigin -ne 'WellKnown' } | Sort-Object InterfaceIndex | Select-Object -First 1 -ExpandProperty IPAddress)
+`$san = if (`$lan) { "DNS:localhost,IP:127.0.0.1,IP:`$lan" } else { "DNS:localhost,IP:127.0.0.1" }
+"[req]`ndefault_bits=2048`nprompt=no`ndistinguished_name=dn`nx509_extensions=san`n[dn]`nCN=localhost`nO=Centralized`n[san]`nsubjectAltName=`$san" | Set-Content -Path `$cfg -Encoding ASCII
 
 & "`$OpenSsl" req -x509 -nodes -days 365 -newkey rsa:2048 ``
     -keyout "`$SslDir\key.pem" -out "`$SslDir\cert.pem" ``
@@ -495,6 +497,19 @@ function Main {
     New-Launcher
     Update-UserPath
     $hasSsl = Setup-Ssl -InstallDir $InstallDir
+
+    # Open the app port in Windows Firewall so other devices can reach the site
+    $FwRuleName = "Centralized HTTPS $AppPort"
+    $existing   = Get-NetFirewallRule -DisplayName $FwRuleName -ErrorAction SilentlyContinue
+    if (-not $existing) {
+        New-NetFirewallRule -DisplayName $FwRuleName `
+            -Direction Inbound -Protocol TCP -LocalPort $AppPort `
+            -Action Allow -Profile Any | Out-Null
+        Write-Ok "Firewall rule added: allow inbound TCP $AppPort"
+    } else {
+        Write-Ok "Firewall rule already present: $FwRuleName"
+    }
+
     Install-CentralizedTask
 
     Write-Done -HasSsl $hasSsl

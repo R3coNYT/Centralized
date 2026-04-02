@@ -462,6 +462,26 @@ EOF
     fi
 }
 
+# ── Open firewall port ─────────────────────────────────────────────────────────────────────────
+
+open_firewall_port() {
+    local port="$APP_PORT"
+    if [ "$PLATFORM" != "linux" ]; then return; fi
+
+    if need_cmd ufw; then
+        if $SUDO ufw status 2>/dev/null | grep -q 'Status: active'; then
+            $SUDO ufw allow "$port"/tcp >/dev/null 2>&1
+            ok "ufw: allowed TCP $port"
+        fi
+    elif need_cmd firewall-cmd; then
+        if $SUDO firewall-cmd --state 2>/dev/null | grep -q running; then
+            $SUDO firewall-cmd --permanent --add-port="$port"/tcp >/dev/null 2>&1
+            $SUDO firewall-cmd --reload >/dev/null 2>&1
+            ok "firewall-cmd: allowed TCP $port"
+        fi
+    fi
+}
+
 # ── Final summary ─────────────────────────────────────────────────────────────
 
 print_done() {
@@ -520,6 +540,7 @@ main() {
     if [ "$PLATFORM" = "linux" ]; then
         create_global_command_linux
         create_systemd_service
+        open_firewall_port
     else
         create_global_command_macos
     fi

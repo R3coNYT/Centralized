@@ -248,8 +248,10 @@ if __name__ == "__main__":
 
     if _has_ssl:
         print(f"[Centralized] HTTPS enabled  →  https://0.0.0.0:{_port}")
+        # threaded=True lets Werkzeug handle each request in its own thread,
+        # avoiding the single-threaded bottleneck of the dev server.
         application.run(host="0.0.0.0", port=_port, debug=False,
-                        ssl_context=(_cert, _key))
+                        threaded=True, ssl_context=(_cert, _key))
     else:
         try:
             from waitress import serve
