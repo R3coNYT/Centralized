@@ -437,17 +437,19 @@
                       {% if s.commands %}
                       <div class="mt-3 d-flex flex-column gap-2">
                         {% for cmd in s.commands %}
-                        <div class="rounded" style="border:1px solid rgba(255,255,255,.15);max-width:100%;overflow:hidden">
+                        <div style="border:1px solid rgba(255,255,255,.15);border-radius:.375rem">
                           <div class="d-flex justify-content-between align-items-center px-3 py-1"
-                               style="background:rgba(255,255,255,.07)">
+                               style="background:rgba(255,255,255,.07);border-radius:.375rem .375rem 0 0">
                             <span class="small fw-semibold text-muted font-monospace">{{ cmd.label }}</span>
                             <button class="btn btn-sm btn-link p-0 text-muted" title="Copy"
                                     onclick="copyAdBlock(this)">
                               <i class="bi bi-clipboard"></i>
                             </button>
                           </div>
-                          <pre class="mb-0 px-3 py-2 small text-success"
-                               style="background:#0d1117;overflow-x:auto;white-space:pre;line-height:1.6;max-width:100%;word-break:normal"><code>{{ cmd.code }}</code></pre>
+                          <div style="overflow-x:auto;border-radius:0 0 .375rem .375rem">
+                            <pre class="mb-0 px-3 py-2 small text-success"
+                                 style="background:#0d1117;white-space:pre;line-height:1.6;min-width:max-content;margin:0;border-radius:0 0 .375rem .375rem"><code>{{ cmd.code }}</code></pre>
+                          </div>
                         </div>
                         {% endfor %}
                       </div>
@@ -733,19 +735,6 @@ function copyAdBlock(btn) {
       },
     });
   }
-
-  // AD-Miner iframe — reload on first open so D3 can compute dimensions
-  (function () {
-    var pane = document.getElementById('adminerPane');
-    if (!pane) return;
-    pane.addEventListener('shown.bs.collapse', function () {
-      var iframe = document.getElementById('adminer-iframe');
-      if (iframe && !iframe.dataset.loaded) {
-        iframe.src = iframe.src;
-        iframe.dataset.loaded = 'true';
-      }
-    }, { once: true });
-  })();
 
   // Donut chart — findings by severity (only if canvas exists)
   const donutEl = document.getElementById('sevDonut');
