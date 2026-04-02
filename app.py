@@ -74,6 +74,23 @@ def create_app():
         resp.headers['Content-Type']  = 'application/manifest+json'
         resp.headers['Cache-Control'] = 'public, max-age=86400'
         return resp
+
+    @app.route('/ssl/cert.pem')
+    def pwa_ssl_cert():
+        """Serve the self-signed CA cert so users can install it as a trusted root."""
+        import os as _os
+        cert_path = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), 'ssl', 'cert.pem')
+        if not _os.path.isfile(cert_path):
+            return '', 404
+        resp = make_response(send_from_directory(
+            _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), 'ssl'),
+            'cert.pem'
+        ))
+        # application/x-x509-ca-cert prompts "install certificate" in most browsers/OS
+        resp.headers['Content-Type']        = 'application/x-x509-ca-cert'
+        resp.headers['Content-Disposition'] = 'attachment; filename="centralized-ca.crt"'
+        resp.headers['Cache-Control']       = 'no-store'
+        return resp
     # ────────────────────────────────────────────────────────────────────────
 
     # Inject theme CSS and tool availability into every template
