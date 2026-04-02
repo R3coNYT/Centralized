@@ -1,4 +1,4 @@
-from flask import Flask
+from flask import Flask, send_from_directory, make_response
 import os
 import shutil
 from extensions import db, login_manager, csrf
@@ -53,6 +53,28 @@ def create_app():
     app.register_blueprint(autorecon_results_bp)
     app.register_blueprint(autorecon_launch_bp)
     app.register_blueprint(ad_miner_bp)
+
+    # ── PWA routes ───────────────────────────────────────────────────────────
+    # Service worker MUST be served from the root scope to control all pages.
+    @app.route('/sw.js')
+    def pwa_sw():
+        resp = make_response(
+            send_from_directory(app.static_folder, 'sw.js')
+        )
+        resp.headers['Content-Type']  = 'application/javascript'
+        resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+        resp.headers['Service-Worker-Allowed'] = '/'
+        return resp
+
+    @app.route('/manifest.json')
+    def pwa_manifest():
+        resp = make_response(
+            send_from_directory(app.static_folder, 'manifest.json')
+        )
+        resp.headers['Content-Type']  = 'application/manifest+json'
+        resp.headers['Cache-Control'] = 'public, max-age=86400'
+        return resp
+    # ────────────────────────────────────────────────────────────────────────
 
     # Inject theme CSS and tool availability into every template
     from routes.admin import get_all_settings, build_theme_css
