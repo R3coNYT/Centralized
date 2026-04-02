@@ -345,6 +345,14 @@ function Update-Ssl {
 
     New-Item -ItemType Directory -Path $SslDir -Force | Out-Null
 
+    # Detect LAN IP so the regenerated cert is valid from network devices too
+    $LanIp = (Get-NetIPAddress -AddressFamily IPv4 |
+        Where-Object { $_.IPAddress -ne '127.0.0.1' -and $_.PrefixOrigin -ne 'WellKnown' } |
+        Sort-Object -Property InterfaceIndex |
+        Select-Object -First 1 -ExpandProperty IPAddress)
+    $San = "DNS:localhost,IP:127.0.0.1"
+    if ($LanIp) { $San = "$San,IP:$LanIp" }
+
     $CfgPath = Join-Path $env:TEMP "centralized_ssl.cnf"
     @"
 [req]
@@ -356,7 +364,7 @@ x509_extensions    = san
 CN = localhost
 O  = Centralized
 [san]
-subjectAltName = DNS:localhost,IP:127.0.0.1
+subjectAltName = $San
 "@ | Set-Content -Path $CfgPath -Encoding ASCII
 
     & $OpenSsl req -x509 -nodes -days 365 -newkey rsa:2048 `
