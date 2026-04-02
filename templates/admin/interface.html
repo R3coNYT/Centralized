@@ -267,7 +267,11 @@ function applyPreview() {
   const nav = document.getElementById('previewNav');
   if (nav) {
     nav.style.backgroundColor = `rgba(${r},${g},${b},0.25)`;
-    nav.style.color = accent;
+    // Use a lightened version of the accent so it passes contrast on dark bg
+    const navR = Math.min(255, Math.round(r * 0.4 + 255 * 0.6));
+    const navG = Math.min(255, Math.round(g * 0.4 + 255 * 0.6));
+    const navB = Math.min(255, Math.round(b * 0.4 + 255 * 0.6));
+    nav.style.color = toHex(navR, navG, navB);
   }
 
   document.querySelectorAll('.btn-primary').forEach(btn => {
