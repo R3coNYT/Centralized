@@ -20,14 +20,16 @@ const PRECACHE_URLS = [
 /* ── Install ──────────────────────────────────────────── */
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(STATIC_CACHE).then((cache) =>
-      cache.addAll(
-        PRECACHE_URLS.filter(async (url) => {
-          try { await fetch(url, { method: 'HEAD' }); return true; }
-          catch { return false; }
-        })
-      )
-    ).then(() => self.skipWaiting())
+    caches.open(STATIC_CACHE).then(async (cache) => {
+      /* Cache each URL individually so a single 404 doesn't abort the whole install */
+      for (const url of PRECACHE_URLS) {
+        try {
+          await cache.add(url);
+        } catch (e) {
+          console.warn('[SW] Skipping precache for:', url, e.message);
+        }
+      }
+    }).then(() => self.skipWaiting())
   );
 });
 
