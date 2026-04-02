@@ -258,7 +258,7 @@ function downloadTrustScript() {
 
 <!-- ── PWA — SSL certificate trust toast ──────────────────────────────────── -->
 <div class="position-fixed bottom-0 end-0 p-3" style="z-index:2001">
-  <div id="pwa-ssl-toast" class="toast align-items-center text-bg-warning border-0"
+  <div id="pwa-ssl-toast" class="toast align-items-center toast-bg-warning border-0"
        role="alert" aria-live="assertive" aria-atomic="true">
     <div class="d-flex">
       <div class="toast-body" style="font-size:.85rem">
@@ -269,7 +269,7 @@ function downloadTrustScript() {
           <i class="bi bi-shield-check me-1"></i>Trust this certificate
         </button>
         <small class="d-block mt-1 text-dark">
-          Downloads <code>trust-centralized.ps1</code> (Windows) or <code>trust-centralized.sh</code> (Linux).<br>
+          Downloads <code class="code-crt">trust-centralized.ps1</code> (Windows) or <code class="code-crt">trust-centralized.sh</code> (Linux).<br>
           Run it with admin/sudo rights, then restart Chrome.
         </small>
       </div>
