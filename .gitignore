@@ -17,6 +17,7 @@ centralized.db-shm
 centralized.db-wal
 uploads/
 backups/
+ssl/
 
 # ── Local config overrides ───────────────────────────────
 .env

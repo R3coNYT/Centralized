@@ -238,5 +238,22 @@ def _seed_admin():
 
 
 if __name__ == "__main__":
-    application = create_app()
-    application.run(host="0.0.0.0", port=5000, debug=False)
+    import os as _os
+    application  = create_app()
+    _base        = _os.path.dirname(_os.path.abspath(__file__))
+    _cert        = _os.path.join(_base, "ssl", "cert.pem")
+    _key         = _os.path.join(_base, "ssl", "key.pem")
+    _port        = int(_os.environ.get("CENTRALIZED_PORT", 5000))
+    _has_ssl     = _os.path.isfile(_cert) and _os.path.isfile(_key)
+
+    if _has_ssl:
+        print(f"[Centralized] HTTPS enabled  →  https://0.0.0.0:{_port}")
+        application.run(host="0.0.0.0", port=_port, debug=False,
+                        ssl_context=(_cert, _key))
+    else:
+        try:
+            from waitress import serve
+            print(f"[Centralized] Serving via waitress  →  http://0.0.0.0:{_port}")
+            serve(application, host="0.0.0.0", port=_port)
+        except ImportError:
+            application.run(host="0.0.0.0", port=_port, debug=False)
