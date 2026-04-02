@@ -261,8 +261,8 @@ code {
 }
 
 .sidebar-toggle-btn:hover {
-  opacity: 1;
-  color: #eeeeee !important;
+  opacity: 0.55;
+  color: #ffffff !important;
 }
 
 .sidebar-toggle-icon {
