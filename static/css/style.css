@@ -705,6 +705,9 @@ html[data-glass="1"] code {
   background-color: rgba(233,190,255,0.12) !important;
   border: 1px solid rgba(233,190,255,0.14) !important;
 }
+html[data-glass="1"] .code-crt {
+  background-color: rgba(115,68,139,0.7) !important;
+}
 
 /* ── 18. Chart.js canvas — transparent, glass shines through ── */
 html[data-glass="1"] canvas {
@@ -734,6 +737,9 @@ html[data-glass="1"] .toast {
 html[data-glass="1"] .toast-header {
   background: rgba(255,255,255,0.05) !important;
   border-bottom-color: rgba(255,255,255,0.09) !important;
+}
+html[data-glass="1"] .toast-bg-warning {
+  background: rgba(255,193,7,0.7) !important;
 }
 
 /* ── 20. Drop zone ──────────────────────────────────────────── */
