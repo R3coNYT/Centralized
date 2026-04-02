@@ -652,6 +652,13 @@ html[data-glass="1"] pre {
   -webkit-backdrop-filter: blur(10px);
   border: 1px solid rgba(255,255,255,0.08) !important;
 }
+/* Finding remediation command blocks — fully opaque so code is readable */
+html[data-glass="1"] pre.text-success {
+  background: #0d1117 !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  border: none !important;
+}
 html[data-glass="1"] code {
   background-color: rgba(233,190,255,0.12) !important;
   border: 1px solid rgba(233,190,255,0.14) !important;
