@@ -304,6 +304,73 @@ function Start-CentralizedService {
     }
 }
 
+# -- SSL certificate check / renewal -----------------------------------------
+
+function Update-Ssl {
+    param([string]$InstallDir)
+
+    $SslDir  = Join-Path $InstallDir "ssl"
+    $CertPem = Join-Path $SslDir "cert.pem"
+    $KeyPem  = Join-Path $SslDir "key.pem"
+
+    # Check if a valid cert is present (> 30 days remaining)
+    if ((Test-Path $CertPem) -and (Test-Path $KeyPem)) {
+        try {
+            $cert = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($CertPem)
+            if ($cert.NotAfter -gt (Get-Date).AddDays(30)) {
+                Write-Ok "SSL certificate valid until $($cert.NotAfter.ToString('yyyy-MM-dd'))"
+                return
+            }
+            Write-Warn "SSL certificate expires $($cert.NotAfter.ToString('yyyy-MM-dd')) — regenerating"
+        } catch {
+            Write-Warn "Could not read SSL certificate — will regenerate"
+        }
+    } else {
+        Write-Log "No SSL certificate found — generating self-signed"
+    }
+
+    # Locate openssl.exe (Git for Windows)
+    $OpenSsl = $null
+    foreach ($c in @("C:\Program Files\Git\usr\bin\openssl.exe", "C:\Program Files (x86)\Git\usr\bin\openssl.exe")) {
+        if (Test-Path $c) { $OpenSsl = $c; break }
+    }
+    if (-not $OpenSsl) {
+        $cmd = Get-Command openssl -ErrorAction SilentlyContinue
+        if ($cmd) { $OpenSsl = $cmd.Source }
+    }
+    if (-not $OpenSsl) {
+        Write-Warn "openssl.exe not found — SSL setup skipped"
+        return
+    }
+
+    New-Item -ItemType Directory -Path $SslDir -Force | Out-Null
+
+    $CfgPath = Join-Path $env:TEMP "centralized_ssl.cnf"
+    @"
+[req]
+default_bits       = 2048
+prompt             = no
+distinguished_name = dn
+x509_extensions    = san
+[dn]
+CN = localhost
+O  = Centralized
+[san]
+subjectAltName = DNS:localhost,IP:127.0.0.1
+"@ | Set-Content -Path $CfgPath -Encoding ASCII
+
+    & $OpenSsl req -x509 -nodes -days 365 -newkey rsa:2048 `
+        -keyout $KeyPem -out $CertPem `
+        -config $CfgPath 2>$null
+    Remove-Item $CfgPath -Force -ErrorAction SilentlyContinue
+
+    if ((Test-Path $CertPem) -and (Test-Path $KeyPem)) {
+        Write-Ok "SSL certificate generated (365 days)"
+    } else {
+        Write-Warn "SSL certificate generation failed"
+    }
+}
+
 # -- Summary -------------------------------------------------------------------
 
 function Print-Done {
@@ -321,7 +388,8 @@ function Print-Done {
     Write-Host "  Your clients, audits and uploaded files are intact."
     Write-Host ""
     if ($ServicePresent) {
-        Write-Host "  Task restarted -> http://127.0.0.1:5000" -ForegroundColor Cyan
+        $scheme = if (Test-Path (Join-Path $InstallDir "ssl\cert.pem")) { "https" } else { "http" }
+        Write-Host "  Task restarted -> ${scheme}://127.0.0.1:5000" -ForegroundColor Cyan
     } else {
         Write-Host "  Restart the app to apply changes:"
         Write-Host "    C:\Tools\Centralized\centralized.bat" -ForegroundColor Cyan
@@ -348,6 +416,7 @@ $Commit     = Update-Git          -InstallDir $InstallDir
 Restore-Data                      -InstallDir $InstallDir -BackupDir $BackupDir
 $VenvPython = Update-Dependencies -InstallDir $InstallDir
 Apply-DbMigrations -VenvPython $VenvPython -InstallDir $InstallDir
+Update-Ssl         -InstallDir $InstallDir
 Prune-Backups      -InstallDir $InstallDir
 
 # Restart the scheduled task (always, whether the update was triggered from CLI or web UI)

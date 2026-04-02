@@ -232,6 +232,77 @@ $USER ALL=(ALL) NOPASSWD: $systemctl_path restart centralized"
     fi
 }
 
+# ── SSL certificate check / renewal ───────────────────────────────────────────────────
+
+ensure_ssl() {
+    local ssl_dir="$INSTALL_DIR/ssl"
+    mkdir -p "$ssl_dir"
+    chmod 700 "$ssl_dir"
+
+    # Check if a valid cert exists (more than 30 days remaining)
+    if [ -f "$ssl_dir/cert.pem" ] && [ -f "$ssl_dir/key.pem" ]; then
+        if openssl x509 -checkend 2592000 -noout -in "$ssl_dir/cert.pem" >/dev/null 2>&1; then
+            local expiry
+            expiry="$(openssl x509 -enddate -noout -in "$ssl_dir/cert.pem" 2>/dev/null | cut -d= -f2)"
+            ok "SSL certificate valid (expires: $expiry)"
+            return
+        fi
+        warn "SSL certificate expiring within 30 days"
+    else
+        log "No SSL certificate found — generating self-signed"
+    fi
+
+    # If the existing cert was issued by Let\'s Encrypt, try certbot renew first
+    if [ -f "$ssl_dir/cert.pem" ] && \
+       openssl x509 -issuer -noout -in "$ssl_dir/cert.pem" 2>/dev/null | grep -qi "let.*encrypt"; then
+        log "Detected Let's Encrypt certificate — running certbot renew"
+        local domain
+        domain="$(openssl x509 -subject -noout -in "$ssl_dir/cert.pem" 2>/dev/null | \
+            sed 's/.*CN[[:space:]]*=[[:space:]]*\([^,/]*\).*/\1/')"
+        if [ -n "$domain" ] && $SUDO certbot renew --quiet --cert-name "$domain" 2>/dev/null; then
+            $SUDO cp "/etc/letsencrypt/live/$domain/fullchain.pem" "$ssl_dir/cert.pem"
+            $SUDO cp "/etc/letsencrypt/live/$domain/privkey.pem"   "$ssl_dir/key.pem"
+            $SUDO chown "$USER:$USER" "$ssl_dir/cert.pem" "$ssl_dir/key.pem"
+            chmod 600 "$ssl_dir/key.pem"
+            ok "Let's Encrypt certificate renewed for $domain"
+            return
+        fi
+        warn "certbot renew failed — falling back to self-signed"
+    fi
+
+    # Generate / regenerate a self-signed certificate
+    local ip="" san cfg
+    if [ "$PLATFORM" = "linux" ]; then
+        ip="$(hostname -I 2>/dev/null | awk '{print $1}')" || ip=""
+    else
+        ip="$(ipconfig getifaddr en0 2>/dev/null)" || ip=""
+    fi
+    san="DNS:localhost,IP:127.0.0.1"
+    [ -n "$ip" ] && [ "$ip" != "127.0.0.1" ] && san="$san,IP:$ip"
+
+    cfg="$(mktemp /tmp/cent_ssl_XXXXXX.cnf)"
+    cat > "$cfg" <<SSLCNF
+[req]
+default_bits       = 2048
+prompt             = no
+distinguished_name = dn
+x509_extensions    = san
+[dn]
+CN = localhost
+O  = Centralized
+[san]
+subjectAltName = $san
+SSLCNF
+
+    openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+        -keyout "$ssl_dir/key.pem" \
+        -out    "$ssl_dir/cert.pem" \
+        -config "$cfg" 2>/dev/null
+    rm -f "$cfg"
+    chmod 600 "$ssl_dir/key.pem"
+    ok "Self-signed certificate generated (365 days)"
+}
+
 # ── Restart service ──────────────────────────────────────────────────────────
 
 restart_service() {
@@ -259,6 +330,8 @@ restart_service() {
 # ── Summary ───────────────────────────────────────────────────────────────────
 
 print_done() {
+    local scheme="http"
+    [ -f "$INSTALL_DIR/ssl/cert.pem" ] && scheme="https"
     echo
     echo "========================================"
     echo "     Centralized — Update Complete"
@@ -272,6 +345,7 @@ print_done() {
     echo
     if [ "$PLATFORM" = "linux" ] && command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet centralized 2>/dev/null; then
         echo "  Service     : running (sudo systemctl status centralized)"
+        echo "  URL         : $scheme://127.0.0.1:5000"
     else
         echo "  Start the app: centralized"
     fi
@@ -295,6 +369,7 @@ main() {
     git_update
     update_deps
     apply_db_migrations
+    ensure_ssl
     prune_backups
     refresh_sudoers
     restart_service

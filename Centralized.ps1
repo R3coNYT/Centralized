@@ -216,8 +216,8 @@ function Install-CentralizedTask {
     # Ensure logs directory exists
     New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
 
-    # Wrapper script: starts waitress and redirects stdout+stderr to a rotating log.
-    # Uses cmd /c so that 2>&1 correctly captures native-exe stderr in PowerShell 5.1.
+    # Wrapper script: starts the app and redirects stdout+stderr to a rotating log.
+    # Uses python app.py so SSL auto-detection in app.py __main__ is respected.
     $wrapper = @"
 Set-Location '$InstallDir'
 `$log = '$LogDir\service.log'
@@ -225,7 +225,7 @@ Set-Location '$InstallDir'
 if ((Test-Path `$log) -and (Get-Item `$log).Length -gt 2MB) {
     Move-Item `$log "`$log.bak" -Force
 }
-cmd /c "$VenvPython -m waitress --port=$AppPort --call app:create_app >> `$log 2>&1"
+cmd /c "$VenvPython app.py >> `$log 2>&1"
 "@
     Set-Content -Path $WrapperPs1 -Value $wrapper -Encoding UTF8
 
@@ -274,7 +274,8 @@ cmd /c "$VenvPython -m waitress --port=$AppPort --call app:create_app >> `$log 2
 
     $state = (Get-ScheduledTask -TaskName $TaskName).State
     if ($state -eq "Running") {
-        Write-Ok "Task started  ->  http://127.0.0.1:$AppPort"
+        $scheme = if (Test-Path "$InstallDir\ssl\cert.pem") { "https" } else { "http" }
+        Write-Ok "Task started  ->  ${scheme}://127.0.0.1:$AppPort"
     } else {
         Write-Warn "Task registered (state: $state) — check again in a moment:"
         Write-Warn "  Get-ScheduledTask -TaskName Centralized"
@@ -282,16 +283,176 @@ cmd /c "$VenvPython -m waitress --port=$AppPort --call app:create_app >> `$log 2
     }
 }
 
+# ── SSL certificate setup ─────────────────────────────────────────────────────
+
+function Find-OpenSsl {
+    # Git for Windows ships openssl.exe — always available since git is a hard requirement
+    $candidates = @(
+        "C:\Program Files\Git\usr\bin\openssl.exe",
+        "C:\Program Files (x86)\Git\usr\bin\openssl.exe"
+    )
+    foreach ($c in $candidates) {
+        if (Test-Path $c) { return $c }
+    }
+    $inPath = Get-Command openssl -ErrorAction SilentlyContinue
+    if ($inPath) { return $inPath.Source }
+    return $null
+}
+
+function New-SslCertPem {
+    param([string]$SslDir)
+
+    $OpenSsl = Find-OpenSsl
+    if (-not $OpenSsl) {
+        Write-Warn "openssl.exe not found — SSL skipped (Centralized will run over HTTP)"
+        return $false
+    }
+
+    New-Item -ItemType Directory -Path $SslDir -Force | Out-Null
+
+    $CfgPath = Join-Path $env:TEMP "centralized_ssl.cnf"
+    @"
+[req]
+default_bits       = 2048
+prompt             = no
+distinguished_name = dn
+x509_extensions    = san
+[dn]
+CN = localhost
+O  = Centralized
+[san]
+subjectAltName = DNS:localhost,IP:127.0.0.1
+"@ | Set-Content -Path $CfgPath -Encoding ASCII
+
+    $KeyPem  = Join-Path $SslDir "key.pem"
+    $CertPem = Join-Path $SslDir "cert.pem"
+
+    & $OpenSsl req -x509 -nodes -days 365 -newkey rsa:2048 `
+        -keyout $KeyPem -out $CertPem `
+        -config $CfgPath 2>$null
+
+    Remove-Item $CfgPath -Force -ErrorAction SilentlyContinue
+
+    if ((Test-Path $KeyPem) -and (Test-Path $CertPem)) {
+        Write-Ok "Self-signed certificate generated (valid 365 days)"
+        return $true
+    }
+    Write-Warn "Certificate generation failed — Centralized will run over HTTP"
+    return $false
+}
+
+function New-SslRenewalTask {
+    param([string]$InstallDir)
+
+    $SslDir  = Join-Path $InstallDir "ssl"
+    $OpenSsl = Find-OpenSsl
+    if (-not $OpenSsl) { return }
+
+    $LogDir   = Join-Path $InstallDir "logs"
+    New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
+
+    $RenewPs1 = Join-Path $SslDir "renew.ps1"
+    # Write renewal script with escaped backticks for the here-string
+    $renew = @"
+# Centralized SSL certificate renewal — managed by installer
+`$SslDir  = '$SslDir'
+`$OpenSsl = '$OpenSsl'
+`$LogFile = '$LogDir\ssl_renew.log'
+function Log(`$m) { Add-Content -Path `$LogFile -Value "[`$(Get-Date -f 'yyyy-MM-dd HH:mm:ss')] `$m" }
+
+# Exit if cert has more than 30 days left
+try {
+    `$cert = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new(`$SslDir + '\cert.pem')
+    if (`$cert.NotAfter -gt (Get-Date).AddDays(30)) { exit 0 }
+    Log "Certificate expires `$(`$cert.NotAfter.ToString('yyyy-MM-dd')) — regenerating"
+} catch { Log "Could not read cert — regenerating" }
+
+`$cfg = `$env:TEMP + '\cent_ssl_renew.cnf'
+@'
+[req]
+default_bits=2048
+prompt=no
+distinguished_name=dn
+x509_extensions=san
+[dn]
+CN=localhost
+O=Centralized
+[san]
+subjectAltName=DNS:localhost,IP:127.0.0.1
+'@ | Set-Content -Path `$cfg -Encoding ASCII
+
+& "`$OpenSsl" req -x509 -nodes -days 365 -newkey rsa:2048 ``
+    -keyout "`$SslDir\key.pem" -out "`$SslDir\cert.pem" ``
+    -config "`$cfg" 2>`$null
+Remove-Item `$cfg -Force -ErrorAction SilentlyContinue
+
+Stop-ScheduledTask  -TaskName 'Centralized' -ErrorAction SilentlyContinue
+Start-Sleep -Seconds 2
+Start-ScheduledTask -TaskName 'Centralized' -ErrorAction SilentlyContinue
+Log "Certificate renewed"
+"@
+    Set-Content -Path $RenewPs1 -Value $renew -Encoding UTF8
+
+    $TaskName = "Centralized-SslRenew"
+    $existing = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+    if ($existing) { Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false }
+
+    $action    = New-ScheduledTaskAction `
+        -Execute  "powershell.exe" `
+        -Argument "-NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$RenewPs1`""
+    $trigger   = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Monday -At "03:30AM"
+    $settings  = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Hours 1)
+    $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+
+    Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger `
+        -Settings $settings -Principal $principal `
+        -Description "Renew Centralized TLS certificate if expiring" -Force | Out-Null
+
+    Write-Ok "SSL auto-renewal scheduled task registered (weekly check, Mondays 03:30)"
+}
+
+function Setup-Ssl {
+    param([string]$InstallDir)
+
+    $SslDir  = Join-Path $InstallDir "ssl"
+    $CertPem = Join-Path $SslDir "cert.pem"
+    $KeyPem  = Join-Path $SslDir "key.pem"
+
+    # Skip if a valid cert exists (> 30 days remaining)
+    if ((Test-Path $CertPem) -and (Test-Path $KeyPem)) {
+        try {
+            $cert = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($CertPem)
+            if ($cert.NotAfter -gt (Get-Date).AddDays(30)) {
+                Write-Ok "SSL certificate valid until $($cert.NotAfter.ToString('yyyy-MM-dd'))"
+                return $true
+            }
+            Write-Warn "SSL certificate expires $($cert.NotAfter.ToString('yyyy-MM-dd')) — regenerating"
+        } catch {}
+    }
+
+    Write-Info "Setting up SSL / TLS certificate (self-signed)"
+    Write-Info "For Let's Encrypt on Windows, see: https://github.com/win-acme/win-acme"
+
+    $ok = New-SslCertPem -SslDir $SslDir
+    if ($ok) {
+        New-SslRenewalTask -InstallDir $InstallDir
+        return $true
+    }
+    return $false
+}
+
 # ── Final summary ─────────────────────────────────────────────────────────────
 
 function Write-Done {
+    param([bool]$HasSsl = $false)
+    $scheme = if ($HasSsl) { "https" } else { "http" }
     Write-Host ""
     Write-Host "========================================" -ForegroundColor Green
     Write-Host "   Centralized — Installation Complete  " -ForegroundColor Green
     Write-Host "========================================" -ForegroundColor Green
     Write-Host ""
     Write-Host "  Install dir : $InstallDir"             -ForegroundColor White
-    Write-Host "  App URL     : http://127.0.0.1:$AppPort" -ForegroundColor White
+    Write-Host "  App URL     : ${scheme}://127.0.0.1:$AppPort" -ForegroundColor White
     Write-Host "  Login       : admin / admin"            -ForegroundColor White
     Write-Host ""
     $task = Get-ScheduledTask -TaskName "Centralized" -ErrorAction SilentlyContinue
@@ -304,6 +465,11 @@ function Write-Done {
         Write-Host "  Start the app (pick one):"             -ForegroundColor Cyan
         Write-Host "    $InstallDir\centralized.bat"         -ForegroundColor Yellow
         Write-Host "    $InstallDir\centralized.ps1  (PowerShell)" -ForegroundColor Yellow
+    }
+    if ($HasSsl) {
+        Write-Host ""
+        Write-Host "  NOTE: Self-signed certificate — browser will show a security warning." -ForegroundColor Yellow
+        Write-Host "  Import $InstallDir\ssl\cert.pem into Windows trust store to suppress it." -ForegroundColor Yellow
     }
     Write-Host ""
     Write-Host "  IMPORTANT: Change the default admin password after first login!" -ForegroundColor Red
@@ -328,9 +494,10 @@ function Main {
     New-UploadsDir
     New-Launcher
     Update-UserPath
+    $hasSsl = Setup-Ssl -InstallDir $InstallDir
     Install-CentralizedTask
 
-    Write-Done
+    Write-Done -HasSsl $hasSsl
 }
 
 Main

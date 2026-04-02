@@ -213,6 +213,170 @@ create_uploads_dir() {
     ok "Uploads directory ready"
 }
 
+# ── SSL certificate setup ──────────────────────────────────────────────────────
+
+_ssl_selfcert() {
+    # Usage: _ssl_selfcert <ssl_dir> [<CN>]
+    local ssl_dir="$1" cn="${2:-localhost}" ip="" san cfg
+    if [ "$PLATFORM" = "linux" ]; then
+        ip="$(hostname -I 2>/dev/null | awk '{print $1}')" || ip=""
+    else
+        ip="$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null)" || ip=""
+    fi
+    san="DNS:localhost,IP:127.0.0.1"
+    [ -n "$ip" ] && [ "$ip" != "127.0.0.1" ] && san="$san,IP:$ip"
+    [ "$cn" != "localhost" ]                   && san="$san,DNS:$cn"
+
+    # Use a config file for SAN — compatible with OpenSSL and LibreSSL (macOS)
+    cfg="$(mktemp /tmp/cent_ssl_XXXXXX.cnf)"
+    cat > "$cfg" <<SSLCNF
+[req]
+default_bits       = 2048
+prompt             = no
+distinguished_name = dn
+x509_extensions    = san
+[dn]
+CN = $cn
+O  = Centralized
+[san]
+subjectAltName = $san
+SSLCNF
+
+    openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+        -keyout "$ssl_dir/key.pem" \
+        -out    "$ssl_dir/cert.pem" \
+        -config "$cfg" 2>/dev/null
+    rm -f "$cfg"
+    chmod 600 "$ssl_dir/key.pem"
+    local expiry
+    expiry="$(openssl x509 -enddate -noout -in "$ssl_dir/cert.pem" 2>/dev/null | cut -d= -f2)"
+    ok "Self-signed certificate generated (CN=$cn, expires: $expiry)"
+}
+
+_ssl_letsencrypt() {
+    local ssl_dir="$1" domain="$2"
+    if ! need_cmd certbot; then
+        if [ "$PLATFORM" = "linux" ]; then
+            log "Installing certbot"
+            retry 3 $SUDO apt-get install -y certbot >/dev/null 2>&1 || { warn "Could not install certbot"; return 1; }
+        else
+            warn "certbot not available — using self-signed"; return 1
+        fi
+    fi
+    log "Requesting Let's Encrypt certificate for $domain (port 80 must be open)"
+    $SUDO certbot certonly --standalone -d "$domain" \
+        --non-interactive --agree-tos --email "admin@$domain" --quiet 2>/dev/null || {
+        warn "Let's Encrypt request failed — using self-signed"; return 1
+    }
+    $SUDO cp "/etc/letsencrypt/live/$domain/fullchain.pem" "$ssl_dir/cert.pem"
+    $SUDO cp "/etc/letsencrypt/live/$domain/privkey.pem"   "$ssl_dir/key.pem"
+    $SUDO chown "$USER:$USER" "$ssl_dir/cert.pem" "$ssl_dir/key.pem"
+    chmod 600 "$ssl_dir/key.pem"
+    ok "Let's Encrypt certificate obtained for $domain"
+    return 0
+}
+
+_ssl_setup_renewal() {
+    local ssl_dir="$1" mode="$2" domain="${3:-}"
+    local renew_script="$ssl_dir/renew.sh"
+
+    # Build the renewal script using printf (avoids nested heredoc issues)
+    printf '#!/usr/bin/env bash\n# Centralized SSL renewal — managed by installer\nSSL_DIR="%s"\n' "$ssl_dir" > "$renew_script"
+    printf '# Exit if cert has more than 30 days left\n' >> "$renew_script"
+    printf 'openssl x509 -checkend 2592000 -noout -in "$SSL_DIR/cert.pem" >/dev/null 2>&1 && exit 0\n' >> "$renew_script"
+    printf 'echo "[$(date)] Certificate expiring within 30 days — renewing"\n' >> "$renew_script"
+
+    if [ "$mode" = "letsencrypt" ] && [ -n "$domain" ]; then
+        printf 'DOMAIN="%s"\n' "$domain" >> "$renew_script"
+        printf 'certbot renew --quiet --cert-name "$DOMAIN" 2>/dev/null && \\\n' >> "$renew_script"
+        printf '    cp "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" "$SSL_DIR/cert.pem" && \\\n' >> "$renew_script"
+        printf '    cp "/etc/letsencrypt/live/$DOMAIN/privkey.pem"   "$SSL_DIR/key.pem"  && \\\n' >> "$renew_script"
+        printf '    chmod 600 "$SSL_DIR/key.pem" && systemctl restart centralized 2>/dev/null || true\n' >> "$renew_script"
+        printf 'echo "[$(date)] Renewal complete"\n' >> "$renew_script"
+    else
+        # Self-signed regeneration
+        local ip="" san="DNS:localhost,IP:127.0.0.1"
+        ip="$(hostname -I 2>/dev/null | awk '{print $1}')" || ip=""
+        [ -n "$ip" ] && [ "$ip" != "127.0.0.1" ] && san="$san,IP:$ip"
+        printf 'CFG="$(mktemp /tmp/cent_ssl_XXXXXX.cnf)"\n' >> "$renew_script"
+        printf 'printf "[req]\\ndefault_bits=2048\\nprompt=no\\ndistinguished_name=dn\\nx509_extensions=san\\n[dn]\\nCN=localhost\\nO=Centralized\\n[san]\\nsubjectAltName=%s" > "$CFG"\n' "$san" >> "$renew_script"
+        printf 'openssl req -x509 -nodes -days 365 -newkey rsa:2048 \\\n' >> "$renew_script"
+        printf '    -keyout "$SSL_DIR/key.pem" -out "$SSL_DIR/cert.pem" \\\n' >> "$renew_script"
+        printf '    -config "$CFG" 2>/dev/null && rm -f "$CFG" && chmod 600 "$SSL_DIR/key.pem"\n' >> "$renew_script"
+        printf 'systemctl restart centralized 2>/dev/null || true\n' >> "$renew_script"
+        printf 'echo "[$(date)] Self-signed certificate regenerated"\n' >> "$renew_script"
+    fi
+    chmod +x "$renew_script"
+    ok "Renewal script: $renew_script"
+
+    mkdir -p "$INSTALL_DIR/logs"
+    if [ "$PLATFORM" = "linux" ] && need_cmd systemctl; then
+        local ssl_abs
+        ssl_abs="$(realpath "$ssl_dir" 2>/dev/null || echo "$ssl_dir")"
+        $SUDO tee /etc/systemd/system/centralized-ssl-renew.service >/dev/null <<SVC
+[Unit]
+Description=Centralized SSL certificate renewal
+[Service]
+Type=oneshot
+User=$USER
+ExecStart=${ssl_abs}/renew.sh
+StandardOutput=append:${INSTALL_DIR}/logs/ssl_renew.log
+SVC
+        $SUDO tee /etc/systemd/system/centralized-ssl-renew.timer >/dev/null <<TMR
+[Unit]
+Description=Daily Centralized SSL renewal check
+[Timer]
+OnCalendar=*-*-* 03:30:00
+Persistent=true
+[Install]
+WantedBy=timers.target
+TMR
+        $SUDO systemctl daemon-reload
+        $SUDO systemctl enable --now centralized-ssl-renew.timer
+        ok "SSL auto-renewal: systemd timer enabled (daily at 03:30)"
+    else
+        local cron_line
+        cron_line="30 3 * * * \"$ssl_dir/renew.sh\" >> \"$INSTALL_DIR/logs/ssl_renew.log\" 2>&1"
+        ( crontab -l 2>/dev/null | grep -v 'ssl/renew\.sh'; printf '%s\n' "$cron_line" ) | crontab -
+        ok "SSL auto-renewal: cron job added (daily at 03:30)"
+    fi
+}
+
+setup_ssl() {
+    local ssl_dir="$INSTALL_DIR/ssl"
+    mkdir -p "$ssl_dir"
+    chmod 700 "$ssl_dir"
+
+    # Skip if a valid certificate already exists (more than 30 days remaining)
+    if [ -f "$ssl_dir/cert.pem" ] && [ -f "$ssl_dir/key.pem" ]; then
+        if openssl x509 -checkend 2592000 -noout -in "$ssl_dir/cert.pem" >/dev/null 2>&1; then
+            ok "SSL certificate valid — $(openssl x509 -enddate -noout -in "$ssl_dir/cert.pem" 2>/dev/null | cut -d= -f2)"
+            SSL_ENABLED=true; return
+        fi
+        warn "SSL certificate expiring soon — will regenerate"
+    fi
+
+    echo
+    log "SSL / TLS Certificate Setup"
+    echo "  A TLS certificate enables HTTPS and the PWA desktop install button."
+    echo "  • Enter a public domain → Let's Encrypt (requires port 80 open)"
+    echo "  • Leave empty           → self-signed   (localhost / internal network)"
+    echo
+    read -rp "  Domain (Enter for self-signed): " _SSL_DOMAIN
+
+    local mode="selfsigned"
+    if [ -n "${_SSL_DOMAIN:-}" ]; then
+        _ssl_letsencrypt "$ssl_dir" "$_SSL_DOMAIN" && mode="letsencrypt" || \
+            _ssl_selfcert "$ssl_dir" "$_SSL_DOMAIN"
+    else
+        _ssl_selfcert "$ssl_dir" "localhost"
+    fi
+
+    mkdir -p "$INSTALL_DIR/logs"
+    _ssl_setup_renewal "$ssl_dir" "$mode" "${_SSL_DOMAIN:-}"
+    SSL_ENABLED=true
+}
+
 # ── Global launcher script ─────────────────────────────────────────────────────
 
 create_global_command_linux() {
@@ -301,13 +465,15 @@ EOF
 # ── Final summary ─────────────────────────────────────────────────────────────
 
 print_done() {
+    local scheme="http"
+    [ "${SSL_ENABLED:-false}" = "true" ] && scheme="https"
     echo
     echo "========================================"
     echo "     Centralized — Installation Done"
     echo "========================================"
     echo
     echo "  Install dir : $INSTALL_DIR"
-    echo "  App URL     : http://127.0.0.1:$APP_PORT"
+    echo "  App URL     : $scheme://127.0.0.1:$APP_PORT"
     echo "  Login       : admin / admin"
     echo
     echo "  Start the app:"
@@ -322,6 +488,11 @@ print_done() {
         echo "  If 'centralized' is not found, reopen your terminal."
         echo
     fi
+    if [ "${SSL_ENABLED:-false}" = "true" ]; then
+        echo "  NOTE: Self-signed certificate — your browser will show a warning."
+        echo "  Add an exception or import ssl/cert.pem into your OS trust store."
+        echo
+    fi
     echo "  IMPORTANT: Change the default admin password after first login!"
     echo
 }
@@ -329,6 +500,7 @@ print_done() {
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 main() {
+    SSL_ENABLED=false
     detect_platform
     set_install_root
     get_sudo
@@ -343,6 +515,7 @@ main() {
     clone_or_update_repo
     create_venv
     create_uploads_dir
+    setup_ssl
 
     if [ "$PLATFORM" = "linux" ]; then
         create_global_command_linux
