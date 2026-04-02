@@ -131,8 +131,14 @@ body {
 
 .stat-label {
   font-size: .78rem;
-  color: var(--text-muted-custom);
+  color: var(--text-muted-accessible); /* was --text-muted-custom (#6c757d, ratio 3.6) → #9ba3af (ratio ≥4.5) */
   margin-top: 2px;
+}
+
+/* ── Accessible link colours on dark card backgrounds ───── */
+
+.table a:not(.btn) {
+  color: #6ea8fe; /* Bootstrap dark-mode link — ratio ≥5:1 on #1a1d23 */
 }
 
 /* ── Tables ──────────────────────────────────────────────── */
@@ -343,6 +349,18 @@ code {
    GLASSMORPHIC MODE — html[data-glass="1"]
    ══════════════════════════════════════════════════════════ */
 
+/* ── 0. Override body text colour to pure white for maximum contrast ── */
+html[data-glass="1"] {
+  --bs-body-color: #ffffff;
+  --bs-body-color-rgb: 255, 255, 255;
+  --bs-secondary-color: rgba(255, 255, 255, 0.75);
+}
+
+/* ── 0b. Accessible stat-label in glass mode ── */
+html[data-glass="1"] .stat-label {
+  color: rgba(255, 255, 255, 0.80) !important;
+}
+
 /* ── 1. Background gradient layer ─────────────────────────── */
 html[data-glass="1"] body::before {
   content: '';
@@ -391,7 +409,7 @@ html[data-glass="1"] .sidebar {
   border-right: 1px solid rgba(255,255,255,0.09) !important;
 }
 html[data-glass="1"] .topbar {
-  background: rgba(0,0,0,0.16) !important;
+  background: rgba(0,0,0,0.36) !important; /* was 0.16 — raised for topbar text contrast */
   backdrop-filter: blur(28px) saturate(150%);
   -webkit-backdrop-filter: blur(28px) saturate(150%);
   border-bottom: 1px solid rgba(255,255,255,0.09) !important;
@@ -471,15 +489,15 @@ html[data-glass="1"] .input-group-text {
 
 /* ── 7. Buttons ─────────────────────────────────────────────── */
 html[data-glass="1"] .btn-primary {
-  background: rgba(13,110,253,0.85) !important;
-  border-color: rgba(13,110,253,0.92) !important;
+  background: rgba(0,80,210,0.92) !important; /* deeper blue → white text ratio ≥4.5:1 even vs. light glass bg */
+  border-color: rgba(0,90,230,0.96) !important;
   color: #fff !important;
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   box-shadow: 0 0 18px rgba(13,110,253,0.28) !important;
 }
 html[data-glass="1"] .btn-primary:hover {
-  background: rgba(13,110,253,0.95) !important;
+  background: rgba(0,90,225,0.98) !important;
   box-shadow: 0 0 24px rgba(13,110,253,0.42) !important;
 }
 html[data-glass="1"] .btn-secondary {
