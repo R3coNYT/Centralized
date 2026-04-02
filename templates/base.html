@@ -235,10 +235,40 @@
       })
       .catch(function (err) {
         console.warn('[PWA] Service worker registration failed:', err);
+        /* SecurityError = browser blocked SW due to untrusted SSL certificate.
+           Show a toast guiding the user to install the cert as a trusted root. */
+        if (err && err.name === 'SecurityError') {
+          var sslToast = document.getElementById('pwa-ssl-toast');
+          if (sslToast && window.bootstrap) {
+            new bootstrap.Toast(sslToast, { autohide: false }).show();
+          }
+        }
       });
   });
 })();
 </script>
+
+<!-- ── PWA — SSL certificate trust toast ──────────────────────────────────── -->
+<div class="position-fixed bottom-0 end-0 p-3" style="z-index:2001">
+  <div id="pwa-ssl-toast" class="toast align-items-center text-bg-warning border-0"
+       role="alert" aria-live="assertive" aria-atomic="true">
+    <div class="d-flex">
+      <div class="toast-body" style="font-size:.85rem">
+        <i class="bi bi-shield-exclamation me-1"></i>
+        <strong>Certificat SSL non approuvé.</strong><br>
+        Pour activer le PWA, installez le certificat comme autorité de confiance :
+        <a href="/ssl/cert.pem" class="btn btn-sm btn-dark mt-1 d-block" download="centralized-ca.crt">
+          <i class="bi bi-download me-1"></i>Télécharger centralized-ca.crt
+        </a>
+        <small class="d-block mt-1 text-dark">
+          Windows : double-cliquer → Installer → <em>Autorités de certification racines de confiance</em>
+        </small>
+      </div>
+      <button type="button" class="btn-close me-2 m-auto"
+              data-bs-dismiss="toast" aria-label="Fermer"></button>
+    </div>
+  </div>
+</div>
 
 <!-- ── PWA — "Update available" toast ─────────────────────────────────── -->
 <div class="position-fixed bottom-0 start-0 p-3" style="z-index:2000">
