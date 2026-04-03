@@ -2,12 +2,58 @@ import csv
 import io
 import json as _json
 from flask import Blueprint, jsonify, request
-from flask_login import login_required
-from models import Audit, Host, Vulnerability, Port, CVE_STATUS_VALUES
+from flask_login import login_required, current_user
+from models import Audit, Host, Vulnerability, Port, CVE_STATUS_VALUES, NotificationPref
 from extensions import db
 from sqlalchemy import func
 
 api_bp = Blueprint("api", __name__, url_prefix="/api")
+
+# ---------------------------------------------------------------------------
+# Notification preferences
+# ---------------------------------------------------------------------------
+
+# Valid event keys per scope
+_NOTIF_EVENTS = {
+    "client": ["new_audit", "audit_completed", "new_critical"],
+    "audit":  ["status_change", "new_host", "new_critical", "audit_completed"],
+    "host":   ["new_vuln", "critical_vuln", "risk_change"],
+}
+
+_VALID_SCOPES = set(_NOTIF_EVENTS.keys())
+
+
+@api_bp.route("/notifications/prefs/<scope>/<int:entity_id>", methods=["GET"])
+@login_required
+def get_notif_prefs(scope, entity_id):
+    if scope not in _VALID_SCOPES:
+        return jsonify({"error": "Invalid scope"}), 400
+    pref = NotificationPref.query.filter_by(
+        user_id=current_user.id, scope=scope, entity_id=entity_id
+    ).first()
+    events = _json.loads(pref.events) if pref else []
+    return jsonify({"events": events, "available": _NOTIF_EVENTS[scope]})
+
+
+@api_bp.route("/notifications/prefs/<scope>/<int:entity_id>", methods=["POST"])
+@login_required
+def set_notif_prefs(scope, entity_id):
+    if scope not in _VALID_SCOPES:
+        return jsonify({"error": "Invalid scope"}), 400
+    data = request.get_json(silent=True) or {}
+    # Sanitise — only allow known event keys for this scope
+    allowed = set(_NOTIF_EVENTS[scope])
+    events = [e for e in data.get("events", []) if e in allowed]
+
+    pref = NotificationPref.query.filter_by(
+        user_id=current_user.id, scope=scope, entity_id=entity_id
+    ).first()
+    if pref is None:
+        pref = NotificationPref(user_id=current_user.id, scope=scope, entity_id=entity_id)
+        db.session.add(pref)
+    pref.events = _json.dumps(events)
+    db.session.commit()
+    return jsonify({"ok": True, "events": events})
 
 
 @api_bp.route("/audits/<int:audit_id>/stats")

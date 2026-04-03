@@ -345,6 +345,117 @@ function downloadTrustScript() {
   </div>
 </div>
 
+<!-- ── Notification preferences modal (shared — opened via openNotifModal()) ── -->
+{% if current_user.is_authenticated %}
+<div class="modal fade" id="notifModal" tabindex="-1" aria-labelledby="notifModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="notifModalLabel">
+          <i class="bi bi-bell me-2"></i>Notification preferences
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body" id="notifModalBody">
+        <div class="text-center py-3"><span class="spinner-border spinner-border-sm"></span></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary btn-sm" id="notifSaveBtn" onclick="saveNotifPrefs()">
+          <i class="bi bi-check-lg me-1"></i>Save
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  var _notifScope    = null;
+  var _notifEntityId = null;
+  var _notifModal    = null;
+
+  var EVENT_LABELS = {
+    /* client */
+    new_audit:       { label: 'New audit created',               icon: 'bi-clipboard2-plus' },
+    audit_completed: { label: 'Audit marked as completed',        icon: 'bi-check2-circle'  },
+    new_critical:    { label: 'New critical vulnerability found', icon: 'bi-exclamation-octagon-fill text-danger' },
+    /* audit */
+    status_change:   { label: 'Audit status changed',            icon: 'bi-arrow-repeat'    },
+    new_host:        { label: 'New host discovered',             icon: 'bi-hdd-network'     },
+    /* host */
+    new_vuln:        { label: 'New vulnerability found',         icon: 'bi-bug'             },
+    critical_vuln:   { label: 'Critical / High vulnerability',   icon: 'bi-shield-exclamation text-danger' },
+    risk_change:     { label: 'Risk score changed',              icon: 'bi-graph-up-arrow'  },
+  };
+
+  window.openNotifModal = function (scope, entityId, label) {
+    _notifScope    = scope;
+    _notifEntityId = entityId;
+
+    var titleEl = document.getElementById('notifModalLabel');
+    if (titleEl) titleEl.innerHTML = '<i class="bi bi-bell me-2"></i>Notifications — ' + (label || '');
+
+    var body = document.getElementById('notifModalBody');
+    if (body) body.innerHTML = '<div class="text-center py-3"><span class="spinner-border spinner-border-sm"></span></div>';
+
+    if (!_notifModal) {
+      var el = document.getElementById('notifModal');
+      _notifModal = el && window.bootstrap ? new bootstrap.Modal(el) : null;
+    }
+    if (_notifModal) _notifModal.show();
+
+    fetch('/api/notifications/prefs/' + scope + '/' + entityId)
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) {
+        if (!data) { if (body) body.innerHTML = '<p class="text-danger">Failed to load preferences.</p>'; return; }
+        var html = '<p class="small text-muted mb-3">Choose which events should trigger a desktop notification for this ' + scope + '.</p><div class="vstack gap-2">';
+        data.available.forEach(function (key) {
+          var info    = EVENT_LABELS[key] || { label: key, icon: 'bi-bell' };
+          var checked = data.events.indexOf(key) !== -1 ? 'checked' : '';
+          html += '<div class="form-check form-switch">'
+               +  '<input class="form-check-input notif-check" type="checkbox" role="switch" id="notif_' + key + '" value="' + key + '" ' + checked + '>'
+               +  '<label class="form-check-label d-flex align-items-center gap-2" for="notif_' + key + '">'
+               +    '<i class="bi ' + info.icon + '"></i>' + info.label
+               +  '</label>'
+               + '</div>';
+        });
+        html += '</div>';
+        if (body) body.innerHTML = html;
+      })
+      .catch(function () { if (body) body.innerHTML = '<p class="text-danger">Network error.</p>'; });
+  };
+
+  window.saveNotifPrefs = function () {
+    if (!_notifScope || !_notifEntityId) return;
+    var checked = document.querySelectorAll('#notifModalBody .notif-check:checked');
+    var events  = Array.from(checked).map(function (el) { return el.value; });
+
+    var btn = document.getElementById('notifSaveBtn');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Saving…'; }
+
+    fetch('/api/notifications/prefs/' + _notifScope + '/' + _notifEntityId, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': (document.cookie.match(/csrf_token=([^;]+)/) || [])[1] || '' },
+      body:    JSON.stringify({ events: events }),
+    })
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (data) {
+      if (_notifModal) _notifModal.hide();
+      /* Update bell icon active state on the triggering button */
+      var bellBtn = document.querySelector('[data-notif-scope="' + _notifScope + '"][data-notif-id="' + _notifEntityId + '"]');
+      if (bellBtn) {
+        bellBtn.classList.toggle('btn-outline-secondary', events.length === 0);
+        bellBtn.classList.toggle('btn-warning',           events.length  >  0);
+        bellBtn.title = events.length > 0 ? events.length + ' notification(s) active' : 'Set notifications';
+      }
+    })
+    .catch(function () { if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-check-lg me-1"></i>Save'; } });
+  };
+})();
+</script>
+{% endif %}
+
 {% if current_user.is_authenticated and current_user.role == 'admin' %}
 <style>
 @keyframes ar-spin {
@@ -482,6 +593,22 @@ th[data-sort][aria-sort="descending"]::after{content:' ↓';opacity:1}
     document.querySelectorAll('th[data-sort]').forEach(function(th){
       th.addEventListener('click',function(){sortTable(th)});
     });
+    {% if current_user.is_authenticated %}
+    // Restore active bell state for all visible notification buttons
+    var notifBtns = document.querySelectorAll('[data-notif-scope][data-notif-id]');
+    notifBtns.forEach(function(btn){
+      var scope = btn.dataset.notifScope, id = btn.dataset.notifId;
+      fetch('/api/notifications/prefs/' + scope + '/' + id)
+        .then(function(r){ return r.ok ? r.json() : null; })
+        .then(function(data){
+          if (data && data.events && data.events.length > 0){
+            btn.classList.remove('btn-outline-secondary');
+            btn.classList.add('btn-warning');
+            btn.title = data.events.length + ' notification(s) active';
+          }
+        }).catch(function(){});
+    });
+    {% endif %}
   });
   var RISK_ORDER={INFO:0,LOW:1,POTENTIAL:1,MEDIUM:2,HIGH:3,CRITICAL:4};
   function ipToInt(s){var m=s.match(/(\d+)\.(\d+)\.(\d+)\.(\d+)/);return m?(+m[1]<<24)+(+m[2]<<16)+(+m[3]<<8)+(+m[4]):0;}

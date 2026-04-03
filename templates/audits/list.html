@@ -70,6 +70,12 @@
           <td class="text-muted small">{{ audit.created_at.strftime('%Y-%m-%d') }}</td>
           <td>
             <div class="d-flex gap-1">
+              <button class="btn btn-sm btn-outline-secondary"
+                      data-notif-scope="audit" data-notif-id="{{ audit.id }}"
+                      onclick="openNotifModal('audit', {{ audit.id }}, '{{ audit.name|e }}')"
+                      title="Set notifications">
+                <i class="bi bi-bell"></i>
+              </button>
               <a href="{{ url_for('audits.detail', audit_id=audit.id) }}" class="btn btn-sm btn-outline-secondary" title="View">
                 <i class="bi bi-eye"></i>
               </a>

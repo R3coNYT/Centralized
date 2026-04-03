@@ -32,6 +32,12 @@
           <td class="text-muted small">{{ client.created_at.strftime('%Y-%m-%d') }}</td>
           <td>
             <div class="d-flex gap-1">
+              <button class="btn btn-sm btn-outline-secondary"
+                      data-notif-scope="client" data-notif-id="{{ client.id }}"
+                      onclick="openNotifModal('client', {{ client.id }}, '{{ client.name|e }}')"
+                      title="Set notifications">
+                <i class="bi bi-bell"></i>
+              </button>
               <a href="{{ url_for('clients.edit_client', client_id=client.id) }}" class="btn btn-sm btn-outline-secondary"><i class="bi bi-pencil"></i></a>
               <form method="POST" action="{{ url_for('clients.delete_client', client_id=client.id) }}"
                     onsubmit="return confirm('Delete client \'{{ client.name }}\'?')">
