@@ -248,6 +248,30 @@ body {
 
 /* ── Utilities ───────────────────────────────────────────── */
 
+/* ── Form controls — dark theme fixes ───────────────────────── */
+/* Bootstrap dark theme styles the control itself but leaves <option>   */
+/* elements up to the browser, which renders them with OS default colors */
+/* (white bg / black text). Force dark bg + light text on all selects.  */
+
+.form-select,
+.form-select:focus {
+  color: #dee2e6;
+  background-color: #1e2430;
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+.form-select option,
+.form-select optgroup {
+  background-color: #1e2430;
+  color: #dee2e6;
+}
+
+.form-select:disabled {
+  background-color: #161920;
+  color: #6c757d;
+}
+
+
 .font-monospace { font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace; }
 
 .w-40 { width: 40%; }

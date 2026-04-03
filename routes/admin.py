@@ -827,6 +827,12 @@ def notifications_overview():
     )
 
 
+@admin_bp.route("/help")
+@login_required
+def help_page():
+    return render_template("admin/help.html")
+
+
 # ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
 # Internal helpers
