@@ -382,7 +382,30 @@ class NotificationPref(db.Model):
     )
 
     def __repr__(self):
-        return f"<CveCache {self.cve_id} expires={self.expires_at}>"
+        return f"<NotificationPref user={self.user_id} {self.scope}/{self.entity_id}>"
+
+
+# ---------------------------------------------------------------------------
+# Pending Notifications (queued desktop notifications delivered via polling)
+# ---------------------------------------------------------------------------
+
+class PendingNotification(db.Model):
+    __tablename__ = "pending_notifications"
+    id         = db.Column(db.Integer, primary_key=True)
+    user_id    = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    title      = db.Column(db.String(200), nullable=False)
+    body       = db.Column(db.String(500), default="")
+    url        = db.Column(db.String(500), default="")
+    created_at = db.Column(db.DateTime, default=utcnow)
+    read_at    = db.Column(db.DateTime, nullable=True)
+
+    user = db.relationship(
+        "User",
+        backref=db.backref("pending_notifications", cascade="all, delete-orphan", lazy="dynamic"),
+    )
+
+    def __repr__(self):
+        return f"<PendingNotification user={self.user_id} '{self.title}'>"
 
 
 # ---------------------------------------------------------------------------

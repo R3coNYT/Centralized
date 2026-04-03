@@ -9,6 +9,7 @@ from flask_login import login_required, current_user
 from werkzeug.utils import secure_filename
 from models import Audit, Host, Port, Vulnerability, HttpPage, UploadedFile
 from extensions import db
+from services.notifications import fire_notification
 from parsers import (
     detect_file_type, parse_file,
     FILE_TYPE_LYNIS_LOG, FILE_TYPE_LYNIS_REPORT,
@@ -401,6 +402,7 @@ def _is_plausible_host_ip(ip: str) -> bool:
 
 def _persist_parsed_data(audit_id: int, parsed_hosts: list, enrich_nvd: bool):
     """Merge parsed host data into the database for the given audit."""
+    _audit = Audit.query.get(audit_id)  # for client_id in notifications
     for host_data in parsed_hosts:
         ip = str(host_data.get("ip", "")).strip()
         if not ip or not _is_plausible_host_ip(ip):
@@ -408,10 +410,17 @@ def _persist_parsed_data(audit_id: int, parsed_hosts: list, enrich_nvd: bool):
 
         # Find or create host
         host = Host.query.filter_by(audit_id=audit_id, ip=ip).first()
+        _is_new_host = host is None
         if not host:
             host = Host(audit_id=audit_id, ip=ip)
             db.session.add(host)
             db.session.flush()
+            fire_notification(
+                "audit", audit_id, "new_host",
+                f"New host discovered: {ip}",
+                f"A new host was added to the audit.",
+                f"/audits/{audit_id}",
+            )
 
         # Update host fields if new data is available
         if host_data.get("hostname") and not host.hostname:
@@ -565,6 +574,35 @@ def _persist_parsed_data(audit_id: int, parsed_hosts: list, enrich_nvd: bool):
                 recommendation=vdata.get("recommendation"),
             )
             db.session.add(vuln)
+
+            # Fire per-host and per-audit/client notifications for new vulns
+            vuln_sev = vuln.severity
+            fire_notification(
+                "host", host.id, "new_vuln",
+                f"New vulnerability on {ip}: {vuln.title[:60]}",
+                f"Severity: {vuln_sev}",
+                f"/hosts/{host.id}",
+            )
+            if vuln_sev in ("CRITICAL", "HIGH"):
+                fire_notification(
+                    "host", host.id, "critical_vuln",
+                    f"{vuln_sev} vuln on {ip}: {vuln.title[:60]}",
+                    f"A {vuln_sev.lower()} severity vulnerability was detected.",
+                    f"/hosts/{host.id}",
+                )
+                fire_notification(
+                    "audit", audit_id, "new_critical",
+                    f"{vuln_sev} finding in audit: {vuln.title[:60]}",
+                    f"Host: {ip}",
+                    f"/audits/{audit_id}",
+                )
+                if _audit and _audit.client_id:
+                    fire_notification(
+                        "client", _audit.client_id, "new_critical",
+                        f"{vuln_sev} finding: {vuln.title[:60]}",
+                        f"Host: {ip}",
+                        f"/audits/{audit_id}",
+                    )
 
             # Always fetch authoritative CVSS/severity from NVD for known CVE IDs.
             # This is independent of enrich_nvd (which controls keyword-based searches).
