@@ -366,6 +366,50 @@ function downloadTrustScript() {
     }
   }
 
+  // Poll once immediately, then every 60 seconds
+  function checkUpdate() {
+    fetch('/admin/update-status')
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!data) return;
+        if (data.available) {
+          applyUpdate();
+          notifyUpdate(data.latest || '');
+        } else {
+          removeUpdate();
+        }
+      })
+      .catch(() => {});
+  }
+
+  /* ── Desktop notification when update is available ── */
+  var NOTIF_KEY = 'centralized-update-notified';
+
+  function notifyUpdate(version) {
+    /* Only notify once per version (tracked in localStorage) */
+    if (localStorage.getItem(NOTIF_KEY) === version) return;
+
+    /* Request permission if needed, then ask SW to show notification */
+    var doNotify = function () {
+      if (Notification.permission !== 'granted') return;
+      if (!navigator.serviceWorker || !navigator.serviceWorker.controller) return;
+      localStorage.setItem(NOTIF_KEY, version);
+      navigator.serviceWorker.controller.postMessage({
+        type: 'SHOW_UPDATE_NOTIFICATION',
+        version: version
+      });
+    };
+
+    if (Notification.permission === 'granted') {
+      doNotify();
+    } else if (Notification.permission !== 'denied') {
+      Notification.requestPermission().then(function (perm) {
+        if (perm === 'granted') doNotify();
+      });
+    }
+  }
+
+  /* Clear stored version once the user is up-to-date */
   function removeUpdate() {
     icon.classList.remove('ar-spin');
     badge.classList.add('d-none');
@@ -375,18 +419,7 @@ function downloadTrustScript() {
       link.classList.remove('nav-link-update-available');
       link.title = '';
     }
-  }
-
-  // Poll once immediately, then every 60 seconds
-  function checkUpdate() {
-    fetch('/admin/update-status')
-      .then(r => r.ok ? r.json() : null)
-      .then(data => {
-        if (!data) return;
-        if (data.available) applyUpdate();
-        else removeUpdate();
-      })
-      .catch(() => {});
+    localStorage.removeItem(NOTIF_KEY);
   }
 
   checkUpdate();
