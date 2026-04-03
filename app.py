@@ -373,6 +373,8 @@ def _seed_admin():
 
 if __name__ == "__main__":
     import os as _os
+    import threading as _threading
+    from wsgiref.simple_server import make_server as _make_server, WSGIRequestHandler as _WSGIRequestHandler
     application  = create_app()
     _base        = _os.path.dirname(_os.path.abspath(__file__))
     _cert        = _os.path.join(_base, "ssl", "cert.pem")
@@ -381,6 +383,28 @@ if __name__ == "__main__":
     _has_ssl     = _os.path.isfile(_cert) and _os.path.isfile(_key)
 
     if _has_ssl:
+        # HTTP → HTTPS redirect server on port 80
+        def _redirect_app(environ, start_response):
+            host = (environ.get("HTTP_HOST") or "localhost").split(":")[0]
+            target = f"https://{host}:{_port}{environ.get('PATH_INFO', '/')}"
+            qs = environ.get("QUERY_STRING", "")
+            if qs:
+                target += "?" + qs
+            start_response("301 Moved Permanently", [("Location", target), ("Content-Length", "0")])
+            return [b""]
+
+        class _SilentHandler(_WSGIRequestHandler):
+            def log_message(self, *args):
+                pass
+
+        try:
+            _redirect_srv = _make_server("0.0.0.0", 80, _redirect_app, handler_class=_SilentHandler)
+            _t = _threading.Thread(target=_redirect_srv.serve_forever, daemon=True)
+            _t.start()
+            print("[Centralized] HTTP→HTTPS redirect  →  http://0.0.0.0:80")
+        except OSError as _e:
+            print(f"[Centralized] Could not bind port 80 for redirect ({_e})")
+
         print(f"[Centralized] HTTPS enabled  →  https://0.0.0.0:{_port}")
         # threaded=True lets Werkzeug handle each request in its own thread,
         # avoiding the single-threaded bottleneck of the dev server.
