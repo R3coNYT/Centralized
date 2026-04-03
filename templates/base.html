@@ -456,6 +456,51 @@ function downloadTrustScript() {
 </script>
 {% endif %}
 
+{% if current_user.is_authenticated %}
+<script>
+/* ── Desktop notifications via SSE (real-time) ─────────────────────────── */
+(function () {
+  var ICON = '/static/img/icon-192.png';
+  var es   = null;
+
+  function showNotif(title, body, url) {
+    if (!('Notification' in window) || Notification.permission !== 'granted') return;
+    var n = new Notification(title, { body: body || '', icon: ICON, tag: 'centralized-' + Date.now() });
+    if (url) {
+      n.addEventListener('click', function () { window.focus(); window.location.href = url; });
+    }
+  }
+
+  function connect() {
+    if (es) { try { es.close(); } catch(e) {} }
+    es = new EventSource('/api/notifications/stream');
+    es.onmessage = function (e) {
+      try {
+        var n = JSON.parse(e.data);
+        showNotif(n.title, n.body, n.url);
+      } catch(err) {}
+    };
+    es.onerror = function () {
+      /* EventSource reconnects automatically; close and let browser retry */
+      es.close();
+      setTimeout(connect, 5000);
+    };
+  }
+
+  if (!('Notification' in window)) return;
+  if (Notification.permission === 'granted') {
+    connect();
+  } else if (Notification.permission !== 'denied') {
+    /* Ask on first click so the browser doesn't block the prompt */
+    document.addEventListener('click', function _req() {
+      document.removeEventListener('click', _req);
+      Notification.requestPermission().then(function (p) { if (p === 'granted') connect(); });
+    }, { once: true });
+  }
+})();
+</script>
+{% endif %}
+
 {% if current_user.is_authenticated and current_user.role == 'admin' %}
 <style>
 @keyframes ar-spin {

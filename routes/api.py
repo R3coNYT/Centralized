@@ -1,11 +1,14 @@
 import csv
 import io
 import json as _json
-from flask import Blueprint, jsonify, request
+import queue
+from datetime import datetime as _dt
+from flask import Blueprint, jsonify, request, Response, stream_with_context
 from flask_login import login_required, current_user
-from models import Audit, Host, Vulnerability, Port, CVE_STATUS_VALUES, NotificationPref
+from models import Audit, Host, Vulnerability, Port, CVE_STATUS_VALUES, NotificationPref, PendingNotification
 from extensions import db
 from sqlalchemy import func
+from services.notifications import register_queue, unregister_queue
 
 api_bp = Blueprint("api", __name__, url_prefix="/api")
 
@@ -54,6 +57,79 @@ def set_notif_prefs(scope, entity_id):
     pref.events = _json.dumps(events)
     db.session.commit()
     return jsonify({"ok": True, "events": events})
+
+
+@api_bp.route("/notifications/pending")
+@login_required
+def get_pending_notifications():
+    """Return unread notifications for the current user and mark them as read."""
+    notifs = (
+        PendingNotification.query
+        .filter_by(user_id=current_user.id, read_at=None)
+        .order_by(PendingNotification.created_at.asc())
+        .all()
+    )
+    result = [{"id": n.id, "title": n.title, "body": n.body, "url": n.url} for n in notifs]
+    if notifs:
+        now = _dt.utcnow()
+        for n in notifs:
+            n.read_at = now
+        db.session.commit()
+    return jsonify(result)
+
+
+@api_bp.route("/notifications/stream")
+@login_required
+def notifications_stream():
+    """SSE stream — pushes notifications in real-time to the browser."""
+    user_id = current_user.id
+
+    # Drain any un-delivered DB notifications first so nothing is missed
+    missed = (
+        PendingNotification.query
+        .filter_by(user_id=user_id, read_at=None)
+        .order_by(PendingNotification.created_at.asc())
+        .all()
+    )
+    initial = [{"title": n.title, "body": n.body, "url": n.url} for n in missed]
+    if missed:
+        now = _dt.utcnow()
+        for n in missed:
+            n.read_at = now
+        db.session.commit()
+
+    q = register_queue(user_id)
+
+    @stream_with_context
+    def generate():
+        # Send any missed notifications immediately
+        for item in initial:
+            yield f"data: {_json.dumps(item)}\n\n"
+        # Then block on the in-memory queue
+        while True:
+            try:
+                item = q.get(timeout=25)
+                yield f"data: {_json.dumps(item)}\n\n"
+            except queue.Empty:
+                # SSE keepalive comment — prevents proxies from closing idle connections
+                yield ": keepalive\n\n"
+            except GeneratorExit:
+                break
+
+    def cleanup(resp):
+        unregister_queue(user_id, q)
+        return resp
+
+    response = Response(
+        generate(),
+        mimetype="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",   # disable nginx response buffering
+        },
+    )
+    response.call_on_close(lambda: unregister_queue(user_id, q))
+    return response
 
 
 @api_bp.route("/audits/<int:audit_id>/stats")

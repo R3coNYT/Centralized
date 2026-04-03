@@ -4,6 +4,7 @@ from flask_login import login_required, current_user
 from models import Audit, Client, Host, Vulnerability, Finding, Port
 from extensions import db
 from datetime import datetime
+from services.notifications import fire_notification
 
 audits_bp = Blueprint("audits", __name__, url_prefix="/audits")
 
@@ -50,6 +51,14 @@ def new_audit():
             end_date=end_date,
         )
         db.session.add(audit)
+        db.session.flush()  # get ID before firing notifications
+        if audit.client_id:
+            fire_notification(
+                "client", audit.client_id, "new_audit",
+                f"New audit: {audit.name}",
+                f"Target: {audit.target}" if audit.target else "A new audit has been created.",
+                f"/audits/{audit.id}",
+            )
         db.session.commit()
         flash(f"Audit '{name}' created.", "success")
         return redirect(url_for("audits.detail", audit_id=audit.id))
@@ -137,15 +146,38 @@ def edit_audit(audit_id):
     clients = Client.query.order_by(Client.name).all()
 
     if request.method == "POST":
+        old_status = audit.status
         audit.name = request.form.get("name", audit.name).strip()
         audit.target = request.form.get("target", "").strip()
         audit.scope = request.form.get("scope", "").strip()
         audit.notes = request.form.get("notes", "").strip()
-        audit.status = request.form.get("status", audit.status)
+        new_status = request.form.get("status", audit.status)
+        audit.status = new_status
         client_id = request.form.get("client_id")
         audit.client_id = int(client_id) if client_id else None
         audit.start_date = _parse_date(request.form.get("start_date"))
         audit.end_date = _parse_date(request.form.get("end_date"))
+        if old_status != new_status:
+            fire_notification(
+                "audit", audit.id, "status_change",
+                f"Audit status changed: {audit.name}",
+                f"Status: {old_status} → {new_status}",
+                f"/audits/{audit.id}",
+            )
+            if new_status == "completed":
+                fire_notification(
+                    "audit", audit.id, "audit_completed",
+                    f"Audit completed: {audit.name}",
+                    f"The audit has been marked as completed.",
+                    f"/audits/{audit.id}",
+                )
+                if audit.client_id:
+                    fire_notification(
+                        "client", audit.client_id, "audit_completed",
+                        f"Audit completed: {audit.name}",
+                        f"An audit for this client has been marked as completed.",
+                        f"/audits/{audit.id}",
+                    )
         db.session.commit()
         flash("Audit updated.", "success")
         return redirect(url_for("audits.detail", audit_id=audit.id))
