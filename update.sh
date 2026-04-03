@@ -43,6 +43,21 @@ detect_platform() {
     esac
 }
 
+# ── Resolve sudo ───────────────────────────────────────────────────────────────
+
+get_sudo() {
+    if [ "$PLATFORM" = "linux" ]; then
+        if command -v sudo >/dev/null 2>&1; then
+            SUDO="sudo"
+        else
+            err "sudo is required on Linux but was not found"
+            exit 1
+        fi
+    else
+        SUDO=""
+    fi
+}
+
 # ── Locate install directory ───────────────────────────────────────────────────
 
 find_install_dir() {
@@ -408,6 +423,7 @@ main() {
     echo
 
     detect_platform
+    get_sudo
     find_install_dir
     info "Install directory: $INSTALL_DIR"
 
