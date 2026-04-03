@@ -319,22 +319,22 @@ function downloadTrustScript() {
     <div class="d-flex">
       <div class="toast-body">
         <i class="bi bi-arrow-clockwise me-1"></i>
-        Une mise à jour est disponible.
+        Update available.
         <button type="button" class="btn btn-sm btn-light ms-2"
-                onclick="window.location.reload(true)">Recharger</button>
+                onclick="window.location.reload(true)">Reload</button>
       </div>
       <button type="button" class="btn-close btn-close-white me-2 m-auto"
-              data-bs-dismiss="toast" aria-label="Fermer"></button>
+              data-bs-dismiss="toast" aria-label="Close"></button>
     </div>
   </div>
 </div>
 
 <!-- ── PWA — "Install via address bar" toast ──────────────────────────── -->
 <div class="position-fixed bottom-0 start-0 p-3" style="z-index:2000">
-  <div id="pwa-addrbar-toast" class="toast align-items-center text-bg-info border-0"
+  <div id="pwa-addrbar-toast" class="toast align-items-center toast-bg-info border-0"
        role="alert" aria-live="polite" aria-atomic="true">
     <div class="d-flex">
-      <div class="toast-body" style="font-size:.85rem">
+      <div class="toast-body-white" style="font-size:.85rem">
         <i class="bi bi-browser-chrome me-1"></i>
         <strong>Install via Chrome address bar:</strong><br>
         Look for the <i class="bi bi-plus-circle"></i> icon at the right of the URL bar, then click <em>"Install Centralized"</em>.
@@ -434,9 +434,11 @@ function downloadTrustScript() {
     var btn = document.getElementById('notifSaveBtn');
     if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Saving…'; }
 
+    var csrfMeta = document.querySelector('meta[name="csrf-token"]');
+    var csrfToken = csrfMeta ? csrfMeta.getAttribute('content') : '';
     fetch('/api/notifications/prefs/' + _notifScope + '/' + _notifEntityId, {
       method:  'POST',
-      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': (document.cookie.match(/csrf_token=([^;]+)/) || [])[1] || '' },
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
       body:    JSON.stringify({ events: events }),
     })
     .then(function (r) { return r.ok ? r.json() : null; })
@@ -458,10 +460,9 @@ function downloadTrustScript() {
 
 {% if current_user.is_authenticated %}
 <script>
-/* ── Desktop notifications via SSE (real-time) ─────────────────────────── */
+/* ── Desktop notifications via polling (every 30s) ─────────────────────── */
 (function () {
   var ICON = '/static/img/icon-192.png';
-  var es   = null;
 
   function showNotif(title, body, url) {
     if (!('Notification' in window) || Notification.permission !== 'granted') return;
@@ -471,30 +472,28 @@ function downloadTrustScript() {
     }
   }
 
-  function connect() {
-    if (es) { try { es.close(); } catch(e) {} }
-    es = new EventSource('/api/notifications/stream');
-    es.onmessage = function (e) {
-      try {
-        var n = JSON.parse(e.data);
-        showNotif(n.title, n.body, n.url);
-      } catch(err) {}
-    };
-    es.onerror = function () {
-      /* EventSource reconnects automatically; close and let browser retry */
-      es.close();
-      setTimeout(connect, 5000);
-    };
+  function poll() {
+    fetch('/api/notifications/pending')
+      .then(function (r) { return r.ok ? r.json() : []; })
+      .then(function (items) {
+        items.forEach(function (n) { showNotif(n.title, n.body, n.url); });
+      })
+      .catch(function () {});
+  }
+
+  function start() {
+    poll();
+    setInterval(poll, 30000);
   }
 
   if (!('Notification' in window)) return;
   if (Notification.permission === 'granted') {
-    connect();
+    start();
   } else if (Notification.permission !== 'denied') {
     /* Ask on first click so the browser doesn't block the prompt */
     document.addEventListener('click', function _req() {
       document.removeEventListener('click', _req);
-      Notification.requestPermission().then(function (p) { if (p === 'granted') connect(); });
+      Notification.requestPermission().then(function (p) { if (p === 'granted') start(); });
     }, { once: true });
   }
 })();
@@ -531,7 +530,7 @@ function downloadTrustScript() {
     }
   }
 
-  // Poll once immediately, then every 60 seconds
+  // Poll once immediately, then every 30 seconds
   function checkUpdate() {
     fetch('/admin/update-status')
       .then(r => r.ok ? r.json() : null)
@@ -588,7 +587,7 @@ function downloadTrustScript() {
   }
 
   checkUpdate();
-  setInterval(checkUpdate, 60000);
+  setInterval(checkUpdate, 30000);
 })();
 </script>
 {% endif %}
