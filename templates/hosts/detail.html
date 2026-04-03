@@ -119,11 +119,18 @@
           <tr class="tbl-filter-row">
             <th><input data-fc="0" type="text" placeholder="Port…"></th>
             <th>
-              <select data-fc="1">
-                <option value="">All</option>
-                <option value="tcp">TCP</option>
-                <option value="udp">UDP</option>
-              </select>
+              <div class="dropdown cs-wrapper">
+                <button type="button" class="cs-toggle btn w-100 d-flex align-items-center justify-content-between" data-bs-toggle="dropdown" aria-expanded="false">
+                  <span class="cs-label">All</span>
+                  <i class="bi bi-chevron-down cs-chevron ms-2 flex-shrink-0" aria-hidden="true"></i>
+                </button>
+                <ul class="cs-menu dropdown-menu w-100">
+                  <li><a class="cs-item dropdown-item active" href="#" data-value="" onclick="csSet(this);return false;">All</a></li>
+                  <li><a class="cs-item dropdown-item" href="#" data-value="tcp" onclick="csSet(this);return false;">TCP</a></li>
+                  <li><a class="cs-item dropdown-item" href="#" data-value="udp" onclick="csSet(this);return false;">UDP</a></li>
+                </ul>
+                <input type="hidden" data-fc="1" value="">
+              </div>
             </th>
             <th><input data-fc="2" type="text" placeholder="Service…"></th>
             <th><input data-fc="3" type="text" placeholder="Product…"></th>
@@ -388,22 +395,33 @@
           <td><span class="badge bg-secondary small">{{ v.source }}</span></td>
           <td class="small text-muted" style="max-width:300px">{{ (v.description or '')[:120] }}{% if v.description and v.description|length > 120 %}…{% endif %}</td>
           <td style="min-width:160px">
-            <select class="form-select form-select-sm cve-status-select
-              {% if v.cve_status == 'active' %}border-danger
-              {% elif v.cve_status == 'corrected' %}border-success
-              {% elif v.cve_status == 'false_positive' %}border-secondary
-              {% elif v.cve_status == 'mitigated' %}border-warning
-              {% elif v.cve_status == 'accepted' %}border-info
-              {% endif %}"
-              data-vuln-id="{{ v.id }}"
-              data-host-id="{{ host.id }}"
-              onchange="updateVulnStatus(this)">
-              {% for s in cve_status_values %}
-              <option value="{{ s }}" {% if v.cve_status == s %}selected{% endif %}>
-                {{ {'active':'🔴 Active','corrected':'✅ Corrected','false_positive':'⚪ False Positive','mitigated':'🟡 Mitigated','accepted':'🔵 Accepted Risk'}.get(s, s) }}
-              </option>
-              {% endfor %}
-            </select>
+            {% set _s = v.cve_status %}
+            <div class="dropdown cs-wrapper"
+                 data-vuln-id="{{ v.id }}"
+                 data-host-id="{{ host.id }}">
+              <button type="button"
+                      class="cs-toggle btn btn-sm w-100 d-flex align-items-center justify-content-between
+                        {% if _s == 'active' %}border-danger
+                        {% elif _s == 'corrected' %}border-success
+                        {% elif _s == 'false_positive' %}border-secondary
+                        {% elif _s == 'mitigated' %}border-warning
+                        {% elif _s == 'accepted' %}border-info
+                        {% endif %}"
+                      data-bs-toggle="dropdown" aria-expanded="false">
+                <span class="cs-label text-truncate">{{ {'active':'🔴 Active','corrected':'✅ Corrected','false_positive':'⚪ False Positive','mitigated':'🟡 Mitigated','accepted':'🔵 Accepted Risk'}.get(_s, _s) }}</span>
+                <i class="bi bi-chevron-down cs-chevron ms-2 flex-shrink-0" aria-hidden="true"></i>
+              </button>
+              <ul class="cs-menu dropdown-menu w-100">
+                {% for s in cve_status_values %}
+                <li><a class="cs-item dropdown-item {% if _s == s %}active{% endif %}"
+                       href="#" data-value="{{ s }}"
+                       onclick="csVuln(this);return false;">
+                  {{ {'active':'🔴 Active','corrected':'✅ Corrected','false_positive':'⚪ False Positive','mitigated':'🟡 Mitigated','accepted':'🔵 Accepted Risk'}.get(s, s) }}
+                </a></li>
+                {% endfor %}
+              </ul>
+              <input type="hidden" class="cve-status-select" value="{{ _s }}">
+            </div>
           </td>
           <td class="text-center" style="min-width:36px">
             {% if v.cve_id %}
@@ -612,6 +630,20 @@ async function analyzeHost(hostId) {
     btn.disabled = false;
     btn.innerHTML = '<i class="bi bi-cpu me-1"></i>Analyze Risk & CVEs';
   }
+}
+
+/* csVuln(a) — onclick handler for cve-status dropdown items.
+   Passes a proxy to updateVulnStatus so classList changes apply to
+   the visible toggle button (not a hidden element). */
+function csVuln(a) {
+  csSet(a);
+  const w = a.closest('.cs-wrapper');
+  const btn = w.querySelector('.cs-toggle');
+  updateVulnStatus({
+    dataset: { vulnId: w.dataset.vulnId },
+    value: a.dataset.value,
+    classList: btn.classList,
+  });
 }
 
 async function updateVulnStatus(select) {
@@ -910,11 +942,24 @@ function markVulnFalsePositive(vulnId) {
   const row = document.getElementById('vuln-row-' + vulnId);
   if (!row) return;
   row.classList.add('opacity-50');
-  const select = row.querySelector('.cve-status-select');
-  if (select) {
-    select.value = 'false_positive';
-    Object.values(STATUS_BORDER).forEach(c => select.classList.remove(c));
-    select.classList.add(STATUS_BORDER.false_positive);
+  // Update hidden input value
+  const inp = row.querySelector('.cve-status-select');
+  if (inp) inp.value = 'false_positive';
+  // Sync the visible toggle button
+  const w = row.querySelector('.cs-wrapper[data-vuln-id]');
+  if (w) {
+    const btn = w.querySelector('.cs-toggle');
+    if (btn) {
+      Object.values(STATUS_BORDER).forEach(c => btn.classList.remove(c));
+      btn.classList.add(STATUS_BORDER.false_positive);
+    }
+    const fpItem = w.querySelector('.cs-item[data-value="false_positive"]');
+    if (fpItem) {
+      w.querySelectorAll('.cs-item.active').forEach(i => i.classList.remove('active'));
+      fpItem.classList.add('active');
+      const lbl = w.querySelector('.cs-label');
+      if (lbl) lbl.textContent = fpItem.textContent.trim();
+    }
   }
 }
 

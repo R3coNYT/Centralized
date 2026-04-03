@@ -41,12 +41,19 @@
             <th><input data-fc="1" type="text" placeholder="Client…"></th>
             <th><input data-fc="2" type="text" placeholder="Target…"></th>
             <th>
-              <select data-fc="3">
-                <option value="">All statuses</option>
-                <option value="in progress">In Progress</option>
-                <option value="completed">Completed</option>
-                <option value="archived">Archived</option>
-              </select>
+              <div class="dropdown cs-wrapper">
+                <button type="button" class="cs-toggle btn w-100 d-flex align-items-center justify-content-between" data-bs-toggle="dropdown" aria-expanded="false">
+                  <span class="cs-label">All statuses</span>
+                  <i class="bi bi-chevron-down cs-chevron ms-2 flex-shrink-0" aria-hidden="true"></i>
+                </button>
+                <ul class="cs-menu dropdown-menu w-100">
+                  <li><a class="cs-item dropdown-item active" href="#" data-value="" onclick="csSet(this);return false;">All statuses</a></li>
+                  <li><a class="cs-item dropdown-item" href="#" data-value="in progress" onclick="csSet(this);return false;">In Progress</a></li>
+                  <li><a class="cs-item dropdown-item" href="#" data-value="completed" onclick="csSet(this);return false;">Completed</a></li>
+                  <li><a class="cs-item dropdown-item" href="#" data-value="archived" onclick="csSet(this);return false;">Archived</a></li>
+                </ul>
+                <input type="hidden" data-fc="3" value="">
+              </div>
             </th>
             <th></th><th></th><th></th><th></th><th></th>
           </tr>

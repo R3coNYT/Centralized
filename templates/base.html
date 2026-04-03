@@ -611,10 +611,11 @@ function downloadTrustScript() {
 <!-- ── Column filter (shared) ─────────────────────────────────────────────── -->
 <style>
 thead .tbl-filter-row th{padding:.2rem .4rem;background:rgba(0,0,0,.18)}
-thead .tbl-filter-row input,
-thead .tbl-filter-row select{width:100%;font-size:.72rem;padding:.15rem .35rem;border:1px solid rgba(255,255,255,.18);border-radius:.25rem;background:rgba(255,255,255,.07);color:inherit}
+thead .tbl-filter-row input{width:100%;font-size:.72rem;padding:.15rem .35rem;border:1px solid rgba(255,255,255,.18);border-radius:.25rem;background:rgba(255,255,255,.07);color:inherit}
 thead .tbl-filter-row input::placeholder{opacity:.45}
-thead .tbl-filter-row select option{background:#1e2a36;color:#cdd3da}
+/* data-fc dropdown toggle inside filter th */
+thead .tbl-filter-row .cs-toggle{font-size:.72rem;padding:.15rem .5rem;border-radius:.25rem}
+thead .tbl-filter-row .cs-toggle .cs-chevron{font-size:.65em}
 th[data-sort]{cursor:pointer;user-select:none;white-space:nowrap}
 th[data-sort]::after{content:' ⇅';opacity:.35;font-size:.75em;vertical-align:middle}
 th[data-sort][aria-sort="ascending"]::after{content:' ↑';opacity:1}
@@ -727,6 +728,37 @@ th[data-sort][aria-sort="descending"]::after{content:' ↓';opacity:1}
     localStorage.setItem('sidebarCollapsed', next);
   });
 })();
+</script>
+
+<!-- ── Custom Select helpers ─────────────────────────────────────────────── -->
+<script>
+/* csSet(anchor) — called by onclick on each .cs-item
+   Updates the visible toggle label, marks active item,
+   and sets the hidden input value + fires a change event. */
+function csSet(a) {
+  var w = a.closest('.cs-wrapper');
+  w.querySelector('.cs-label').textContent = a.textContent.trim();
+  w.querySelectorAll('.cs-item.active').forEach(function(i){i.classList.remove('active');});
+  a.classList.add('active');
+  var inp = w.querySelector('input[type=hidden]');
+  if (inp) { inp.value = a.dataset.value; inp.dispatchEvent(new Event('input',{bubbles:true})); inp.dispatchEvent(new Event('change',{bubbles:true})); }
+}
+
+/* csSetValue(id, value) — programmatically set a custom select by hidden-input id.
+   Used for modal pre-fill (e.g. edit-role). */
+function csSetValue(id, value) {
+  var inp = document.getElementById(id);
+  if (!inp) return;
+  inp.value = value;
+  var w = inp.closest('.cs-wrapper');
+  if (!w) return;
+  var target = w.querySelector('.cs-item[data-value="' + value.replace(/"/g,'\\"') + '"]');
+  if (target) {
+    w.querySelector('.cs-label').textContent = target.textContent.trim();
+    w.querySelectorAll('.cs-item.active').forEach(function(i){i.classList.remove('active');});
+    target.classList.add('active');
+  }
+}
 </script>
 </body>
 </html>

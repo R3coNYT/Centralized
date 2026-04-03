@@ -293,6 +293,192 @@ body {
   cursor: not-allowed;
 }
 
+/* ── Custom Select (cs-*) — glassmorphic ul/li dropdown ──── */
+
+.cs-wrapper {
+  position: relative;
+}
+
+/* Toggle button — mimics a select appearance */
+.cs-toggle {
+  color: #dee2e6;
+  background-color: rgba(30, 36, 48, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-top-color: rgba(255, 255, 255, 0.22);
+  border-radius: 0.6rem;
+  backdrop-filter: blur(8px) saturate(140%);
+  -webkit-backdrop-filter: blur(8px) saturate(140%);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25),
+              inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+  padding: 0.375rem 0.75rem;
+  font-size: 1rem;
+  text-align: left;
+}
+
+.cs-toggle.btn-sm {
+  padding: 0.25rem 0.5rem;
+  font-size: 0.875rem;
+}
+
+.cs-toggle:hover:not(:disabled) {
+  color: #dee2e6;
+  background-color: rgba(36, 44, 58, 0.92);
+  border-color: rgba(255, 255, 255, 0.24);
+  border-top-color: rgba(255, 255, 255, 0.34);
+}
+
+.cs-toggle:focus,
+.cs-toggle:focus-visible,
+.cs-toggle[aria-expanded="true"] {
+  color: #dee2e6;
+  background-color: rgba(36, 44, 60, 0.92);
+  border-color: rgba(13, 110, 253, 0.65);
+  border-top-color: rgba(13, 110, 253, 0.65);
+  border-radius: 0.6rem;
+  box-shadow: 0 0 0 3px rgba(13, 110, 253, 0.18),
+              0 2px 10px rgba(0, 0, 0, 0.30),
+              inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  outline: none;
+}
+
+/* Chevron rotation when open */
+.cs-toggle[aria-expanded="true"] .cs-chevron {
+  transform: rotate(180deg);
+}
+
+.cs-chevron {
+  transition: transform 0.2s ease;
+  font-size: 0.75em;
+  opacity: 0.7;
+}
+
+/* Disabled wrapper */
+.cs-disabled .cs-toggle {
+  background-color: rgba(22, 25, 32, 0.70);
+  color: #6c757d;
+  border-color: rgba(255, 255, 255, 0.07);
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+/* Dropdown menu panel */
+.cs-menu {
+  background-color: rgba(18, 22, 32, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-top-color: rgba(255, 255, 255, 0.22);
+  border-radius: 0.6rem;
+  backdrop-filter: blur(16px) saturate(160%);
+  -webkit-backdrop-filter: blur(16px) saturate(160%);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.40),
+              0 2px 8px rgba(0, 0, 0, 0.24),
+              inset 0 1px 0 rgba(255, 255, 255, 0.10);
+  padding: 0.35rem 0;
+  margin-top: 4px !important;
+  overflow: hidden;
+  max-height: 260px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,0.15) transparent;
+}
+
+.cs-menu::-webkit-scrollbar { width: 5px; }
+.cs-menu::-webkit-scrollbar-track { background: transparent; }
+.cs-menu::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.18);
+  border-radius: 4px;
+}
+
+/* Items */
+.cs-item {
+  color: #c9d1db;
+  border-radius: 0.35rem;
+  margin: 1px 6px;
+  padding: 0.42rem 0.75rem;
+  font-size: 0.9rem;
+  transition: background-color 0.12s ease, color 0.12s ease;
+  display: block;
+  text-decoration: none;
+  user-select: none;
+}
+
+.cs-item:hover:not(.disabled):not(.cs-item-disabled) {
+  background-color: rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+
+.cs-item.active {
+  background-color: rgba(13, 110, 253, 0.26);
+  color: #74b0ff;
+  font-weight: 500;
+}
+
+.cs-item.active:hover {
+  background-color: rgba(13, 110, 253, 0.36);
+  color: #90c0ff;
+}
+
+.cs-placeholder,
+.cs-item-disabled {
+  color: #5a6370 !important;
+  font-size: 0.82rem;
+  cursor: default;
+}
+
+/* ── Glass mode overrides for custom select ── */
+html[data-glass="1"] .cs-toggle {
+  background-color: rgba(255, 255, 255, 0.07) !important;
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
+  border-top-color: rgba(255, 255, 255, 0.28) !important;
+  backdrop-filter: blur(16px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(16px) saturate(180%) !important;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.20),
+              inset 0 1px 0 rgba(255,255,255,0.18),
+              inset 0 -1px 0 rgba(0,0,0,0.08) !important;
+  color: #fff !important;
+}
+
+html[data-glass="1"] .cs-toggle:hover:not(:disabled) {
+  background-color: rgba(255, 255, 255, 0.12) !important;
+  border-color: rgba(255, 255, 255, 0.28) !important;
+  border-top-color: rgba(255, 255, 255, 0.42) !important;
+}
+
+html[data-glass="1"] .cs-toggle:focus,
+html[data-glass="1"] .cs-toggle[aria-expanded="true"] {
+  background-color: rgba(255, 255, 255, 0.14) !important;
+  border-color: rgba(13, 110, 253, 0.70) !important;
+  border-top-color: rgba(13, 110, 253, 0.70) !important;
+  box-shadow: 0 0 0 3px rgba(13, 110, 253, 0.22),
+              0 4px 20px rgba(0, 0, 0, 0.25),
+              inset 0 1px 0 rgba(255, 255, 255, 0.24) !important;
+  color: #fff !important;
+}
+
+html[data-glass="1"] .cs-menu {
+  background-color: rgba(8, 12, 22, 0.72) !important;
+  border: 1px solid rgba(255, 255, 255, 0.16) !important;
+  border-top-color: rgba(255, 255, 255, 0.30) !important;
+  backdrop-filter: blur(28px) saturate(200%) !important;
+  -webkit-backdrop-filter: blur(28px) saturate(200%) !important;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.50),
+              inset 0 1px 0 rgba(255,255,255,0.16) !important;
+}
+
+html[data-glass="1"] .cs-item {
+  color: rgba(255,255,255,0.82);
+}
+
+html[data-glass="1"] .cs-item:hover:not(.disabled) {
+  background-color: rgba(255,255,255,0.10);
+  color: #fff;
+}
+
+html[data-glass="1"] .cs-item.active {
+  background-color: rgba(13,110,253,0.32);
+  color: #90c8ff;
+}
+
 
 .font-monospace { font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace; }
 
