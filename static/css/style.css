@@ -703,6 +703,7 @@ html[data-glass="1"] .modal-footer {
 
 /* ── 6. Form controls ──────────────────────────────────────── */
 html[data-glass="1"] .form-control,
+html[data-glass="1"] .dropdown,
 html[data-glass="1"] .form-select {
   background-color: rgba(255,255,255,0.07) !important;
   border: 1px solid rgba(255,255,255,0.14) !important;
@@ -717,12 +718,14 @@ html[data-glass="1"] .form-select {
   transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
 }
 html[data-glass="1"] .form-control:hover:not(:disabled):not(:focus),
+html[data-glass="1"] .dropdown:hover:not(:disabled):not(:focus),
 html[data-glass="1"] .form-select:hover:not(:disabled):not(:focus) {
   background-color: rgba(255,255,255,0.11) !important;
   border-color: rgba(255,255,255,0.24) !important;
   border-top-color: rgba(255,255,255,0.38) !important;
 }
 html[data-glass="1"] .form-control:focus,
+html[data-glass="1"] .dropdown:focus,
 html[data-glass="1"] .form-select:focus {
   background-color: rgba(255,255,255,0.13) !important;
   border-color: rgba(13,110,253,0.70) !important;
