@@ -358,6 +358,29 @@ class CveCache(db.Model):
             "source":            "nvd",
         }
 
+
+# ---------------------------------------------------------------------------
+# Notification Preferences (per-user, per-entity subscriptions)
+# ---------------------------------------------------------------------------
+
+class NotificationPref(db.Model):
+    __tablename__ = "notification_prefs"
+    id         = db.Column(db.Integer, primary_key=True)
+    user_id    = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    scope      = db.Column(db.String(20), nullable=False)   # client / audit / host
+    entity_id  = db.Column(db.Integer, nullable=False)
+    events     = db.Column(db.Text, default="[]")           # JSON list of subscribed event keys
+    updated_at = db.Column(db.DateTime, default=utcnow, onupdate=utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint("user_id", "scope", "entity_id", name="uq_notif_pref"),
+    )
+
+    user = db.relationship(
+        "User",
+        backref=db.backref("notification_prefs", cascade="all, delete-orphan", lazy="dynamic"),
+    )
+
     def __repr__(self):
         return f"<CveCache {self.cve_id} expires={self.expires_at}>"
 

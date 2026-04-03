@@ -15,10 +15,15 @@
 
 /* ── Layout ─────────────────────────────────────────────── */
 
+html {
+  overflow-x: hidden;
+}
+
 body {
   background-color: var(--bg-surface);
   min-height: 100vh;
   display: flex;
+  overflow-x: hidden;
 }
 
 .sidebar {

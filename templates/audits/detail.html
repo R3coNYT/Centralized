@@ -194,7 +194,17 @@
             {% if h_vulns > 0 %}<span class="badge {% if h_vulns > 5 %}sev-high{% else %}bg-warning text-dark{% endif %}">{{ h_vulns }}</span>
             {% else %}<span class="text-muted">0</span>{% endif %}
           </td>
-          <td><a href="{{ url_for('hosts.detail', host_id=host.id) }}" class="btn btn-sm btn-outline-secondary"><i class="bi bi-eye"></i></a></td>
+          <td>
+            <div class="d-flex gap-1">
+              <button class="btn btn-sm btn-outline-secondary"
+                      data-notif-scope="host" data-notif-id="{{ host.id }}"
+                      onclick="openNotifModal('host', {{ host.id }}, '{{ host.ip }}')"
+                      title="Set notifications" style="padding:.15rem .35rem;font-size:.8rem">
+                <i class="bi bi-bell"></i>
+              </button>
+              <a href="{{ url_for('hosts.detail', host_id=host.id) }}" class="btn btn-sm btn-outline-secondary"><i class="bi bi-eye"></i></a>
+            </div>
+          </td>
         </tr>
         {% else %}
         <tr><td colspan="8" class="text-center text-muted py-4">No hosts yet. Upload scan files to populate.</td></tr>
