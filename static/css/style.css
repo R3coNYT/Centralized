@@ -748,6 +748,12 @@ html[data-glass="1"] .toast-header {
 html[data-glass="1"] .toast-bg-warning {
   background: rgba(255,193,7,0.7) !important;
 }
+html[data-glass="1"] .toast-bg-info {
+  background: rgba(0, 102, 255, 0.7) !important;
+}
+html[data-glass="1"] .toast-body-white {
+  background: rgb(255, 255, 255) !important;
+}
 
 /* ── 20. Drop zone ──────────────────────────────────────────── */
 html[data-glass="1"] .drop-zone {
