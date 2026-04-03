@@ -148,14 +148,21 @@
             <th><input data-fc="1" type="text" placeholder="Hostname…"></th>
             <th><input data-fc="2" type="text" placeholder="OS…"></th>
             <th>
-              <select data-fc="3">
-                <option value="">All risks</option>
-                <option value="critical">Critical</option>
-                <option value="high">High</option>
-                <option value="medium">Medium</option>
-                <option value="low">Low</option>
-                <option value="info">Info</option>
-              </select>
+              <div class="dropdown cs-wrapper">
+                <button type="button" class="cs-toggle btn w-100 d-flex align-items-center justify-content-between" data-bs-toggle="dropdown" aria-expanded="false">
+                  <span class="cs-label">All risks</span>
+                  <i class="bi bi-chevron-down cs-chevron ms-2 flex-shrink-0" aria-hidden="true"></i>
+                </button>
+                <ul class="cs-menu dropdown-menu w-100">
+                  <li><a class="cs-item dropdown-item active" href="#" data-value="" onclick="csSet(this);return false;">All risks</a></li>
+                  <li><a class="cs-item dropdown-item" href="#" data-value="critical" onclick="csSet(this);return false;">Critical</a></li>
+                  <li><a class="cs-item dropdown-item" href="#" data-value="high" onclick="csSet(this);return false;">High</a></li>
+                  <li><a class="cs-item dropdown-item" href="#" data-value="medium" onclick="csSet(this);return false;">Medium</a></li>
+                  <li><a class="cs-item dropdown-item" href="#" data-value="low" onclick="csSet(this);return false;">Low</a></li>
+                  <li><a class="cs-item dropdown-item" href="#" data-value="info" onclick="csSet(this);return false;">Info</a></li>
+                </ul>
+                <input type="hidden" data-fc="3" value="">
+              </div>
             </th>
             <th><input data-fc="4" type="text" placeholder="CMS/WAF…"></th>
             <th></th><th></th><th></th>
@@ -272,12 +279,19 @@
             <th><input data-fc="1" type="text" placeholder="Type…"></th>
             <th></th>
             <th>
-              <select data-fc="3">
-                <option value="">All</option>
-                <option value="ok">OK</option>
-                <option value="error">Error</option>
-                <option value="pending">Pending</option>
-              </select>
+              <div class="dropdown cs-wrapper">
+                <button type="button" class="cs-toggle btn w-100 d-flex align-items-center justify-content-between" data-bs-toggle="dropdown" aria-expanded="false">
+                  <span class="cs-label">All</span>
+                  <i class="bi bi-chevron-down cs-chevron ms-2 flex-shrink-0" aria-hidden="true"></i>
+                </button>
+                <ul class="cs-menu dropdown-menu w-100">
+                  <li><a class="cs-item dropdown-item active" href="#" data-value="" onclick="csSet(this);return false;">All</a></li>
+                  <li><a class="cs-item dropdown-item" href="#" data-value="ok" onclick="csSet(this);return false;">OK</a></li>
+                  <li><a class="cs-item dropdown-item" href="#" data-value="error" onclick="csSet(this);return false;">Error</a></li>
+                  <li><a class="cs-item dropdown-item" href="#" data-value="pending" onclick="csSet(this);return false;">Pending</a></li>
+                </ul>
+                <input type="hidden" data-fc="3" value="">
+              </div>
             </th>
             <th></th><th></th>
           </tr>
@@ -335,29 +349,50 @@
           <div class="row mb-3">
             <div class="col-md-6">
               <label class="form-label fw-semibold">Host</label>
-              <select class="form-select" name="host_id">
-                <option value="">— Global finding —</option>
-                {% for h in hosts %}<option value="{{ h.id }}">{{ h.ip }}{% if h.hostname %} ({{ h.hostname }}){% endif %}</option>{% endfor %}
-              </select>
+              <div class="dropdown cs-wrapper">
+                <button type="button" class="cs-toggle btn w-100 d-flex align-items-center justify-content-between" data-bs-toggle="dropdown" aria-expanded="false">
+                  <span class="cs-label">— Global finding —</span>
+                  <i class="bi bi-chevron-down cs-chevron ms-2 flex-shrink-0" aria-hidden="true"></i>
+                </button>
+                <ul class="cs-menu dropdown-menu w-100">
+                  <li><a class="cs-item dropdown-item active" href="#" data-value="" onclick="csSet(this);return false;">— Global finding —</a></li>
+                  {% for h in hosts %}<li><a class="cs-item dropdown-item" href="#" data-value="{{ h.id }}" onclick="csSet(this);return false;">{{ h.ip }}{% if h.hostname %} ({{ h.hostname }}){% endif %}</a></li>{% endfor %}
+                </ul>
+                <input type="hidden" name="host_id" value="">
+              </div>
             </div>
             <div class="col-md-3">
               <label class="form-label fw-semibold">Severity</label>
-              <select class="form-select" name="severity">
-                <option value="CRITICAL">Critical</option>
-                <option value="HIGH">High</option>
-                <option value="MEDIUM" selected>Medium</option>
-                <option value="LOW">Low</option>
-                <option value="INFO">Info</option>
-              </select>
+              <div class="dropdown cs-wrapper">
+                <button type="button" class="cs-toggle btn w-100 d-flex align-items-center justify-content-between" data-bs-toggle="dropdown" aria-expanded="false">
+                  <span class="cs-label">Medium</span>
+                  <i class="bi bi-chevron-down cs-chevron ms-2 flex-shrink-0" aria-hidden="true"></i>
+                </button>
+                <ul class="cs-menu dropdown-menu w-100">
+                  <li><a class="cs-item dropdown-item" href="#" data-value="CRITICAL" onclick="csSet(this);return false;">Critical</a></li>
+                  <li><a class="cs-item dropdown-item" href="#" data-value="HIGH" onclick="csSet(this);return false;">High</a></li>
+                  <li><a class="cs-item dropdown-item active" href="#" data-value="MEDIUM" onclick="csSet(this);return false;">Medium</a></li>
+                  <li><a class="cs-item dropdown-item" href="#" data-value="LOW" onclick="csSet(this);return false;">Low</a></li>
+                  <li><a class="cs-item dropdown-item" href="#" data-value="INFO" onclick="csSet(this);return false;">Info</a></li>
+                </ul>
+                <input type="hidden" name="severity" value="MEDIUM">
+              </div>
             </div>
             <div class="col-md-3">
               <label class="form-label fw-semibold">Status</label>
-              <select class="form-select" name="status">
-                <option value="open" selected>Open</option>
-                <option value="confirmed">Confirmed</option>
-                <option value="mitigated">Mitigated</option>
-                <option value="false_positive">False Positive</option>
-              </select>
+              <div class="dropdown cs-wrapper">
+                <button type="button" class="cs-toggle btn w-100 d-flex align-items-center justify-content-between" data-bs-toggle="dropdown" aria-expanded="false">
+                  <span class="cs-label">Open</span>
+                  <i class="bi bi-chevron-down cs-chevron ms-2 flex-shrink-0" aria-hidden="true"></i>
+                </button>
+                <ul class="cs-menu dropdown-menu w-100">
+                  <li><a class="cs-item dropdown-item active" href="#" data-value="open" onclick="csSet(this);return false;">Open</a></li>
+                  <li><a class="cs-item dropdown-item" href="#" data-value="confirmed" onclick="csSet(this);return false;">Confirmed</a></li>
+                  <li><a class="cs-item dropdown-item" href="#" data-value="mitigated" onclick="csSet(this);return false;">Mitigated</a></li>
+                  <li><a class="cs-item dropdown-item" href="#" data-value="false_positive" onclick="csSet(this);return false;">False Positive</a></li>
+                </ul>
+                <input type="hidden" name="status" value="open">
+              </div>
             </div>
           </div>
           <div class="mb-3">

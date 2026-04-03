@@ -42,14 +42,19 @@
           <i class="bi bi-clipboard2-data me-1"></i>Auto-scan all services from an audit
         </div>
         <form method="GET" action="{{ url_for('cve.search_page') }}" class="d-flex gap-2">
-          <select name="audit_id" class="form-select form-select-sm">
-            <option value="">— Select audit —</option>
-            {% for a in audits %}
-            <option value="{{ a.id }}" {% if audit_id == a.id %}selected{% endif %}>
-              {{ a.name }}{% if a.target %} ({{ a.target }}){% endif %}
-            </option>
-            {% endfor %}
-          </select>
+          <div class="dropdown cs-wrapper flex-grow-1">
+            <button type="button" class="cs-toggle btn btn-sm w-100 d-flex align-items-center justify-content-between" data-bs-toggle="dropdown" aria-expanded="false">
+              <span class="cs-label">{% set _sel = audits | selectattr('id', 'equalto', audit_id) | list %}{% if _sel %}{{ _sel[0].name }}{% if _sel[0].target %} ({{ _sel[0].target }}){% endif %}{% else %}— Select audit —{% endif %}</span>
+              <i class="bi bi-chevron-down cs-chevron ms-2 flex-shrink-0" aria-hidden="true"></i>
+            </button>
+            <ul class="cs-menu dropdown-menu w-100">
+              <li><a class="cs-item dropdown-item {% if not audit_id %}active{% endif %}" href="#" data-value="" onclick="csSet(this);return false;">— Select audit —</a></li>
+              {% for a in audits %}
+              <li><a class="cs-item dropdown-item {% if audit_id == a.id %}active{% endif %}" href="#" data-value="{{ a.id }}" onclick="csSet(this);return false;">{{ a.name }}{% if a.target %} ({{ a.target }}){% endif %}</a></li>
+              {% endfor %}
+            </ul>
+            <input type="hidden" name="audit_id" value="{{ audit_id or '' }}">
+          </div>
           <button class="btn btn-outline-secondary btn-sm px-3" type="submit">
             <i class="bi bi-magic me-1"></i>Scan
           </button>

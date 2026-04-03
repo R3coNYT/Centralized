@@ -19,11 +19,18 @@
             <th><input data-fc="0" type="text" placeholder="Username…"></th>
             <th><input data-fc="1" type="text" placeholder="Email…"></th>
             <th>
-              <select data-fc="2">
-                <option value="">All roles</option>
-                <option value="admin">Admin</option>
-                <option value="analyst">Analyst</option>
-              </select>
+              <div class="dropdown cs-wrapper">
+                <button type="button" class="cs-toggle btn w-100 d-flex align-items-center justify-content-between" data-bs-toggle="dropdown" aria-expanded="false">
+                  <span class="cs-label">All roles</span>
+                  <i class="bi bi-chevron-down cs-chevron ms-2 flex-shrink-0" aria-hidden="true"></i>
+                </button>
+                <ul class="cs-menu dropdown-menu w-100">
+                  <li><a class="cs-item dropdown-item active" href="#" data-value="" onclick="csSet(this);return false;">All roles</a></li>
+                  <li><a class="cs-item dropdown-item" href="#" data-value="admin" onclick="csSet(this);return false;">Admin</a></li>
+                  <li><a class="cs-item dropdown-item" href="#" data-value="analyst" onclick="csSet(this);return false;">Analyst</a></li>
+                </ul>
+                <input type="hidden" data-fc="2" value="">
+              </div>
             </th>
             <th></th><th></th>
           </tr>
@@ -97,10 +104,17 @@
           </div>
           <div class="mb-3">
             <label class="form-label fw-semibold">Role</label>
-            <select name="role" id="edit-role" class="form-select">
-              <option value="analyst">Analyst</option>
-              <option value="admin">Admin</option>
-            </select>
+            <div class="dropdown cs-wrapper">
+              <button type="button" class="cs-toggle btn w-100 d-flex align-items-center justify-content-between" data-bs-toggle="dropdown" aria-expanded="false">
+                <span class="cs-label">Analyst</span>
+                <i class="bi bi-chevron-down cs-chevron ms-2 flex-shrink-0" aria-hidden="true"></i>
+              </button>
+              <ul class="cs-menu dropdown-menu w-100">
+                <li><a class="cs-item dropdown-item active" href="#" data-value="analyst" onclick="csSet(this);return false;">Analyst</a></li>
+                <li><a class="cs-item dropdown-item" href="#" data-value="admin" onclick="csSet(this);return false;">Admin</a></li>
+              </ul>
+              <input type="hidden" name="role" id="edit-role" value="analyst">
+            </div>
           </div>
           <div class="mb-1">
             <label class="form-label fw-semibold">New Password
@@ -142,7 +156,7 @@ document.getElementById('editUserModal').addEventListener('show.bs.modal', funct
 
   document.getElementById('edit-username').value = username;
   document.getElementById('edit-email').value    = email;
-  document.getElementById('edit-role').value     = role;
+  csSetValue('edit-role', role);
   document.getElementById('edit-password').value = '';
   document.getElementById('editUserForm').action = `/users/${uid}/edit`;
   document.getElementById('editUserModalLabel').innerHTML =

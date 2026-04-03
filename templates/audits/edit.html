@@ -18,12 +18,19 @@
 
           <div class="mb-3">
             <label class="form-label fw-semibold">Client</label>
-            <select class="form-select" name="client_id">
-              <option value="">— No client —</option>
-              {% for c in clients %}
-              <option value="{{ c.id }}" {% if audit.client_id == c.id %}selected{% endif %}>{{ c.name }}</option>
-              {% endfor %}
-            </select>
+            <div class="dropdown cs-wrapper">
+              <button type="button" class="cs-toggle btn w-100 d-flex align-items-center justify-content-between" data-bs-toggle="dropdown" aria-expanded="false">
+                <span class="cs-label">{% set _cl = clients | selectattr('id', 'equalto', audit.client_id) | list %}{% if _cl %}{{ _cl[0].name }}{% else %}— No client —{% endif %}</span>
+                <i class="bi bi-chevron-down cs-chevron ms-2 flex-shrink-0" aria-hidden="true"></i>
+              </button>
+              <ul class="cs-menu dropdown-menu w-100">
+                <li><a class="cs-item dropdown-item {% if not audit.client_id %}active{% endif %}" href="#" data-value="" onclick="csSet(this);return false;">— No client —</a></li>
+                {% for c in clients %}
+                <li><a class="cs-item dropdown-item {% if audit.client_id == c.id %}active{% endif %}" href="#" data-value="{{ c.id }}" onclick="csSet(this);return false;">{{ c.name }}</a></li>
+                {% endfor %}
+              </ul>
+              <input type="hidden" name="client_id" value="{{ audit.client_id or '' }}">
+            </div>
           </div>
 
           <div class="mb-3">
@@ -51,11 +58,18 @@
 
           <div class="mb-3">
             <label class="form-label fw-semibold">Status</label>
-            <select class="form-select" name="status">
-              <option value="in_progress" {% if audit.status == 'in_progress' %}selected{% endif %}>In Progress</option>
-              <option value="completed" {% if audit.status == 'completed' %}selected{% endif %}>Completed</option>
-              <option value="archived" {% if audit.status == 'archived' %}selected{% endif %}>Archived</option>
-            </select>
+            <div class="dropdown cs-wrapper">
+              <button type="button" class="cs-toggle btn w-100 d-flex align-items-center justify-content-between" data-bs-toggle="dropdown" aria-expanded="false">
+                <span class="cs-label">{% if audit.status == 'in_progress' %}In Progress{% elif audit.status == 'completed' %}Completed{% elif audit.status == 'archived' %}Archived{% else %}In Progress{% endif %}</span>
+                <i class="bi bi-chevron-down cs-chevron ms-2 flex-shrink-0" aria-hidden="true"></i>
+              </button>
+              <ul class="cs-menu dropdown-menu w-100">
+                <li><a class="cs-item dropdown-item {% if audit.status == 'in_progress' %}active{% endif %}" href="#" data-value="in_progress" onclick="csSet(this);return false;">In Progress</a></li>
+                <li><a class="cs-item dropdown-item {% if audit.status == 'completed' %}active{% endif %}" href="#" data-value="completed" onclick="csSet(this);return false;">Completed</a></li>
+                <li><a class="cs-item dropdown-item {% if audit.status == 'archived' %}active{% endif %}" href="#" data-value="archived" onclick="csSet(this);return false;">Archived</a></li>
+              </ul>
+              <input type="hidden" name="status" value="{{ audit.status }}">
+            </div>
           </div>
 
           <div class="mb-4">

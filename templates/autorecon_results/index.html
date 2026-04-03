@@ -84,15 +84,20 @@
 
         <!-- Audit selector -->
         <div class="mb-3">
-          <label for="audit-select" class="form-label fw-semibold">Target Audit</label>
-          <select class="form-select" id="audit-select">
-            <option value="">— choose an audit —</option>
-            {% for audit in audits %}
-            <option value="{{ audit.id }}">
-              {{ audit.name }}{% if audit.client %} — {{ audit.client.name }}{% endif %}
-            </option>
-            {% endfor %}
-          </select>
+          <label class="form-label fw-semibold">Target Audit</label>
+          <div class="dropdown cs-wrapper">
+            <button type="button" class="cs-toggle btn w-100 d-flex align-items-center justify-content-between" data-bs-toggle="dropdown" aria-expanded="false">
+              <span class="cs-label">— choose an audit —</span>
+              <i class="bi bi-chevron-down cs-chevron ms-2 flex-shrink-0" aria-hidden="true"></i>
+            </button>
+            <ul class="cs-menu dropdown-menu w-100">
+              <li><a class="cs-item dropdown-item active" href="#" data-value="" onclick="csSet(this);return false;">— choose an audit —</a></li>
+              {% for audit in audits %}
+              <li><a class="cs-item dropdown-item" href="#" data-value="{{ audit.id }}" onclick="csSet(this);return false;">{{ audit.name }}{% if audit.client %} — {{ audit.client.name }}{% endif %}</a></li>
+              {% endfor %}
+            </ul>
+            <input type="hidden" id="audit-select" value="">
+          </div>
         </div>
 
         <!-- NVD toggle -->
