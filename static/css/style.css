@@ -248,27 +248,49 @@ body {
 
 /* ── Utilities ───────────────────────────────────────────── */
 
-/* ── Form controls — dark theme fixes ───────────────────────── */
-/* Bootstrap dark theme styles the control itself but leaves <option>   */
-/* elements up to the browser, which renders them with OS default colors */
-/* (white bg / black text). Force dark bg + light text on all selects.  */
+/* ── Form select — custom glassmorphic style ───────────────── */
+.form-select {
+  color: #dee2e6;
+  background-color: rgba(30, 36, 48, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-top-color: rgba(255, 255, 255, 0.22);
+  border-radius: 0.6rem;
+  backdrop-filter: blur(8px) saturate(140%);
+  -webkit-backdrop-filter: blur(8px) saturate(140%);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25),
+              inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+}
 
-.form-select,
+.form-select:hover:not(:disabled):not(:focus) {
+  background-color: rgba(36, 44, 58, 0.90);
+  border-color: rgba(255, 255, 255, 0.22);
+  border-top-color: rgba(255, 255, 255, 0.34);
+}
+
 .form-select:focus {
   color: #dee2e6;
-  background-color: #1e2430;
-  border-color: rgba(255, 255, 255, 0.15);
+  background-color: rgba(36, 44, 60, 0.92);
+  border-color: rgba(13, 110, 253, 0.65);
+  border-top-color: rgba(13, 110, 253, 0.65);
+  border-radius: 0.6rem;
+  box-shadow: 0 0 0 3px rgba(13, 110, 253, 0.18),
+              0 2px 10px rgba(0, 0, 0, 0.30),
+              inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  outline: none;
 }
 
 .form-select option,
 .form-select optgroup {
-  background-color: #1e2430;
+  background-color: #1a2033;
   color: #dee2e6;
 }
 
 .form-select:disabled {
-  background-color: #161920;
+  background-color: rgba(22, 25, 32, 0.70);
   color: #6c757d;
+  border-color: rgba(255, 255, 255, 0.07);
+  cursor: not-allowed;
 }
 
 
@@ -497,15 +519,31 @@ html[data-glass="1"] .modal-footer {
 html[data-glass="1"] .form-control,
 html[data-glass="1"] .form-select {
   background-color: rgba(255,255,255,0.07) !important;
-  border-color: rgba(255,255,255,0.14) !important;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255,255,255,0.14) !important;
+  border-top-color: rgba(255,255,255,0.26) !important;
+  border-radius: 0.6rem !important;
+  backdrop-filter: blur(16px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(16px) saturate(180%) !important;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.20),
+              inset 0 1px 0 rgba(255,255,255,0.16),
+              inset 0 -1px 0 rgba(0,0,0,0.08) !important;
+  color: #fff !important;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+}
+html[data-glass="1"] .form-control:hover:not(:disabled):not(:focus),
+html[data-glass="1"] .form-select:hover:not(:disabled):not(:focus) {
+  background-color: rgba(255,255,255,0.11) !important;
+  border-color: rgba(255,255,255,0.24) !important;
+  border-top-color: rgba(255,255,255,0.38) !important;
 }
 html[data-glass="1"] .form-control:focus,
 html[data-glass="1"] .form-select:focus {
-  background-color: rgba(255,255,255,0.11) !important;
-  border-color: rgba(13,110,253,0.60) !important;
-  box-shadow: 0 0 0 3px rgba(13,110,253,0.18) !important;
+  background-color: rgba(255,255,255,0.13) !important;
+  border-color: rgba(13,110,253,0.70) !important;
+  border-top-color: rgba(13,110,253,0.70) !important;
+  box-shadow: 0 0 0 3px rgba(13,110,253,0.22),
+              0 4px 20px rgba(0,0,0,0.25),
+              inset 0 1px 0 rgba(255,255,255,0.22) !important;
 }
 html[data-glass="1"] .form-check-input {
   background-color: rgba(255,255,255,0.10) !important;
