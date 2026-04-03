@@ -601,7 +601,6 @@ sudo update-ca-trust</div>
           <li>References</li>
         </ul>
         <p>Click the <i class="bi bi-lightning-charge"></i> <em>Enrich</em> button on a vulnerability row to fetch data for that single CVE, or use the <em>Enrich all</em> button at the top of the host to process all CVEs at once.</p>
-        <div class="help-tip"><i class="bi bi-lightbulb-fill me-1 text-warning"></i>Set a GitHub API token in <em>Administration → Settings</em> to raise the NVD rate limit from 60 to 5 000 requests/hour.</div>
       </div>
     </div>
   </div>
@@ -906,7 +905,8 @@ sudo update-ca-trust</div>
         </ol>
         <div class="help-warn"><i class="bi bi-exclamation-triangle-fill me-1 text-warning"></i>The database schema is migrated automatically — no data is lost during a normal update.</div>
         <p>You can also <strong>rollback</strong> to a previous version from the same page by selecting a commit from the version history.</p>
-      </div>
+        <div class="help-tip"><i class="bi bi-lightbulb-fill me-1 text-warning"></i>Set a GitHub API token in <em>Administration → Settings</em> to raise the API rate limit from 60 to 5 000 requests/hour, so updates and version checks are less likely to be rate-limited.</div>
+    </div>
     </div>
   </div>
 
