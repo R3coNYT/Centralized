@@ -398,12 +398,12 @@ if __name__ == "__main__":
                 pass
 
         try:
-            _redirect_srv = _make_server("0.0.0.0", 80, _redirect_app, handler_class=_SilentHandler)
+            _redirect_srv = _make_server("0.0.0.0", _port, _redirect_app, handler_class=_SilentHandler)
             _t = _threading.Thread(target=_redirect_srv.serve_forever, daemon=True)
             _t.start()
-            print("[Centralized] HTTP→HTTPS redirect  →  http://0.0.0.0:80")
+            print(f"[Centralized] HTTP→HTTPS redirect  →  http://0.0.0.0:{_port}")
         except OSError as _e:
-            print(f"[Centralized] Could not bind port 80 for redirect ({_e})")
+            print(f"[Centralized] Could not bind port {_port} for redirect ({_e})")
 
         print(f"[Centralized] HTTPS enabled  →  https://0.0.0.0:{_port}")
         # threaded=True lets Werkzeug handle each request in its own thread,
