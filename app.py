@@ -379,11 +379,11 @@ if __name__ == "__main__":
     _base        = _os.path.dirname(_os.path.abspath(__file__))
     _cert        = _os.path.join(_base, "ssl", "cert.pem")
     _key         = _os.path.join(_base, "ssl", "key.pem")
+    _http_port   = int(_os.environ.get("CENTRALIZED_HTTP_PORT", 80))
     _port        = int(_os.environ.get("CENTRALIZED_PORT", 5000))
     _has_ssl     = _os.path.isfile(_cert) and _os.path.isfile(_key)
 
     if _has_ssl:
-        # HTTP → HTTPS redirect server on port 80
         def _redirect_app(environ, start_response):
             host = (environ.get("HTTP_HOST") or "localhost").split(":")[0]
             target = f"https://{host}:{_port}{environ.get('PATH_INFO', '/')}"
@@ -398,16 +398,14 @@ if __name__ == "__main__":
                 pass
 
         try:
-            _redirect_srv = _make_server("0.0.0.0", _port, _redirect_app, handler_class=_SilentHandler)
+            _redirect_srv = _make_server("0.0.0.0", _http_port, _redirect_app, handler_class=_SilentHandler)
             _t = _threading.Thread(target=_redirect_srv.serve_forever, daemon=True)
             _t.start()
-            print(f"[Centralized] HTTP→HTTPS redirect  →  http://0.0.0.0:{_port}")
+            print(f"[Centralized] HTTP→HTTPS redirect  →  http://0.0.0.0:{_http_port}")
         except OSError as _e:
-            print(f"[Centralized] Could not bind port {_port} for redirect ({_e})")
+            print(f"[Centralized] Could not bind port {_http_port} for redirect ({_e})")
 
         print(f"[Centralized] HTTPS enabled  →  https://0.0.0.0:{_port}")
-        # threaded=True lets Werkzeug handle each request in its own thread,
-        # avoiding the single-threaded bottleneck of the dev server.
         application.run(host="0.0.0.0", port=_port, debug=False,
                         threaded=True, ssl_context=(_cert, _key))
     else:
