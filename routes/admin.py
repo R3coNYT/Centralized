@@ -453,7 +453,13 @@ def update_status():
     """Lightweight JSON endpoint used by the sidebar to poll update availability."""
     if current_user.role != "admin":
         return jsonify({"available": False})
-    return jsonify({"available": _check_update_available()})
+    current, _ = _get_local_commit()
+    latest, latest_short, _ = _get_github_latest_commit()
+    available = bool(latest and current and current != latest)
+    # Re-populate cache so _check_update_available() stays coherent
+    _update_cache["ts"] = _time.monotonic()
+    _update_cache["available"] = available
+    return jsonify({"available": available, "latest": latest_short or latest or ""})
 
 
 @admin_bp.route("/update")

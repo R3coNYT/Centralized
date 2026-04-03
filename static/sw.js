@@ -108,6 +108,26 @@ self.addEventListener('push', (event) => {
   event.waitUntil(self.registration.showNotification(title, options));
 });
 
+/* ── Local message-triggered notifications ───────────── */
+/* The page sends {type:'SHOW_UPDATE_NOTIFICATION', version:'abc123'}
+   when /admin/update-status reports a new version. This lets us show
+   a native desktop notification without a VAPID push server. */
+self.addEventListener('message', (event) => {
+  if (!event.data || event.data.type !== 'SHOW_UPDATE_NOTIFICATION') return;
+  const version = event.data.version || '';
+  event.waitUntil(
+    self.registration.showNotification('Centralized — Update available', {
+      body:  version ? `New version available: ${version}\nGo to Settings → Update to apply.`
+                     : 'A new version of Centralized is available.\nGo to Settings → Update to apply.',
+      icon:  '/static/img/icon-192.png',
+      badge: '/static/img/icon-192.png',
+      tag:   'centralized-update',   /* replaces any previous update notif */
+      renotify: false,
+      data:  { url: '/admin/update' },
+    })
+  );
+});
+
 /* ── Notification click ───────────────────────────────── */
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
