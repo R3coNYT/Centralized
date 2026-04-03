@@ -7,9 +7,10 @@ import urllib.request
 
 from flask import Blueprint, jsonify, redirect, render_template, request, url_for, flash
 from flask_login import current_user, login_required
+from werkzeug.utils import secure_filename
 
 from extensions import db
-from models import SiteSettings, CveSource
+from models import SiteSettings, CveSource, Client, Audit, Host, NotificationPref
 
 admin_bp = Blueprint("admin", __name__, url_prefix="/admin")
 
@@ -170,11 +171,14 @@ def interface():
         return redirect(url_for("admin.interface"))
 
     settings = get_all_settings()
+    app_icon = settings.get("app_icon", "")
+    app_icon_url = url_for('static', filename='img/' + app_icon) if app_icon else ""
     return render_template(
         "admin/interface.html",
         settings=settings,
         defaults=DEFAULT_SETTINGS,
         github_token_active=bool(_get_github_token()),
+        app_icon_url=app_icon_url,
     )
 
 
@@ -726,6 +730,101 @@ def run_rollback():
         return jsonify({"error": f"Interpreter not found: {exc}"}), 500
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
+
+
+# ---------------------------------------------------------------------------
+# App icon upload
+# ---------------------------------------------------------------------------
+
+_ALLOWED_ICON_EXT = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
+_IMG_DIR = os.path.join(BASE_DIR, "static", "img")
+
+
+@admin_bp.route("/interface/icon", methods=["POST"])
+@login_required
+def interface_icon():
+    if current_user.role != "admin":
+        flash("Access denied.", "danger")
+        return redirect(url_for("admin.interface"))
+    f = request.files.get("icon")
+    if not f or f.filename == "":
+        flash("No file selected.", "warning")
+        return redirect(url_for("admin.interface"))
+    ext = os.path.splitext(secure_filename(f.filename))[1].lower()
+    if ext not in _ALLOWED_ICON_EXT:
+        flash("Unsupported file type. Use PNG, JPG, WEBP or GIF.", "danger")
+        return redirect(url_for("admin.interface"))
+    icon_filename = "app_icon" + ext
+    f.save(os.path.join(_IMG_DIR, icon_filename))
+    row = SiteSettings.query.filter_by(key="app_icon").first()
+    if row:
+        row.value = icon_filename
+    else:
+        db.session.add(SiteSettings(key="app_icon", value=icon_filename))
+    db.session.commit()
+    flash("App icon updated.", "success")
+    return redirect(url_for("admin.interface"))
+
+
+@admin_bp.route("/interface/icon/reset", methods=["POST"])
+@login_required
+def interface_icon_reset():
+    if current_user.role != "admin":
+        flash("Access denied.", "danger")
+        return redirect(url_for("admin.interface"))
+    row = SiteSettings.query.filter_by(key="app_icon").first()
+    if row:
+        # Remove the saved file if it exists
+        try:
+            os.remove(os.path.join(_IMG_DIR, row.value))
+        except OSError:
+            pass
+        db.session.delete(row)
+        db.session.commit()
+    flash("App icon reset to default.", "info")
+    return redirect(url_for("admin.interface"))
+
+
+# ---------------------------------------------------------------------------
+# Notifications overview
+# ---------------------------------------------------------------------------
+
+_EVENT_LABELS = {
+    "new_audit":       "New audit",
+    "audit_completed": "Audit completed",
+    "new_critical":    "New critical vuln",
+    "status_change":   "Status change",
+    "new_host":        "New host",
+    "new_vuln":        "New vuln",
+    "critical_vuln":   "Critical/High vuln",
+    "risk_change":     "Risk score change",
+}
+
+
+@admin_bp.route("/notifications")
+@login_required
+def notifications_overview():
+    clients = Client.query.order_by(Client.name).all()
+    audits  = Audit.query.order_by(Audit.created_at.desc()).all()
+    hosts   = Host.query.order_by(Host.ip).all()
+
+    import json as _json
+    user_prefs = NotificationPref.query.filter_by(user_id=current_user.id).all()
+    prefs = {}
+    for p in user_prefs:
+        try:
+            prefs[(p.scope, p.entity_id)] = _json.loads(p.events) if p.events else []
+        except Exception:
+            prefs[(p.scope, p.entity_id)] = []
+
+    return render_template(
+        "admin/notifications.html",
+        clients=clients,
+        audits=audits,
+        hosts=hosts,
+        prefs=prefs,
+        event_labels=_EVENT_LABELS,
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -1,0 +1,272 @@
+{% extends "base.html" %}
+{% block title %}Notifications{% endblock %}
+{% block page_title %}Notification Management{% endblock %}
+
+{% block content %}
+
+<!-- Browser permission banner -->
+<div id="notifPermBanner" class="alert alert-warning d-flex align-items-center gap-3 mb-4" style="display:none!important">
+  <i class="bi bi-exclamation-triangle-fill fs-5"></i>
+  <span>Desktop notifications are <strong>blocked</strong> or not granted. Enable them to receive alerts.</span>
+  <button class="btn btn-warning btn-sm ms-auto" onclick="requestBrowserPermission()">
+    <i class="bi bi-bell me-1"></i>Enable
+  </button>
+</div>
+
+<!-- Global toggle card -->
+<div class="card mb-4">
+  <div class="card-header fw-semibold"><i class="bi bi-bell me-2"></i>Global notifications</div>
+  <div class="card-body">
+    <div class="d-flex align-items-center justify-content-between flex-wrap gap-3">
+      <div>
+        <div class="fw-semibold">Receive desktop notifications</div>
+        <div class="small text-muted">When disabled, no notification will pop up regardless of per-entity settings.</div>
+      </div>
+      <div class="form-check form-switch m-0">
+        <input class="form-check-input" type="checkbox" role="switch" id="globalNotifToggle"
+               style="width:3em;height:1.5em;cursor:pointer"
+               onchange="setGlobalEnabled(this.checked)"/>
+        <label class="form-check-label ms-2 fw-semibold" for="globalNotifToggle" id="globalNotifLabel">Loading…</label>
+      </div>
+    </div>
+    <hr class="my-3"/>
+    <div class="d-flex align-items-center gap-3 flex-wrap">
+      <div>
+        <span class="small text-muted">Browser permission: </span>
+        <span id="browserPermStatus" class="badge bg-secondary">checking…</span>
+      </div>
+      <button class="btn btn-outline-secondary btn-sm" onclick="requestBrowserPermission()">
+        <i class="bi bi-shield-check me-1"></i>Request permission
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Per-entity tabs -->
+<ul class="nav nav-tabs mb-3" id="notifTabs" role="tablist">
+  <li class="nav-item" role="presentation">
+    <button class="nav-link active" id="tab-clients" data-bs-toggle="tab" data-bs-target="#panel-clients" type="button" role="tab">
+      <i class="bi bi-people me-1"></i>Clients <span class="badge bg-secondary ms-1">{{ clients|length }}</span>
+    </button>
+  </li>
+  <li class="nav-item" role="presentation">
+    <button class="nav-link" id="tab-audits" data-bs-toggle="tab" data-bs-target="#panel-audits" type="button" role="tab">
+      <i class="bi bi-clipboard2-data me-1"></i>Audits <span class="badge bg-secondary ms-1">{{ audits|length }}</span>
+    </button>
+  </li>
+  <li class="nav-item" role="presentation">
+    <button class="nav-link" id="tab-hosts" data-bs-toggle="tab" data-bs-target="#panel-hosts" type="button" role="tab">
+      <i class="bi bi-hdd-network me-1"></i>Hosts <span class="badge bg-secondary ms-1">{{ hosts|length }}</span>
+    </button>
+  </li>
+</ul>
+
+<div class="tab-content">
+
+  <!-- Clients tab -->
+  <div class="tab-pane fade show active" id="panel-clients" role="tabpanel">
+    {% if clients %}
+    <div class="card">
+      <div class="table-responsive">
+        <table class="table table-hover mb-0 align-middle">
+          <thead>
+            <tr>
+              <th>Client</th>
+              <th>Active alerts</th>
+              <th class="text-end">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for c in clients %}
+            {% set events = prefs.get(('client', c.id), []) %}
+            <tr>
+              <td>
+                <a href="{{ url_for('clients.detail', client_id=c.id) }}" class="text-decoration-none fw-semibold">
+                  {{ c.name }}
+                </a>
+              </td>
+              <td>
+                {% if events %}
+                  {% for ev in events %}
+                  <span class="badge bg-primary me-1">{{ event_labels.get(ev, ev) }}</span>
+                  {% endfor %}
+                {% else %}
+                  <span class="text-muted small">None</span>
+                {% endif %}
+              </td>
+              <td class="text-end">
+                <button class="btn btn-sm {% if events %}btn-warning{% else %}btn-outline-secondary{% endif %}"
+                        onclick="openNotifModal('client', {{ c.id }}, '{{ c.name | e }}')"
+                        title="Manage notifications">
+                  <i class="bi bi-bell{% if events %}-fill{% endif %}"></i>
+                </button>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% else %}
+    <div class="text-muted text-center py-4"><i class="bi bi-people fs-3 d-block mb-2"></i>No clients yet.</div>
+    {% endif %}
+  </div>
+
+  <!-- Audits tab -->
+  <div class="tab-pane fade" id="panel-audits" role="tabpanel">
+    {% if audits %}
+    <div class="card">
+      <div class="table-responsive">
+        <table class="table table-hover mb-0 align-middle">
+          <thead>
+            <tr>
+              <th>Audit</th>
+              <th>Client</th>
+              <th>Active alerts</th>
+              <th class="text-end">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for a in audits %}
+            {% set events = prefs.get(('audit', a.id), []) %}
+            <tr>
+              <td>
+                <a href="{{ url_for('audits.detail', audit_id=a.id) }}" class="text-decoration-none fw-semibold">
+                  {{ a.name }}
+                </a>
+              </td>
+              <td class="text-muted small">{{ a.client.name if a.client else '—' }}</td>
+              <td>
+                {% if events %}
+                  {% for ev in events %}
+                  <span class="badge bg-primary me-1">{{ event_labels.get(ev, ev) }}</span>
+                  {% endfor %}
+                {% else %}
+                  <span class="text-muted small">None</span>
+                {% endif %}
+              </td>
+              <td class="text-end">
+                <button class="btn btn-sm {% if events %}btn-warning{% else %}btn-outline-secondary{% endif %}"
+                        onclick="openNotifModal('audit', {{ a.id }}, '{{ a.name | e }}')"
+                        title="Manage notifications">
+                  <i class="bi bi-bell{% if events %}-fill{% endif %}"></i>
+                </button>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% else %}
+    <div class="text-muted text-center py-4"><i class="bi bi-clipboard2-data fs-3 d-block mb-2"></i>No audits yet.</div>
+    {% endif %}
+  </div>
+
+  <!-- Hosts tab -->
+  <div class="tab-pane fade" id="panel-hosts" role="tabpanel">
+    {% if hosts %}
+    <div class="card">
+      <div class="table-responsive">
+        <table class="table table-hover mb-0 align-middle">
+          <thead>
+            <tr>
+              <th>Host</th>
+              <th>Audit</th>
+              <th>Active alerts</th>
+              <th class="text-end">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for h in hosts %}
+            {% set events = prefs.get(('host', h.id), []) %}
+            <tr>
+              <td>
+                <a href="{{ url_for('hosts.detail', host_id=h.id) }}" class="text-decoration-none fw-semibold">
+                  {{ h.ip }}{% if h.hostname %} <span class="text-muted small">({{ h.hostname }})</span>{% endif %}
+                </a>
+              </td>
+              <td class="text-muted small">{{ h.audit.name if h.audit else '—' }}</td>
+              <td>
+                {% if events %}
+                  {% for ev in events %}
+                  <span class="badge bg-primary me-1">{{ event_labels.get(ev, ev) }}</span>
+                  {% endfor %}
+                {% else %}
+                  <span class="text-muted small">None</span>
+                {% endif %}
+              </td>
+              <td class="text-end">
+                <button class="btn btn-sm {% if events %}btn-warning{% else %}btn-outline-secondary{% endif %}"
+                        onclick="openNotifModal('host', {{ h.id }}, '{{ h.ip | e }}')"
+                        title="Manage notifications">
+                  <i class="bi bi-bell{% if events %}-fill{% endif %}"></i>
+                </button>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% else %}
+    <div class="text-muted text-center py-4"><i class="bi bi-hdd-network fs-3 d-block mb-2"></i>No hosts yet.</div>
+    {% endif %}
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+/* ── Browser permission ─────────────────────────────────────────────── */
+function updatePermBadge() {
+  const badge  = document.getElementById('browserPermStatus');
+  const banner = document.getElementById('notifPermBanner');
+  if (!('Notification' in window)) {
+    badge.textContent = 'Not supported';
+    badge.className   = 'badge bg-danger';
+    return;
+  }
+  const p = Notification.permission;
+  badge.textContent = p === 'granted' ? 'Granted' : p === 'denied' ? 'Blocked' : 'Not requested';
+  badge.className   = 'badge ' + (p === 'granted' ? 'bg-success' : p === 'denied' ? 'bg-danger' : 'bg-warning text-dark');
+  if (p !== 'granted') {
+    banner.style.removeProperty('display');
+  }
+}
+
+function requestBrowserPermission() {
+  if (!('Notification' in window)) return;
+  Notification.requestPermission().then(() => updatePermBadge());
+}
+
+/* ── Global toggle (stored in localStorage) ────────────────────────── */
+function setGlobalEnabled(enabled) {
+  localStorage.setItem('centralized_notifs_global', enabled ? '1' : '0');
+  document.getElementById('globalNotifLabel').textContent = enabled ? 'Enabled' : 'Disabled';
+}
+
+function initGlobalToggle() {
+  const val = localStorage.getItem('centralized_notifs_global');
+  const enabled = val === null ? true : val === '1';
+  const toggle  = document.getElementById('globalNotifToggle');
+  const label   = document.getElementById('globalNotifLabel');
+  toggle.checked  = enabled;
+  label.textContent = enabled ? 'Enabled' : 'Disabled';
+}
+
+document.addEventListener('DOMContentLoaded', function () {
+  updatePermBadge();
+  initGlobalToggle();
+});
+
+/* ── Reload page after notif modal saves so badges refresh ─────────── */
+const _origSaveNotifPrefs = window.saveNotifPrefs;
+window.saveNotifPrefs = function () {
+  const origHide = bootstrap && bootstrap.Modal ? bootstrap.Modal.prototype.hide : null;
+  _origSaveNotifPrefs();
+  setTimeout(() => location.reload(), 600);
+};
+</script>
+{% endblock %}
