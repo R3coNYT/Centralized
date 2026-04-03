@@ -249,27 +249,37 @@ $USER ALL=(ALL) NOPASSWD: $systemctl_path restart centralized"
 
 # ── Trust SSL certificate in system + browser stores ───────────────────────────────
 
+# Run a command with sudo if available, but never prompt for a password.
+# Falls back to running without sudo (may fail silently).
+_sudo_n() {
+    if [ -n "$SUDO" ]; then
+        sudo -n "$@" 2>/dev/null || return 0
+    else
+        "$@" 2>/dev/null || return 0
+    fi
+}
+
 trust_ssl_cert() {
     local cert="$1"
     [ -f "$cert" ] || return
 
     if [ "$PLATFORM" = "linux" ]; then
         if [ -d /usr/local/share/ca-certificates ]; then
-            $SUDO cp "$cert" /usr/local/share/ca-certificates/centralized-local.crt
-            $SUDO update-ca-certificates --fresh >/dev/null 2>&1 && \
-                ok "System CA store updated"
+            _sudo_n cp "$cert" /usr/local/share/ca-certificates/centralized-local.crt
+            _sudo_n update-ca-certificates --fresh >/dev/null 2>&1 && \
+                ok "System CA store updated" || true
         elif [ -d /etc/pki/ca-trust/source/anchors ]; then
-            $SUDO cp "$cert" /etc/pki/ca-trust/source/anchors/centralized-local.crt
-            $SUDO update-ca-trust extract >/dev/null 2>&1 && \
-                ok "System CA trust store updated"
+            _sudo_n cp "$cert" /etc/pki/ca-trust/source/anchors/centralized-local.crt
+            _sudo_n update-ca-trust extract >/dev/null 2>&1 && \
+                ok "System CA trust store updated" || true
         fi
     fi
 
     if [ "$PLATFORM" = "linux" ] && ! need_cmd certutil; then
         if need_cmd apt-get; then
-            $SUDO apt-get install -y -qq libnss3-tools >/dev/null 2>&1 || true
+            _sudo_n apt-get install -y -qq libnss3-tools >/dev/null 2>&1 || true
         elif need_cmd dnf; then
-            $SUDO dnf install -y -q nss-tools >/dev/null 2>&1 || true
+            _sudo_n dnf install -y -q nss-tools >/dev/null 2>&1 || true
         fi
     fi
 
@@ -319,10 +329,10 @@ ensure_ssl() {
         local domain
         domain="$(openssl x509 -subject -noout -in "$ssl_dir/cert.pem" 2>/dev/null | \
             sed 's/.*CN[[:space:]]*=[[:space:]]*\([^,/]*\).*/\1/')"
-        if [ -n "$domain" ] && $SUDO certbot renew --quiet --cert-name "$domain" 2>/dev/null; then
-            $SUDO cp "/etc/letsencrypt/live/$domain/fullchain.pem" "$ssl_dir/cert.pem"
-            $SUDO cp "/etc/letsencrypt/live/$domain/privkey.pem"   "$ssl_dir/key.pem"
-            $SUDO chown "$USER:$USER" "$ssl_dir/cert.pem" "$ssl_dir/key.pem"
+        if [ -n "$domain" ] && _sudo_n certbot renew --quiet --cert-name "$domain" 2>/dev/null; then
+            _sudo_n cp "/etc/letsencrypt/live/$domain/fullchain.pem" "$ssl_dir/cert.pem"
+            _sudo_n cp "/etc/letsencrypt/live/$domain/privkey.pem"   "$ssl_dir/key.pem"
+            _sudo_n chown "$USER:$USER" "$ssl_dir/cert.pem" "$ssl_dir/key.pem"
             chmod 600 "$ssl_dir/key.pem"
             ok "Let's Encrypt certificate renewed for $domain"
             return
