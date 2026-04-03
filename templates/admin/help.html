@@ -1,0 +1,1084 @@
+{% extends "base.html" %}
+{% block title %}Help{% endblock %}
+{% block page_title %}Help &amp; Documentation{% endblock %}
+
+{% block content %}
+<style>
+.help-section-title {
+  font-size: .65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .1em;
+  color: var(--bs-primary);
+  margin: 2rem 0 .6rem;
+}
+.accordion-button {
+  font-weight: 600;
+  font-size: .925rem;
+}
+.accordion-button:not(.collapsed) {
+  color: var(--bs-primary);
+  background-color: rgba(var(--bs-primary-rgb), .08);
+  box-shadow: none;
+}
+.accordion-button::after {
+  filter: invert(1) brightness(0.8);
+}
+.accordion-button:not(.collapsed)::after {
+  filter: none;
+}
+.accordion-body {
+  font-size: .9rem;
+  line-height: 1.7;
+}
+.accordion-body h6 {
+  margin-top: 1.1rem;
+  margin-bottom: .4rem;
+  font-weight: 700;
+  font-size: .8rem;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--bs-primary);
+}
+.accordion-body ol, .accordion-body ul {
+  padding-left: 1.3rem;
+}
+.accordion-body li { margin-bottom: .3rem; }
+.help-tip {
+  background: rgba(var(--bs-primary-rgb), .08);
+  border-left: 3px solid var(--bs-primary);
+  padding: .55rem .9rem;
+  border-radius: 0 6px 6px 0;
+  margin: .75rem 0;
+  font-size: .85rem;
+}
+.help-warn {
+  background: rgba(255,193,7,.08);
+  border-left: 3px solid #ffc107;
+  padding: .55rem .9rem;
+  border-radius: 0 6px 6px 0;
+  margin: .75rem 0;
+  font-size: .85rem;
+}
+.help-code {
+  background: rgba(0,0,0,.35);
+  border: 1px solid rgba(255,255,255,.1);
+  border-radius: 6px;
+  padding: .6rem .9rem;
+  font-family: 'SF Mono','Fira Code','Consolas',monospace;
+  font-size: .8rem;
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin: .5rem 0;
+}
+.step-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  background: var(--bs-primary);
+  color: #fff;
+  border-radius: 50%;
+  font-size: .7rem;
+  font-weight: 700;
+  flex-shrink: 0;
+  margin-right: .5rem;
+}
+.step-row { display: flex; align-items: flex-start; margin-bottom: .5rem; }
+</style>
+
+<!-- Search bar -->
+<div class="mb-4">
+  <div class="input-group" style="max-width:520px">
+    <span class="input-group-text"><i class="bi bi-search"></i></span>
+    <input type="text" class="form-control" id="helpSearch" placeholder="Search help topics…" oninput="filterHelp(this.value)"/>
+    <button class="btn btn-outline-secondary" type="button" onclick="document.getElementById('helpSearch').value='';filterHelp('')">
+      <i class="bi bi-x"></i>
+    </button>
+  </div>
+</div>
+
+<div id="helpNoResults" class="text-muted d-none text-center py-5">
+  <i class="bi bi-search fs-2 d-block mb-2 opacity-50"></i>No results for your search.
+</div>
+
+<!-- ═══════════════════════════════════════════════════
+     SECTION 1 — GETTING STARTED
+════════════════════════════════════════════════════ -->
+<p class="help-section-title" data-help-section><i class="bi bi-rocket-takeoff me-2"></i>Getting started</p>
+<div class="accordion mb-3" id="acc-start">
+
+  <div class="accordion-item" data-help-item>
+    <h2 class="accordion-header">
+      <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#hs-overview">
+        <i class="bi bi-info-circle me-2"></i>What is Centralized?
+      </button>
+    </h2>
+    <div id="hs-overview" class="accordion-collapse collapse" data-bs-parent="#acc-start">
+      <div class="accordion-body">
+        <p><strong>Centralized</strong> is a self-hosted pentest management platform. It lets you organise your work around three main objects:</p>
+        <ul>
+          <li><strong>Clients</strong> — the companies or entities you are testing for.</li>
+          <li><strong>Audits</strong> — one engagement per client (web app pentest, infra audit, etc.).</li>
+          <li><strong>Hosts</strong> — every IP / machine discovered during an audit.</li>
+        </ul>
+        <p>You import scan results from tools such as Nmap, Nuclei, Nikto, httpx, SQLMap, Lynis, or DirBuster, and Centralized parses them automatically into structured vulnerabilities, ports, and findings that you can review, score, and export to PDF.</p>
+        <div class="help-tip"><i class="bi bi-lightbulb-fill me-1 text-warning"></i>Start by creating a <strong>Client</strong>, then an <strong>Audit</strong> for that client, then upload your scan files — everything else follows naturally.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="accordion-item" data-help-item>
+    <h2 class="accordion-header">
+      <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#hs-first-login">
+        <i class="bi bi-person-check me-2"></i>First login &amp; default credentials
+      </button>
+    </h2>
+    <div id="hs-first-login" class="accordion-collapse collapse" data-bs-parent="#acc-start">
+      <div class="accordion-body">
+        <p>On the very first launch Centralized creates a default administrator account:</p>
+        <div class="help-code">Username : admin
+Password : admin</div>
+        <div class="help-warn"><i class="bi bi-exclamation-triangle-fill me-1 text-warning"></i><strong>Change this password immediately</strong> — go to <em>Administration → Users</em> and click <em>Edit</em> on the admin account.</div>
+        <p>You can create additional accounts (admin or analyst roles) from the same Users page.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="accordion-item" data-help-item>
+    <h2 class="accordion-header">
+      <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#hs-workflow">
+        <i class="bi bi-diagram-3 me-2"></i>Recommended workflow
+      </button>
+    </h2>
+    <div id="hs-workflow" class="accordion-collapse collapse" data-bs-parent="#acc-start">
+      <div class="accordion-body">
+        <div class="step-row"><span class="step-badge">1</span>Create a <strong>Client</strong> (Clients → New client).</div>
+        <div class="step-row"><span class="step-badge">2</span>Create an <strong>Audit</strong> for that client (Audits → New audit).</div>
+        <div class="step-row"><span class="step-badge">3</span>Run your scans externally (Nmap, Nuclei, Nikto…).</div>
+        <div class="step-row"><span class="step-badge">4</span><strong>Upload</strong> the result files to the audit.</div>
+        <div class="step-row"><span class="step-badge">5</span>Review discovered <strong>Hosts</strong> and <strong>Vulnerabilities</strong>.</div>
+        <div class="step-row"><span class="step-badge">6</span>Enrich CVEs, set statuses, add manual findings.</div>
+        <div class="step-row"><span class="step-badge">7</span>Export the <strong>PDF report</strong>.</div>
+        <div class="step-row"><span class="step-badge">8</span>Mark the audit as <em>Completed</em>.</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ═══════════════════════════════════════════════════
+     SECTION 2 — SSL / HTTPS
+════════════════════════════════════════════════════ -->
+<p class="help-section-title" data-help-section><i class="bi bi-shield-lock me-2"></i>SSL certificate &amp; HTTPS</p>
+<div class="accordion mb-3" id="acc-ssl">
+
+  <div class="accordion-item" data-help-item>
+    <h2 class="accordion-header">
+      <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#hs-ssl-why">
+        <i class="bi bi-question-circle me-2"></i>Why is there an SSL warning?
+      </button>
+    </h2>
+    <div id="hs-ssl-why" class="accordion-collapse collapse" data-bs-parent="#acc-ssl">
+      <div class="accordion-body">
+        <p>Centralized auto-generates a <strong>self-signed certificate</strong> at installation time. Browsers don't trust self-signed certs by default — hence the warning. The connection is still fully encrypted; you just need to tell your browser (or OS) to trust this specific certificate.</p>
+        <div class="help-tip"><i class="bi bi-lightbulb-fill me-1 text-warning"></i>For production use you should replace the cert with one issued by <a href="https://letsencrypt.org" target="_blank" rel="noopener noreferrer">Let's Encrypt</a> or another CA.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="accordion-item" data-help-item>
+    <h2 class="accordion-header">
+      <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#hs-ssl-windows">
+        <i class="bi bi-windows me-2"></i>Trust the certificate — Windows
+      </button>
+    </h2>
+    <div id="hs-ssl-windows" class="accordion-collapse collapse" data-bs-parent="#acc-ssl">
+      <div class="accordion-body">
+        <h6>Option A — Chrome / Edge (via Windows cert store)</h6>
+        <ol>
+          <li>Navigate to the app URL and click <em>Advanced → Proceed</em> to reach the page.</li>
+          <li>Click the 🔒 lock icon in the address bar → <em>Certificate is not valid</em>.</li>
+          <li>Switch to the <em>Details</em> tab → <em>Copy to file…</em> and export the cert as <em>DER .cer</em>.</li>
+          <li>Double-click the exported <code>.cer</code> file → <em>Install Certificate</em>.</li>
+          <li>Choose <em>Local Machine</em> → <em>Place all certificates in the following store</em> → <em>Trusted Root Certification Authorities</em>.</li>
+          <li>Click <em>Finish</em> and restart Chrome/Edge.</li>
+        </ol>
+        <h6>Option B — PowerShell (quick, one-liner)</h6>
+        <div class="help-code">Import-Certificate -FilePath "ssl\cert.pem" -CertStoreLocation Cert:\LocalMachine\Root</div>
+        <p class="text-muted small">Run as Administrator. The cert file is in the Centralized install directory under <code>ssl\cert.pem</code>.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="accordion-item" data-help-item>
+    <h2 class="accordion-header">
+      <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#hs-ssl-macos">
+        <i class="bi bi-apple me-2"></i>Trust the certificate — macOS
+      </button>
+    </h2>
+    <div id="hs-ssl-macos" class="accordion-collapse collapse" data-bs-parent="#acc-ssl">
+      <div class="accordion-body">
+        <h6>Keychain Access (GUI)</h6>
+        <ol>
+          <li>Open <em>Keychain Access</em> (Spotlight → Keychain Access).</li>
+          <li>Drag and drop <code>ssl/cert.pem</code> onto the <em>login</em> keychain.</li>
+          <li>Double-click the imported cert → expand <em>Trust</em> → set <em>When using this certificate</em> to <strong>Always Trust</strong>.</li>
+          <li>Close and authenticate with your password.</li>
+          <li>Restart your browser.</li>
+        </ol>
+        <h6>Terminal (one-liner)</h6>
+        <div class="help-code">sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain ssl/cert.pem</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="accordion-item" data-help-item>
+    <h2 class="accordion-header">
+      <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#hs-ssl-linux">
+        <i class="bi bi-terminal me-2"></i>Trust the certificate — Linux
+      </button>
+    </h2>
+    <div id="hs-ssl-linux" class="accordion-collapse collapse" data-bs-parent="#acc-ssl">
+      <div class="accordion-body">
+        <h6>Debian / Ubuntu</h6>
+        <div class="help-code">sudo cp ssl/cert.pem /usr/local/share/ca-certificates/centralized.crt
+sudo update-ca-certificates</div>
+        <h6>RHEL / Fedora / CentOS</h6>
+        <div class="help-code">sudo cp ssl/cert.pem /etc/pki/ca-trust/source/anchors/centralized.crt
+sudo update-ca-trust</div>
+        <p class="text-muted small mt-2">After running these commands, restart your browser.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="accordion-item" data-help-item>
+    <h2 class="accordion-header">
+      <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#hs-ssl-firefox">
+        <i class="bi bi-browser-firefox me-2"></i>Trust the certificate — Firefox
+      </button>
+    </h2>
+    <div id="hs-ssl-firefox" class="accordion-collapse collapse" data-bs-parent="#acc-ssl">
+      <div class="accordion-body">
+        <p>Firefox uses its own certificate store independent of the OS.</p>
+        <ol>
+          <li>Open <kbd>about:preferences#privacy</kbd>.</li>
+          <li>Scroll down to <em>Certificates</em> → click <em>View Certificates</em>.</li>
+          <li>Switch to the <em>Authorities</em> tab → click <em>Import…</em>.</li>
+          <li>Select <code>ssl/cert.pem</code>.</li>
+          <li>Check <em>Trust this CA to identify websites</em> → OK.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ═══════════════════════════════════════════════════
+     SECTION 3 — PWA
+════════════════════════════════════════════════════ -->
+<p class="help-section-title" data-help-section><i class="bi bi-phone me-2"></i>PWA — Install as desktop / mobile app</p>
+<div class="accordion mb-3" id="acc-pwa">
+
+  <div class="accordion-item" data-help-item>
+    <h2 class="accordion-header">
+      <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#hs-pwa-chrome">
+        <i class="bi bi-browser-chrome me-2"></i>Install on Chrome / Edge (desktop)
+      </button>
+    </h2>
+    <div id="hs-pwa-chrome" class="accordion-collapse collapse" data-bs-parent="#acc-pwa">
+      <div class="accordion-body">
+        <ol>
+          <li>Make sure you are accessing the app over <strong>HTTPS</strong> and the certificate is trusted (see SSL section above).</li>
+          <li>Look for the install icon <i class="bi bi-box-arrow-in-down"></i> in the address bar (right side).</li>
+          <li>Click it → <em>Install</em>.</li>
+          <li>Centralized will open as a standalone window, separate from the browser.</li>
+        </ol>
+        <div class="help-tip"><i class="bi bi-lightbulb-fill me-1 text-warning"></i>If you don't see the install icon, make sure HTTPS is active and the cert is trusted. HTTP doesn't support PWA installation.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="accordion-item" data-help-item>
+    <h2 class="accordion-header">
+      <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#hs-pwa-mobile">
+        <i class="bi bi-phone me-2"></i>Install on iOS / Android
+      </button>
+    </h2>
+    <div id="hs-pwa-mobile" class="accordion-collapse collapse" data-bs-parent="#acc-pwa">
+      <div class="accordion-body">
+        <h6>iOS (Safari)</h6>
+        <ol>
+          <li>Open the app URL in Safari.</li>
+          <li>Tap the <em>Share</em> button (square with arrow).</li>
+          <li>Tap <em>Add to Home Screen</em>.</li>
+          <li>Confirm the name and tap <em>Add</em>.</li>
+        </ol>
+        <h6>Android (Chrome)</h6>
+        <ol>
+          <li>Open the app URL in Chrome.</li>
+          <li>Tap the 3-dot menu → <em>Add to Home screen</em> or <em>Install app</em>.</li>
+          <li>Confirm and tap <em>Install</em>.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ═══════════════════════════════════════════════════
+     SECTION 4 — CLIENTS & AUDITS
+════════════════════════════════════════════════════ -->
+<p class="help-section-title" data-help-section><i class="bi bi-people me-2"></i>Clients &amp; Audits</p>
+<div class="accordion mb-3" id="acc-clients">
+
+  <div class="accordion-item" data-help-item>
+    <h2 class="accordion-header">
+      <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#hs-create-client">
+        <i class="bi bi-person-plus me-2"></i>Create a client
+      </button>
+    </h2>
+    <div id="hs-create-client" class="accordion-collapse collapse" data-bs-parent="#acc-clients">
+      <div class="accordion-body">
+        <ol>
+          <li>In the sidebar, click <strong>Clients</strong>.</li>
+          <li>Click the <em>New client</em> button (top right).</li>
+          <li>Fill in:
+            <ul>
+              <li><strong>Name</strong> (required) — e.g. <em>Acme Corp</em>.</li>
+              <li><strong>Description</strong> — optional context about the client.</li>
+              <li><strong>Contact</strong> — e-mail or name of the point of contact.</li>
+            </ul>
+          </li>
+          <li>Click <em>Create client</em>.</li>
+        </ol>
+        <div class="help-tip"><i class="bi bi-lightbulb-fill me-1 text-warning"></i>A client can have multiple audits. Think of a client as a company and an audit as a specific engagement (pentest, compliance review, etc.).</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="accordion-item" data-help-item>
+    <h2 class="accordion-header">
+      <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#hs-create-audit">
+        <i class="bi bi-clipboard2-plus me-2"></i>Create an audit
+      </button>
+    </h2>
+    <div id="hs-create-audit" class="accordion-collapse collapse" data-bs-parent="#acc-clients">
+      <div class="accordion-body">
+        <ol>
+          <li>In the sidebar, click <strong>Audits</strong>.</li>
+          <li>Click <em>New audit</em>.</li>
+          <li>Fill in:
+            <ul>
+              <li><strong>Audit name</strong> — e.g. <em>Web App Pentest – March 2026</em>.</li>
+              <li><strong>Client</strong> — select the associated client (optional).</li>
+              <li><strong>Target</strong> — the IP range, domain, or scope description.</li>
+              <li><strong>Scope</strong> — additional scope notes.</li>
+              <li><strong>Start / end date</strong> — for the report header.</li>
+            </ul>
+          </li>
+          <li>Click <em>Create audit</em>.</li>
+        </ol>
+        <p>Once created, the audit page gives you access to:
+          <ul>
+            <li>Discovered hosts &amp; vulnerabilities</li>
+            <li>Upload scan files</li>
+            <li>Manual findings</li>
+            <li>PDF report export</li>
+            <li>Status management (In progress / Completed / Archived)</li>
+          </ul>
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <div class="accordion-item" data-help-item>
+    <h2 class="accordion-header">
+      <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#hs-audit-status">
+        <i class="bi bi-arrow-repeat me-2"></i>Audit statuses explained
+      </button>
+    </h2>
+    <div id="hs-audit-status" class="accordion-collapse collapse" data-bs-parent="#acc-clients">
+      <div class="accordion-body">
+        <ul>
+          <li><span class="badge bg-primary">In progress</span> — active engagement, data can be added freely.</li>
+          <li><span class="badge bg-success">Completed</span> — engagement finished; fires a notification to subscribers.</li>
+          <li><span class="badge bg-secondary">Archived</span> — closed for editing, kept for reference.</li>
+        </ul>
+        <p>Change the status from the audit detail page using the status selector in the top-right card.</p>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ═══════════════════════════════════════════════════
+     SECTION 5 — IMPORTING DATA
+════════════════════════════════════════════════════ -->
+<p class="help-section-title" data-help-section><i class="bi bi-cloud-upload me-2"></i>Importing scan data</p>
+<div class="accordion mb-3" id="acc-import">
+
+  <div class="accordion-item" data-help-item>
+    <h2 class="accordion-header">
+      <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#hs-supported-formats">
+        <i class="bi bi-file-earmark-code me-2"></i>Supported file formats
+      </button>
+    </h2>
+    <div id="hs-supported-formats" class="accordion-collapse collapse" data-bs-parent="#acc-import">
+      <div class="accordion-body">
+        <p>Centralized auto-detects the following formats:</p>
+        <div class="table-responsive">
+          <table class="table table-sm table-bordered align-middle" style="font-size:.85rem">
+            <thead class="table-dark">
+              <tr><th>Tool</th><th>Format</th><th>How to generate</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><strong>Nmap</strong></td><td>XML (<code>.xml</code>)</td><td><code>nmap -oX output.xml &lt;target&gt;</code></td></tr>
+              <tr><td><strong>Nmap</strong></td><td>JSON (<code>.json</code>)</td><td>via nmap converter scripts</td></tr>
+              <tr><td><strong>AutoRecon</strong></td><td>JSON (<code>.json</code>)</td><td>built-in output</td></tr>
+              <tr><td><strong>httpx</strong></td><td>JSON (<code>.json</code>)</td><td><code>httpx -json -o output.json</code></td></tr>
+              <tr><td><strong>Nuclei</strong></td><td>JSON (<code>.json</code>)</td><td><code>nuclei -json -o output.json</code></td></tr>
+              <tr><td><strong>Nikto</strong></td><td>XML or JSON</td><td><code>nikto -Format xml -output out.xml</code></td></tr>
+              <tr><td><strong>Lynis</strong></td><td>log / report</td><td><code>lynis audit system</code> → <code>/var/log/lynis.log</code></td></tr>
+              <tr><td><strong>SQLMap</strong></td><td>TXT or CSV</td><td><code>sqlmap --output-dir ./out</code></td></tr>
+              <tr><td><strong>DirBuster / ffuf</strong></td><td>JSON or TXT</td><td><code>ffuf -o output.json -of json</code></td></tr>
+              <tr><td><strong>Screenshots</strong></td><td>PNG / JPG</td><td>any screenshot tool</td></tr>
+              <tr><td><strong>PDF reports</strong></td><td>PDF</td><td>any — stored as attachment</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="help-tip"><i class="bi bi-lightbulb-fill me-1 text-warning"></i>You can upload multiple files in one go — drag &amp; drop them all at once into the upload zone.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="accordion-item" data-help-item>
+    <h2 class="accordion-header">
+      <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#hs-upload-steps">
+        <i class="bi bi-upload me-2"></i>How to upload scan files
+      </button>
+    </h2>
+    <div id="hs-upload-steps" class="accordion-collapse collapse" data-bs-parent="#acc-import">
+      <div class="accordion-body">
+        <ol>
+          <li>Open the audit detail page.</li>
+          <li>Click <em>Upload files</em> (button in the top section or via the sidebar).</li>
+          <li>Drag &amp; drop your files onto the zone, or click <em>Browse Files</em>.</li>
+          <li>For some file types (Lynis, SQLMap, DirBuster, screenshots) you will be prompted to enter the <strong>target IP</strong> so the parser can link data to the correct host.</li>
+          <li>Click <em>Upload</em>.</li>
+          <li>After upload, Centralized parses the files automatically. Hosts, ports, and vulnerabilities are created or merged with existing data.</li>
+        </ol>
+        <div class="help-warn"><i class="bi bi-exclamation-triangle-fill me-1 text-warning"></i>Re-uploading the same Nmap scan won't create duplicate hosts — the parser merges on IP address.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="accordion-item" data-help-item>
+    <h2 class="accordion-header">
+      <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#hs-nmap-tips">
+        <i class="bi bi-terminal me-2"></i>Recommended Nmap command
+      </button>
+    </h2>
+    <div id="hs-nmap-tips" class="accordion-collapse collapse" data-bs-parent="#acc-import">
+      <div class="accordion-body">
+        <div class="help-code">nmap -sV -sC -O -p- --open -oX nmap_output.xml &lt;target&gt;</div>
+        <p>Flags breakdown:</p>
+        <ul>
+          <li><code>-sV</code> — service version detection</li>
+          <li><code>-sC</code> — default scripts (banner grab, common checks)</li>
+          <li><code>-O</code> — OS detection</li>
+          <li><code>-p-</code> — all 65535 ports</li>
+          <li><code>--open</code> — only show open ports</li>
+          <li><code>-oX</code> — output as XML (required for Centralized import)</li>
+        </ul>
+        <div class="help-tip"><i class="bi bi-lightbulb-fill me-1 text-warning"></i>For faster scans on large ranges: use <code>-T4</code> and limit to common ports first with <code>--top-ports 1000</code>, then re-run with <code>-p-</code> on confirmed live hosts.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="accordion-item" data-help-item>
+    <h2 class="accordion-header">
+      <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#hs-nuclei-tips">
+        <i class="bi bi-bug me-2"></i>Recommended Nuclei command
+      </button>
+    </h2>
+    <div id="hs-nuclei-tips" class="accordion-collapse collapse" data-bs-parent="#acc-import">
+      <div class="accordion-body">
+        <div class="help-code">nuclei -l targets.txt -severity critical,high,medium -json -o nuclei_output.json</div>
+        <ul>
+          <li><code>-l targets.txt</code> — list of URLs/IPs to scan</li>
+          <li><code>-severity</code> — filter by severity</li>
+          <li><code>-json</code> — JSON output (required)</li>
+          <li><code>-o</code> — output file</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ═══════════════════════════════════════════════════
+     SECTION 6 — HOSTS & VULNERABILITIES
+════════════════════════════════════════════════════ -->
+<p class="help-section-title" data-help-section><i class="bi bi-hdd-network me-2"></i>Hosts &amp; Vulnerabilities</p>
+<div class="accordion mb-3" id="acc-hosts">
+
+  <div class="accordion-item" data-help-item>
+    <h2 class="accordion-header">
+      <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#hs-host-detail">
+        <i class="bi bi-hdd me-2"></i>Understanding the host detail page
+      </button>
+    </h2>
+    <div id="hs-host-detail" class="accordion-collapse collapse" data-bs-parent="#acc-hosts">
+      <div class="accordion-body">
+        <p>Each host page shows:</p>
+        <ul>
+          <li><strong>Risk score</strong> — automatically computed from the severity and count of vulnerabilities.</li>
+          <li><strong>Open ports</strong> — with service name, version, and banner.</li>
+          <li><strong>Vulnerabilities</strong> — patched in from Nuclei / Nikto / manual input.</li>
+          <li><strong>HTTP pages</strong> — web surfaces discovered via httpx.</li>
+          <li><strong>CVE enrichment</strong> — click the ⚡ button on a vuln to pull CVSS, EPSS, and remediation from NVD.</li>
+          <li><strong>Host context</strong> — manually set OS version, build number, and service versions for report accuracy.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <div class="accordion-item" data-help-item>
+    <h2 class="accordion-header">
+      <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#hs-vuln-status">
+        <i class="bi bi-shield-check me-2"></i>Vulnerability statuses
+      </button>
+    </h2>
+    <div id="hs-vuln-status" class="accordion-collapse collapse" data-bs-parent="#acc-hosts">
+      <div class="accordion-body">
+        <ul>
+          <li><span class="badge bg-danger">Open</span> — active, not yet remediated.</li>
+          <li><span class="badge bg-warning text-dark">In progress</span> — remediation underway.</li>
+          <li><span class="badge bg-info text-dark">Risk accepted</span> — client has accepted the risk.</li>
+          <li><span class="badge bg-secondary">False positive</span> — confirmed non-issue; excluded from risk score.</li>
+          <li><span class="badge bg-success">Patched</span> — fix verified and applied.</li>
+        </ul>
+        <p>Change the status directly in the vulnerability row — the risk score updates immediately.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="accordion-item" data-help-item>
+    <h2 class="accordion-header">
+      <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#hs-manual-vuln">
+        <i class="bi bi-plus-circle me-2"></i>Adding a manual vulnerability
+      </button>
+    </h2>
+    <div id="hs-manual-vuln" class="accordion-collapse collapse" data-bs-parent="#acc-hosts">
+      <div class="accordion-body">
+        <ol>
+          <li>Open the host detail page.</li>
+          <li>Scroll to the <em>Vulnerabilities</em> section.</li>
+          <li>Click <em>Add vulnerability</em>.</li>
+          <li>Fill in the name, CVE ID (optional), severity, description, and port.</li>
+          <li>Save — it will immediately affect the host's risk score.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+
+  <div class="accordion-item" data-help-item>
+    <h2 class="accordion-header">
+      <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#hs-cve-enrich">
+        <i class="bi bi-lightning-charge me-2"></i>CVE enrichment
+      </button>
+    </h2>
+    <div id="hs-cve-enrich" class="accordion-collapse collapse" data-bs-parent="#acc-hosts">
+      <div class="accordion-body">
+        <p>For any vulnerability with a CVE ID, Centralized can pull enrichment data from NVD (National Vulnerability Database):</p>
+        <ul>
+          <li>CVSS v3 / v4 base score and vector</li>
+          <li>EPSS score (exploit probability)</li>
+          <li>Description</li>
+          <li>Remediation / patch advice</li>
+          <li>References</li>
+        </ul>
+        <p>Click the <i class="bi bi-lightning-charge"></i> <em>Enrich</em> button on a vulnerability row to fetch data for that single CVE, or use the <em>Enrich all</em> button at the top of the host to process all CVEs at once.</p>
+        <div class="help-tip"><i class="bi bi-lightbulb-fill me-1 text-warning"></i>Set a GitHub API token in <em>Administration → Settings</em> to raise the NVD rate limit from 60 to 5 000 requests/hour.</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ═══════════════════════════════════════════════════
+     SECTION 7 — CVE SEARCH & REMEDIATION
+════════════════════════════════════════════════════ -->
+<p class="help-section-title" data-help-section><i class="bi bi-bug me-2"></i>CVE Search &amp; Remediation</p>
+<div class="accordion mb-3" id="acc-cve">
+
+  <div class="accordion-item" data-help-item>
+    <h2 class="accordion-header">
+      <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#hs-cve-search">
+        <i class="bi bi-search me-2"></i>Searching CVEs
+      </button>
+    </h2>
+    <div id="hs-cve-search" class="accordion-collapse collapse" data-bs-parent="#acc-cve">
+      <div class="accordion-body">
+        <p>The <strong>CVE Search</strong> page (sidebar) lets you query the NVD database directly:</p>
+        <ul>
+          <li>Search by CVE ID (e.g. <code>CVE-2021-44228</code>)</li>
+          <li>Search by keyword (e.g. <code>Log4j remote code execution</code>)</li>
+          <li>Filter by severity (Critical / High / Medium / Low)</li>
+          <li>Filter by date range</li>
+        </ul>
+        <p>From the results you can click any CVE to see the full detail, CVSS score, and available patches.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="accordion-item" data-help-item>
+    <h2 class="accordion-header">
+      <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#hs-cve-remediation">
+        <i class="bi bi-tools me-2"></i>CVE Remediation assistant
+      </button>
+    </h2>
+    <div id="hs-cve-remediation" class="accordion-collapse collapse" data-bs-parent="#acc-cve">
+      <div class="accordion-body">
+        <p>The <strong>Remediation</strong> section gives you AI-assisted step-by-step remediation plans for any CVE. It queries configured CVE sources (NVD, CIRCL, MITRE, etc.) and consolidates the best remediation advice.</p>
+        <ol>
+          <li>Navigate to <em>CVE Remediation</em> in the sidebar.</li>
+          <li>Enter a CVE ID.</li>
+          <li>Select the impacted environment (OS, software version).</li>
+          <li>Review the generated plan — steps are priority-ordered.</li>
+          <li>Export to PDF if needed.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ═══════════════════════════════════════════════════
+     SECTION 8 — AUTORECON
+════════════════════════════════════════════════════ -->
+<p class="help-section-title" data-help-section><i class="bi bi-play-circle me-2"></i>AutoRecon integration</p>
+<div class="accordion mb-3" id="acc-autorecon">
+
+  <div class="accordion-item" data-help-item>
+    <h2 class="accordion-header">
+      <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#hs-ar-what">
+        <i class="bi bi-info-circle me-2"></i>What is AutoRecon?
+      </button>
+    </h2>
+    <div id="hs-ar-what" class="accordion-collapse collapse" data-bs-parent="#acc-autorecon">
+      <div class="accordion-body">
+        <p>AutoRecon is a multi-threaded reconnaissance tool that runs many scanning tools (Nmap, Nikto, ffuf, enum4linux-ng, etc.) against a target and organises all results into a structured directory.</p>
+        <p>Centralized can launch AutoRecon scans directly from the UI and then automatically import the results into an audit.</p>
+        <div class="help-tip"><i class="bi bi-lightbulb-fill me-1 text-warning"></i>The AutoRecon section only appears in the sidebar when AutoRecon is installed on the system. Run the <code>AutoRecon.sh</code> / <code>AutoRecon.bat</code> installer first.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="accordion-item" data-help-item>
+    <h2 class="accordion-header">
+      <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#hs-ar-launch">
+        <i class="bi bi-play me-2"></i>Launching a scan from Centralized
+      </button>
+    </h2>
+    <div id="hs-ar-launch" class="accordion-collapse collapse" data-bs-parent="#acc-autorecon">
+      <div class="accordion-body">
+        <ol>
+          <li>Click <strong>AutoRecon</strong> in the sidebar.</li>
+          <li>Enter the <strong>target</strong> (IP, range, or hostname).</li>
+          <li>Select the <strong>audit</strong> to link results to.</li>
+          <li>Optionally configure extra AutoRecon flags.</li>
+          <li>Click <em>Launch scan</em>.</li>
+          <li>Live terminal output streams in the browser window.</li>
+          <li>When the scan finishes, parsed results (hosts, ports, vulns) are automatically imported into the selected audit.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ═══════════════════════════════════════════════════
+     SECTION 9 — NOTIFICATIONS
+════════════════════════════════════════════════════ -->
+<p class="help-section-title" data-help-section><i class="bi bi-bell me-2"></i>Notifications</p>
+<div class="accordion mb-3" id="acc-notifs">
+
+  <div class="accordion-item" data-help-item>
+    <h2 class="accordion-header">
+      <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#hs-notif-setup">
+        <i class="bi bi-bell-fill me-2"></i>Setting up desktop notifications
+      </button>
+    </h2>
+    <div id="hs-notif-setup" class="accordion-collapse collapse" data-bs-parent="#acc-notifs">
+      <div class="accordion-body">
+        <ol>
+          <li>Go to <strong>Notifications</strong> in the sidebar.</li>
+          <li>Click <em>Request permission</em> — your browser will show a permission prompt.</li>
+          <li>Click <em>Allow</em>.</li>
+          <li>Make sure the <strong>Global notifications</strong> toggle is <em>Enabled</em>.</li>
+          <li>For each client / audit / host you want to monitor, click the <i class="bi bi-bell"></i> bell icon and choose which events trigger a notification.</li>
+        </ol>
+        <div class="help-tip"><i class="bi bi-lightbulb-fill me-1 text-warning"></i>Notifications are polled every 30 seconds. Keep the app tab open (or install as a PWA) so you receive them.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="accordion-item" data-help-item>
+    <h2 class="accordion-header">
+      <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#hs-notif-events">
+        <i class="bi bi-list-check me-2"></i>Available notification events
+      </button>
+    </h2>
+    <div id="hs-notif-events" class="accordion-collapse collapse" data-bs-parent="#acc-notifs">
+      <div class="accordion-body">
+        <h6>Per client</h6>
+        <ul>
+          <li><strong>New audit created</strong> — a new audit was added for this client.</li>
+          <li><strong>Audit completed</strong> — an audit for this client was marked as completed.</li>
+          <li><strong>New critical vulnerability</strong> — a critical CVE was discovered in any audit of this client.</li>
+        </ul>
+        <h6>Per audit</h6>
+        <ul>
+          <li><strong>Status change</strong> — the audit status changed.</li>
+          <li><strong>New host discovered</strong> — a new host was added to the audit.</li>
+          <li><strong>New critical vulnerability</strong> — same as above, audit-scoped.</li>
+          <li><strong>Audit completed</strong> — the audit was marked as completed.</li>
+        </ul>
+        <h6>Per host</h6>
+        <ul>
+          <li><strong>New vulnerability found</strong> — any new vuln added to this host.</li>
+          <li><strong>Critical / High vulnerability</strong> — a critical or high severity vuln was added.</li>
+          <li><strong>Risk score changed</strong> — the computed risk score changed.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ═══════════════════════════════════════════════════
+     SECTION 10 — REPORTS
+════════════════════════════════════════════════════ -->
+<p class="help-section-title" data-help-section><i class="bi bi-file-earmark-pdf me-2"></i>Reports</p>
+<div class="accordion mb-3" id="acc-reports">
+
+  <div class="accordion-item" data-help-item>
+    <h2 class="accordion-header">
+      <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#hs-pdf-export">
+        <i class="bi bi-download me-2"></i>Exporting a PDF report
+      </button>
+    </h2>
+    <div id="hs-pdf-export" class="accordion-collapse collapse" data-bs-parent="#acc-reports">
+      <div class="accordion-body">
+        <ol>
+          <li>Open the audit detail page.</li>
+          <li>Click the <em>Export PDF</em> button.</li>
+          <li>The report includes:
+            <ul>
+              <li>Executive summary</li>
+              <li>Scope and methodology</li>
+              <li>Per-host findings with severity badges</li>
+              <li>Risk score chart</li>
+              <li>CVE details and remediation advice</li>
+              <li>Open port inventory</li>
+            </ul>
+          </li>
+        </ol>
+        <div class="help-tip"><i class="bi bi-lightbulb-fill me-1 text-warning"></i>Make sure the audit has a <strong>client</strong> assigned and the <strong>start/end dates</strong> are set for a complete report header.</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ═══════════════════════════════════════════════════
+     SECTION 11 — INTERFACE & SETTINGS
+════════════════════════════════════════════════════ -->
+<p class="help-section-title" data-help-section><i class="bi bi-palette me-2"></i>Interface &amp; Settings</p>
+<div class="accordion mb-3" id="acc-interface">
+
+  <div class="accordion-item" data-help-item>
+    <h2 class="accordion-header">
+      <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#hs-theme">
+        <i class="bi bi-brush me-2"></i>Customising the color theme
+      </button>
+    </h2>
+    <div id="hs-theme" class="accordion-collapse collapse" data-bs-parent="#acc-interface">
+      <div class="accordion-body">
+        <ol>
+          <li>Go to <em>Administration → Interface</em>.</li>
+          <li>Use the color pickers to adjust: Accent color, Sidebar background, Card background, Body background.</li>
+          <li>A live preview updates in real time on the right.</li>
+          <li>Click <em>Save theme</em>.</li>
+        </ol>
+        <p>You can also <strong>extract colors from an image</strong>: drop a wallpaper or screenshot into the drop zone at the top — Centralized will suggest a palette derived from the image's dominant colors.</p>
+        <p>The <strong>Glassmorphic</strong> toggle adds a frosted-glass effect across the whole UI.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="accordion-item" data-help-item>
+    <h2 class="accordion-header">
+      <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#hs-app-icon">
+        <i class="bi bi-image me-2"></i>Setting a custom app icon
+      </button>
+    </h2>
+    <div id="hs-app-icon" class="accordion-collapse collapse" data-bs-parent="#acc-interface">
+      <div class="accordion-body">
+        <ol>
+          <li>Go to <em>Administration → Interface</em> and scroll to the <em>App Icon</em> card.</li>
+          <li>Click <em>Choose file</em> and select a PNG, JPG, WEBP, or GIF (min. 192×192 px recommended).</li>
+          <li>A preview shows the selected image.</li>
+          <li>Click <em>Save icon</em>.</li>
+        </ol>
+        <p>The custom icon replaces the favicon in browser tabs, the home screen shortcut (PWA), and the Apple touch icon. Click <em>Reset to default</em> to revert.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="accordion-item" data-help-item>
+    <h2 class="accordion-header">
+      <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#hs-cve-sources">
+        <i class="bi bi-database me-2"></i>Managing CVE sources
+      </button>
+    </h2>
+    <div id="hs-cve-sources" class="accordion-collapse collapse" data-bs-parent="#acc-interface">
+      <div class="accordion-body">
+        <p>Go to <em>Administration → Settings</em> to manage the CVE data sources Centralized queries for enrichment and search:</p>
+        <ul>
+          <li><strong>NVD</strong> — built-in, always active, official US government database.</li>
+          <li><strong>CIRCL</strong>, <strong>MITRE</strong>, <strong>EPSS</strong>, <strong>OSV</strong>, <strong>ENISA EUVD</strong>, <strong>Tenable</strong>, <strong>Wiz</strong>, <strong>VulDB</strong>… can all be added.</li>
+          <li>Toggle sources on/off or add custom URLs.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <div class="accordion-item" data-help-item>
+    <h2 class="accordion-header">
+      <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#hs-user-mgmt">
+        <i class="bi bi-person-gear me-2"></i>User management
+      </button>
+    </h2>
+    <div id="hs-user-mgmt" class="accordion-collapse collapse" data-bs-parent="#acc-interface">
+      <div class="accordion-body">
+        <p>Go to <em>Administration → Users</em> (admin only):</p>
+        <ul>
+          <li><strong>Create</strong> new users with role <em>admin</em> or <em>analyst</em>.</li>
+          <li><strong>Edit</strong> username, e-mail, or password of any account.</li>
+          <li><strong>Delete</strong> accounts (cannot delete your own).</li>
+        </ul>
+        <p>Roles:</p>
+        <ul>
+          <li><strong>admin</strong> — full access including user management, interface settings, and update.</li>
+          <li><strong>analyst</strong> — full access to clients, audits, hosts, CVE search; no access to admin pages.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ═══════════════════════════════════════════════════
+     SECTION 12 — UPDATES & MAINTENANCE
+════════════════════════════════════════════════════ -->
+<p class="help-section-title" data-help-section><i class="bi bi-arrow-repeat me-2"></i>Updates &amp; maintenance</p>
+<div class="accordion mb-3" id="acc-update">
+
+  <div class="accordion-item" data-help-item>
+    <h2 class="accordion-header">
+      <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#hs-update">
+        <i class="bi bi-cloud-download me-2"></i>Updating Centralized
+      </button>
+    </h2>
+    <div id="hs-update" class="accordion-collapse collapse" data-bs-parent="#acc-update">
+      <div class="accordion-body">
+        <p>When an update is available, a pulsing badge appears next to <em>Update</em> in the sidebar.</p>
+        <ol>
+          <li>Click <strong>Update</strong> in the Administration section.</li>
+          <li>Review the latest version info and changelog.</li>
+          <li>Click <em>Run update</em>.</li>
+          <li>The terminal output streams live. On Linux with systemd, the service restarts automatically.</li>
+          <li>On Windows, restart the Centralized service manually via Services or the task manager.</li>
+        </ol>
+        <div class="help-warn"><i class="bi bi-exclamation-triangle-fill me-1 text-warning"></i>The database schema is migrated automatically — no data is lost during a normal update.</div>
+        <p>You can also <strong>rollback</strong> to a previous version from the same page by selecting a commit from the version history.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="accordion-item" data-help-item>
+    <h2 class="accordion-header">
+      <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#hs-backup">
+        <i class="bi bi-floppy me-2"></i>Backing up your data
+      </button>
+    </h2>
+    <div id="hs-backup" class="accordion-collapse collapse" data-bs-parent="#acc-update">
+      <div class="accordion-body">
+        <p>Centralized stores all data in an SQLite database file and an <code>uploads/</code> directory. To back up manually:</p>
+        <div class="help-code"># Copy the database
+cp centralized.db centralized.db.bak
+
+# Copy uploads
+cp -r uploads/ uploads_backup/</div>
+        <p>On Windows:</p>
+        <div class="help-code">Copy-Item "centralized.db" "centralized.db.bak"
+Copy-Item "uploads\" "uploads_backup\" -Recurse</div>
+        <div class="help-tip"><i class="bi bi-lightbulb-fill me-1 text-warning"></i>Automate this with a cron job (Linux) or Task Scheduler (Windows) to keep daily backups.</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ═══════════════════════════════════════════════════
+     SECTION 13 — TROUBLESHOOTING
+════════════════════════════════════════════════════ -->
+<p class="help-section-title" data-help-section><i class="bi bi-wrench-adjustable me-2"></i>Troubleshooting</p>
+<div class="accordion mb-3" id="acc-trouble">
+
+  <div class="accordion-item" data-help-item>
+    <h2 class="accordion-header">
+      <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#hs-t-upload-fail">
+        <i class="bi bi-exclamation-circle me-2"></i>File upload doesn't import any data
+      </button>
+    </h2>
+    <div id="hs-t-upload-fail" class="accordion-collapse collapse" data-bs-parent="#acc-trouble">
+      <div class="accordion-body">
+        <ul>
+          <li>Check that the file format is supported (see <em>Supported file formats</em> above).</li>
+          <li>For Nmap, make sure the file was generated with <code>-oX</code> (XML), not <code>-oN</code> or <code>-oG</code>.</li>
+          <li>For Nuclei, make sure you used <code>-json</code>, not plain text output.</li>
+          <li>Files with 0 bytes or corrupted content will show as uploaded but produce no results — re-run the tool and re-upload.</li>
+          <li>Check the audit's uploaded files list: the file type is shown next to each entry. <em>Unknown</em> means the parser could not identify the format.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <div class="accordion-item" data-help-item>
+    <h2 class="accordion-header">
+      <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#hs-t-notif">
+        <i class="bi bi-bell-slash me-2"></i>Not receiving desktop notifications
+      </button>
+    </h2>
+    <div id="hs-t-notif" class="accordion-collapse collapse" data-bs-parent="#acc-trouble">
+      <div class="accordion-body">
+        <ul>
+          <li>Check that the browser permission is <em>Granted</em> on the Notifications page.</li>
+          <li>Make sure the global toggle is <em>Enabled</em>.</li>
+          <li>Make sure you have subscribed to at least one event for the relevant entity (bell icon).</li>
+          <li>Some OSes (Windows Focus Assist, macOS Do Not Disturb) can suppress browser notifications. Disable them temporarily to test.</li>
+          <li>Notifications are polled every 30 seconds — there may be a short delay after an event fires.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <div class="accordion-item" data-help-item>
+    <h2 class="accordion-header">
+      <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#hs-t-rate-limit">
+        <i class="bi bi-hourglass-split me-2"></i>CVE enrichment fails / rate limit error
+      </button>
+    </h2>
+    <div id="hs-t-rate-limit" class="accordion-collapse collapse" data-bs-parent="#acc-trouble">
+      <div class="accordion-body">
+        <p>The NVD API limits anonymous requests to <strong>60 per hour</strong>. With a GitHub PAT (no special scopes required) Centralized can make <strong>5 000 requests per hour</strong>.</p>
+        <ol>
+          <li>Go to <a href="https://github.com/settings/tokens" target="_blank" rel="noopener noreferrer">github.com/settings/tokens</a>.</li>
+          <li>Generate a classic token with <em>no scopes</em> (read-only public API access).</li>
+          <li>Paste it in <em>Administration → Settings → GitHub API Token</em>.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+
+  <div class="accordion-item" data-help-item>
+    <h2 class="accordion-header">
+      <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#hs-t-port80">
+        <i class="bi bi-plug me-2"></i>HTTP to HTTPS redirect not working
+      </button>
+    </h2>
+    <div id="hs-t-port80" class="accordion-collapse collapse" data-bs-parent="#acc-trouble">
+      <div class="accordion-body">
+        <p>Centralized tries to bind port 80 for the HTTP→HTTPS redirect. This fails if:</p>
+        <ul>
+          <li>Another process (Apache, nginx, IIS…) is already using port 80.</li>
+          <li>The app doesn't have permission to bind privileged ports on Linux (ports &lt; 1024 require root or <code>CAP_NET_BIND_SERVICE</code>).</li>
+        </ul>
+        <p>To fix on Linux without running as root:</p>
+        <div class="help-code">sudo setcap 'cap_net_bind_service=+ep' $(which python3)</div>
+        <p>Or use a reverse proxy (nginx / caddy) in front of Centralized.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="accordion-item" data-help-item>
+    <h2 class="accordion-header">
+      <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#hs-t-pwa">
+        <i class="bi bi-app me-2"></i>Install button not showing for PWA
+      </button>
+    </h2>
+    <div id="hs-t-pwa" class="accordion-collapse collapse" data-bs-parent="#acc-trouble">
+      <div class="accordion-body">
+        <ul>
+          <li>PWA installation requires <strong>HTTPS</strong> — HTTP is not supported by browsers for PWA.</li>
+          <li>The SSL certificate must be trusted (not just bypassed) — see the SSL section above.</li>
+          <li>On Chrome, open <kbd>chrome://apps</kbd> and check if the site is already installed.</li>
+          <li>On Edge, click the 3-dot menu → <em>Apps</em> → <em>Install this site as an app</em>.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+function filterHelp(query) {
+  const q = query.trim().toLowerCase();
+  let visibleCount = 0;
+
+  document.querySelectorAll('[data-help-item]').forEach(item => {
+    const text = item.textContent.toLowerCase();
+    const match = !q || text.includes(q);
+    item.style.display = match ? '' : 'none';
+    if (match) visibleCount++;
+  });
+
+  // Show/hide section labels based on whether any item in that section is visible
+  document.querySelectorAll('[data-help-section]').forEach(section => {
+    // Find the next sibling accordion
+    let el = section.nextElementSibling;
+    let hasVisible = false;
+    while (el && !el.hasAttribute('data-help-section')) {
+      if (el.querySelector('[data-help-item]')) {
+        const items = el.querySelectorAll('[data-help-item]');
+        items.forEach(i => { if (i.style.display !== 'none') hasVisible = true; });
+      }
+      el = el.nextElementSibling;
+    }
+    section.style.display = hasVisible || !q ? '' : 'none';
+  });
+
+  document.getElementById('helpNoResults').classList.toggle('d-none', visibleCount > 0 || !q);
+
+  // Auto-expand matched items when searching
+  if (q) {
+    document.querySelectorAll('[data-help-item]').forEach(item => {
+      if (item.style.display !== 'none') {
+        const collapse = item.querySelector('.accordion-collapse');
+        if (collapse && !collapse.classList.contains('show')) {
+          new bootstrap.Collapse(collapse, { toggle: false }).show();
+        }
+      }
+    });
+  }
+}
+</script>
+{% endblock %}
