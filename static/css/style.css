@@ -81,7 +81,9 @@ body {
 .main-content {
   margin-left: var(--sidebar-width);
   flex: 1;
+  min-width: 0;
   min-height: 100vh;
+  overflow-x: hidden;
   transition: margin-left .25s ease;
 }
 
