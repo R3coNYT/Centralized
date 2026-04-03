@@ -185,29 +185,51 @@
 <!-- ── PWA — Service Worker registration & install prompt ────────────── -->
 <script>
 (function () {
-  /* ── Install prompt ── */
   var deferredPrompt = null;
-  var installBtn = document.getElementById('pwa-install-btn');
+  var swReady        = false;
+  var installBtn     = document.getElementById('pwa-install-btn');
 
+  /* ── beforeinstallprompt — Chrome fires this when installable via JS ── */
   window.addEventListener('beforeinstallprompt', function (e) {
-    e.preventDefault();          /* stop the mini-infobar on mobile */
+    e.preventDefault();
     deferredPrompt = e;
-    if (installBtn) installBtn.classList.remove('d-none');
+    showInstallBtn();
   });
+
+  /* ── Show the install button (called either by beforeinstallprompt or SW ready) ── */
+  function showInstallBtn() {
+    if (!installBtn) return;
+    /* Check not already installed */
+    if (navigator.getInstalledRelatedApps) {
+      navigator.getInstalledRelatedApps().then(function (apps) {
+        if (!apps || apps.length === 0) installBtn.classList.remove('d-none');
+      }).catch(function () { installBtn.classList.remove('d-none'); });
+    } else {
+      installBtn.classList.remove('d-none');
+    }
+  }
 
   if (installBtn) {
     installBtn.addEventListener('click', function () {
-      if (!deferredPrompt) return;
-      deferredPrompt.prompt();
-      deferredPrompt.userChoice.then(function (choice) {
-        console.debug('[PWA] Install choice:', choice.outcome);
-        deferredPrompt = null;
-        installBtn.classList.add('d-none');
-      });
+      if (deferredPrompt) {
+        /* Native prompt available — use it */
+        deferredPrompt.prompt();
+        deferredPrompt.userChoice.then(function (choice) {
+          console.debug('[PWA] Install choice:', choice.outcome);
+          deferredPrompt = null;
+          installBtn.classList.add('d-none');
+        });
+      } else {
+        /* Chrome v116+: install icon is in the address bar — guide the user */
+        var toastEl = document.getElementById('pwa-addrbar-toast');
+        if (toastEl && window.bootstrap) {
+          new bootstrap.Toast(toastEl, { autohide: false }).show();
+        }
+      }
     });
   }
 
-  /* Hide the button once already installed */
+  /* Hide the button once installed */
   window.addEventListener('appinstalled', function () {
     if (installBtn) installBtn.classList.add('d-none');
     deferredPrompt = null;
@@ -218,9 +240,13 @@
   window.addEventListener('load', function () {
     navigator.serviceWorker.register('/sw.js', { scope: '/' })
       .then(function (reg) {
-        console.debug('[PWA] Service worker registered, scope:', reg.scope);
+        console.debug('[PWA] SW registered, scope:', reg.scope);
+        swReady = true;
 
-        /* Detect if an update is available and prompt the user */
+        /* SW is active → PWA is installable. Show button even if
+           beforeinstallprompt hasn't fired yet (Chrome v116+ behaviour). */
+        if (!deferredPrompt) showInstallBtn();
+
         reg.addEventListener('updatefound', function () {
           var newWorker = reg.installing;
           newWorker.addEventListener('statechange', function () {
@@ -234,9 +260,7 @@
         });
       })
       .catch(function (err) {
-        console.warn('[PWA] Service worker registration failed:', err);
-        /* SecurityError = browser blocked SW due to untrusted SSL certificate.
-           Show a toast guiding the user to install the cert as a trusted root. */
+        console.warn('[PWA] SW registration failed:', err);
         if (err && err.name === 'SecurityError') {
           var sslToast = document.getElementById('pwa-ssl-toast');
           if (sslToast && window.bootstrap) {
@@ -292,6 +316,22 @@ function downloadTrustScript() {
       </div>
       <button type="button" class="btn-close btn-close-white me-2 m-auto"
               data-bs-dismiss="toast" aria-label="Fermer"></button>
+    </div>
+  </div>
+</div>
+
+<!-- ── PWA — "Install via address bar" toast ──────────────────────────── -->
+<div class="position-fixed bottom-0 start-0 p-3" style="z-index:2000">
+  <div id="pwa-addrbar-toast" class="toast align-items-center text-bg-info border-0"
+       role="alert" aria-live="polite" aria-atomic="true">
+    <div class="d-flex">
+      <div class="toast-body" style="font-size:.85rem">
+        <i class="bi bi-browser-chrome me-1"></i>
+        <strong>Install via Chrome address bar:</strong><br>
+        Look for the <i class="bi bi-plus-circle"></i> icon at the right of the URL bar, then click <em>"Install Centralized"</em>.
+      </div>
+      <button type="button" class="btn-close btn-close-white me-2 m-auto"
+              data-bs-dismiss="toast" aria-label="Close"></button>
     </div>
   </div>
 </div>
