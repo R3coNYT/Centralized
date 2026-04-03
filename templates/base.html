@@ -151,8 +151,8 @@
       <!-- PWA install button — hidden until browser fires beforeinstallprompt -->
       <button id="pwa-install-btn" type="button"
               class="btn btn-sm btn-outline-secondary d-none"
-              title="Installer l'application">
-        <i class="bi bi-download me-1"></i>Installer
+              title="Install the application">
+        <i class="bi bi-download me-1"></i>Install
       </button>
     </div>
   </div>
@@ -196,10 +196,18 @@
     showInstallBtn();
   });
 
-  /* ── Show the install button (called either by beforeinstallprompt or SW ready) ── */
+  /* ── Detect if PWA is already running in standalone (installed) mode ── */
+  function isInstalled() {
+    return window.matchMedia('(display-mode: standalone)').matches
+        || window.matchMedia('(display-mode: window-controls-overlay)').matches
+        || navigator.standalone === true;
+  }
+
+  /* ── Show the install button only if not already installed ── */
   function showInstallBtn() {
     if (!installBtn) return;
-    /* Check not already installed */
+    if (isInstalled()) return;   /* running as PWA already — never show */
+
     if (navigator.getInstalledRelatedApps) {
       navigator.getInstalledRelatedApps().then(function (apps) {
         if (!apps || apps.length === 0) installBtn.classList.remove('d-none');
@@ -243,9 +251,10 @@
         console.debug('[PWA] SW registered, scope:', reg.scope);
         swReady = true;
 
-        /* SW is active → PWA is installable. Show button even if
-           beforeinstallprompt hasn't fired yet (Chrome v116+ behaviour). */
-        if (!deferredPrompt) showInstallBtn();
+        /* SW is active. Show install button only if:
+           - not already running as standalone (= installed)
+           - and beforeinstallprompt hasn't arrived yet (Chrome v116+ may skip it) */
+        if (!deferredPrompt && !isInstalled()) showInstallBtn();
 
         reg.addEventListener('updatefound', function () {
           var newWorker = reg.installing;
