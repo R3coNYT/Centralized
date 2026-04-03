@@ -644,16 +644,26 @@ th[data-sort][aria-sort="descending"]::after{content:' ↓';opacity:1}
   var btn     = document.getElementById('sidebar-toggle-btn');
   if (!sidebar || !btn) return;
 
-  function applyState(collapsed) {
+  function applyState(collapsed, instant) {
+    if (instant) {
+      sidebar.style.transition = 'none';
+      if (main) main.style.transition = 'none';
+    }
     sidebar.classList.toggle('collapsed', collapsed);
     if (main) main.classList.toggle('sidebar-collapsed', collapsed);
+    if (instant) {
+      void sidebar.offsetHeight; // force reflow so classes apply before re-enabling transitions
+      sidebar.style.transition = '';
+      if (main) { void main.offsetHeight; main.style.transition = ''; }
+    }
   }
 
-  applyState(localStorage.getItem('sidebarCollapsed') === 'true');
+  // Restore saved state instantly (no animation) so sidebar doesn't flash open→closed on navigation
+  applyState(localStorage.getItem('sidebarCollapsed') === 'true', true);
 
   btn.addEventListener('click', function () {
     var next = !sidebar.classList.contains('collapsed');
-    applyState(next);
+    applyState(next, false);
     localStorage.setItem('sidebarCollapsed', next);
   });
 })();
