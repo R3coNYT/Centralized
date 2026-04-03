@@ -195,6 +195,44 @@
       </div>
     </div>
 
+    <!-- App Icon -->
+    <div class="card mt-4">
+      <div class="card-header fw-semibold"><i class="bi bi-image me-2"></i>App Icon</div>
+      <div class="card-body">
+        <div class="small text-muted mb-3">Upload a custom icon used as the app favicon and home screen shortcut. PNG/JPG/WEBP recommended, min. 192&times;192&nbsp;px.</div>
+        <div class="d-flex align-items-center gap-3 mb-3">
+          <img src="{{ app_icon_url or url_for('static', filename='img/icon-192.png') }}"
+               id="iconPreview"
+               style="width:64px;height:64px;object-fit:contain;border-radius:12px;border:1px solid rgba(255,255,255,.12)"/>
+          <div>
+            <div class="fw-semibold small">Current icon</div>
+            <div class="text-muted" style="font-size:.75rem">{% if app_icon_url %}Custom icon active{% else %}Default icon{% endif %}</div>
+          </div>
+        </div>
+        <form method="POST" action="{{ url_for('admin.interface_icon') }}" enctype="multipart/form-data">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+          <div class="d-flex gap-2 align-items-center flex-wrap">
+            <label class="btn btn-outline-secondary btn-sm mb-0" for="iconFileInput">
+              <i class="bi bi-upload me-1"></i>Choose file
+            </label>
+            <input type="file" id="iconFileInput" name="icon" accept="image/*" class="d-none" onchange="previewIcon(this)"/>
+            <span class="small text-muted" id="iconFileName">No file chosen</span>
+            <button type="submit" class="btn btn-primary btn-sm ms-auto" id="iconSaveBtn" disabled>
+              <i class="bi bi-check-lg me-1"></i>Save icon
+            </button>
+          </div>
+        </form>
+        {% if app_icon_url %}
+        <form method="POST" action="{{ url_for('admin.interface_icon_reset') }}" class="mt-2">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+          <button type="submit" class="btn btn-outline-danger btn-sm">
+            <i class="bi bi-arrow-counterclockwise me-1"></i>Reset to default
+          </button>
+        </form>
+        {% endif %}
+      </div>
+    </div>
+
   </div>
 
 </div>
@@ -500,6 +538,16 @@ function showSwatchPicker(swatchEl, hex) {
 function getCsrfToken() {
   const m = document.querySelector('meta[name="csrf-token"]');
   return m ? m.getAttribute('content') : '';
+}
+
+function previewIcon(input) {
+  const file = input.files[0];
+  if (!file) return;
+  document.getElementById('iconFileName').textContent = file.name;
+  document.getElementById('iconSaveBtn').disabled = false;
+  const reader = new FileReader();
+  reader.onload = e => { document.getElementById('iconPreview').src = e.target.result; };
+  reader.readAsDataURL(file);
 }
 
 async function toggleGlass() {

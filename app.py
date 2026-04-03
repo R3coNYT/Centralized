@@ -228,9 +228,13 @@ echo "[*] Done. Please restart Chrome."
             _settings = get_all_settings()
             css = build_theme_css(_settings)
             glass_enabled = _settings.get("glassmorphic") == "1"
+            _app_icon = _settings.get("app_icon", "")
+            _icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "img", _app_icon)
+            app_icon_url = f"/static/img/{_app_icon}" if _app_icon and os.path.isfile(_icon_path) else ""
         except Exception:
             css = ""
             glass_enabled = False
+            app_icon_url = ""
         autorecon_installed = bool(
             (os.name == "nt" and os.path.isfile(r"C:\Tools\AutoRecon\AutoRecon.bat")) or
             shutil.which("AutoRecon") or
@@ -238,7 +242,7 @@ echo "[*] Done. Please restart Chrome."
             os.path.isfile("/opt/autorecon/autorecon.py") or
             os.path.isfile(os.path.expanduser("~/Tools/AutoRecon/AutoRecon.py"))
         )
-        return {"theme_css": css, "autorecon_installed": autorecon_installed, "glass_enabled": glass_enabled}
+        return {"theme_css": css, "autorecon_installed": autorecon_installed, "glass_enabled": glass_enabled, "app_icon_url": app_icon_url}
 
     # Import models here so SQLAlchemy sees them before create_all()
     import models  # noqa: F401
