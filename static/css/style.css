@@ -453,14 +453,14 @@ html[data-glass="1"] .cs-toggle[aria-expanded="true"] {
 }
 
 html[data-glass="1"] .cs-menu {
-  background: rgba(255, 255, 255, 0.08) !important;
-  border: 1px solid rgba(255, 255, 255, 0.14) !important;
-  border-top-color: rgba(255, 255, 255, 0.26) !important;
-  backdrop-filter: blur(28px) saturate(180%) brightness(1.10) !important;
-  -webkit-backdrop-filter: blur(28px) saturate(180%) brightness(1.10) !important;
-  box-shadow: 0 8px 40px rgba(0,0,0,0.28),
-              inset 0 1px 0 rgba(255,255,255,0.18),
-              inset 0 -1px 0 rgba(0,0,0,0.10) !important;
+  background: rgba(var(--bs-primary-rgb, 13,110,253), 0.18) !important;
+  border: 1px solid rgba(255, 255, 255, 0.18) !important;
+  border-top-color: rgba(255, 255, 255, 0.32) !important;
+  backdrop-filter: blur(32px) saturate(200%) brightness(1.15) !important;
+  -webkit-backdrop-filter: blur(32px) saturate(200%) brightness(1.15) !important;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.35),
+              inset 0 1px 0 rgba(255,255,255,0.22),
+              inset 0 -1px 0 rgba(0,0,0,0.12) !important;
 }
 
 html[data-glass="1"] .cs-item {
