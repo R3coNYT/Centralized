@@ -732,6 +732,25 @@ th[data-sort][aria-sort="descending"]::after{content:' ↓';opacity:1}
 
 <!-- ── Custom Select helpers ─────────────────────────────────────────────── -->
 <script>
+/* Glass-mode dropdown menu background — applied via JS to guarantee override
+   regardless of CSS cache or service worker. */
+(function() {
+  function applyGlassMenuStyle() {
+    if (!document.documentElement.hasAttribute('data-glass')) return;
+    document.querySelectorAll('.cs-menu').forEach(function(menu) {
+      menu.style.setProperty('background', 'linear-gradient(160deg, rgba(30,55,140,0.96) 0%, rgba(20,35,100,0.96) 100%)', 'important');
+      menu.style.setProperty('border', '1px solid rgba(255,255,255,0.20)', 'important');
+      menu.style.setProperty('border-top-color', 'rgba(255,255,255,0.36)', 'important');
+    });
+  }
+  /* Apply on every dropdown open */
+  document.addEventListener('show.bs.dropdown', applyGlassMenuStyle);
+  /* Also apply once on load in case menus are already visible */
+  document.addEventListener('DOMContentLoaded', applyGlassMenuStyle);
+})();
+</script>
+
+<script>
 /* csSet(anchor) — called by onclick on each .cs-item
    Updates the visible toggle label, marks active item,
    and sets the hidden input value + fires a change event. */
