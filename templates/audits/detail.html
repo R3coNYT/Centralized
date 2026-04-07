@@ -42,7 +42,7 @@
           </div>
           <div class="col-sm-6">
             <div class="small text-muted mb-1">Status</div>
-            {% include '_partials/status_badge.html' %}
+            <span id="audit-status-badge">{% include '_partials/status_badge.html' %}</span>
           </div>
           <div class="col-sm-6">
             <div class="small text-muted mb-1">Period</div>
@@ -907,5 +907,45 @@ function renderCtxResults(data) {
   document.getElementById('ctx-results').classList.remove('d-none');
 }
 // ─────────────────────────────────────────────────────────────────────────────
+
+/* ── Live update listener — audit detail ── */
+(function () {
+  var THIS_AUDIT_ID = {{ audit.id }};
+  var STATUS_BADGE = {
+    'in_progress': '<span class="badge bg-primary">In Progress</span>',
+    'completed':   '<span class="badge bg-success">Completed</span>',
+    'archived':    '<span class="badge bg-secondary">Archived</span>',
+  };
+  document.addEventListener('centralized:live-update', function (e) {
+    var d = e.detail;
+    /* Status update for this audit */
+    if (d.type === 'audit_update' && d.audit_id == THIS_AUDIT_ID) {
+      var badge = document.getElementById('audit-status-badge');
+      if (badge && d.status) badge.innerHTML = STATUS_BADGE[d.status] || '<span class="badge bg-secondary">' + d.status + '</span>';
+    }
+    /* New host added to this audit → show reload banner */
+    if (d.type === 'new_host' && d.audit_id == THIS_AUDIT_ID) {
+      if (!document.getElementById('live-new-host-banner')) {
+        document.querySelector('.row.g-3').insertAdjacentHTML('beforebegin',
+          '<div id="live-new-host-banner" class="alert alert-info alert-dismissible d-flex align-items-center gap-2 mb-3" role="alert">' +
+            '<i class="bi bi-hdd-network"></i>' +
+            '<span>New host <strong>' + (d.host_ip || '') + '</strong> discovered. <a href="#" class="alert-link" onclick="location.reload();return false;">Reload</a> to see it.</span>' +
+            '<button type="button" class="btn-close" data-bs-dismiss="alert"></button>' +
+          '</div>');
+      }
+    }
+    /* New vuln added to this audit → show reload banner */
+    if (d.type === 'new_vuln' && d.audit_id == THIS_AUDIT_ID) {
+      if (!document.getElementById('live-new-vuln-banner')) {
+        document.querySelector('.row.g-3').insertAdjacentHTML('beforebegin',
+          '<div id="live-new-vuln-banner" class="alert alert-warning alert-dismissible d-flex align-items-center gap-2 mb-3" role="alert">' +
+            '<i class="bi bi-exclamation-triangle"></i>' +
+            '<span>New <strong>' + (d.severity || '') + '</strong> vulnerability detected. <a href="#" class="alert-link" onclick="location.reload();return false;">Reload</a> to see it.</span>' +
+            '<button type="button" class="btn-close" data-bs-dismiss="alert"></button>' +
+          '</div>');
+      }
+    }
+  });
+})();
 </script>
 {% endblock %}
