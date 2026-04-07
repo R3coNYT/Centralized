@@ -297,6 +297,12 @@ body {
 
 .cs-wrapper {
   position: relative;
+  z-index: 1;
+}
+
+/* When open, raise the wrapper above siblings that have backdrop-filter stacking contexts */
+.cs-wrapper:has([aria-expanded="true"]) {
+  z-index: 1060;
 }
 
 /* Toggle button — same visual language as .form-control inputs */
