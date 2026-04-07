@@ -375,6 +375,8 @@ body {
   overflow-y: auto;
   scrollbar-width: thin;
   scrollbar-color: rgba(255,255,255,0.15) transparent;
+  z-index: 1055;
+  position: relative;
 }
 
 .cs-menu::-webkit-scrollbar { width: 5px; }
@@ -446,20 +448,22 @@ html[data-glass="1"] .cs-toggle[aria-expanded="true"] {
 }
 
 html[data-glass="1"] .cs-menu {
-  background-color: rgba(10, 14, 24, 0.80) !important;
+  background: rgba(255, 255, 255, 0.08) !important;
   border: 1px solid rgba(255, 255, 255, 0.14) !important;
-  backdrop-filter: blur(28px) saturate(200%) !important;
-  -webkit-backdrop-filter: blur(28px) saturate(200%) !important;
-  box-shadow: 0 12px 40px rgba(0,0,0,0.50),
-              inset 0 1px 0 rgba(255,255,255,0.10) !important;
+  border-top-color: rgba(255, 255, 255, 0.26) !important;
+  backdrop-filter: blur(28px) saturate(180%) brightness(1.10) !important;
+  -webkit-backdrop-filter: blur(28px) saturate(180%) brightness(1.10) !important;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.28),
+              inset 0 1px 0 rgba(255,255,255,0.18),
+              inset 0 -1px 0 rgba(0,0,0,0.10) !important;
 }
 
 html[data-glass="1"] .cs-item {
   color: rgba(255,255,255,0.82);
 }
 
-html[data-glass="1"] .cs-item:hover:not(.disabled) {
-  background-color: rgba(255,255,255,0.10);
+html[data-glass="1"] .cs-item:hover:not(.disabled):not(.cs-item-disabled) {
+  background-color: rgba(255, 255, 255, 0.15);
   color: #fff;
 }
 
