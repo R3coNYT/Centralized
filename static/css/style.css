@@ -846,6 +846,19 @@ html[data-glass="1"] .alert-secondary  { background: rgba(108,117,125,0.16) !imp
 html[data-glass="1"] .alert-dark       { background: rgba(33,37,41,0.32) !important; }
 
 /* ── 11. Dropdowns ──────────────────────────────────────────── */
+html[data-glass="1"] .dropdown {
+  background-color: rgba(255,255,255,0.07) !important;
+  border: 1px solid rgba(255,255,255,0.14) !important;
+  border-top-color: rgba(255,255,255,0.26) !important;
+  border-radius: 0.6rem !important;
+  backdrop-filter: blur(16px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(16px) saturate(180%) !important;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.20),
+              inset 0 1px 0 rgba(255,255,255,0.16),
+              inset 0 -1px 0 rgba(0,0,0,0.08) !important;
+  color: #fff !important;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+}
 html[data-glass="1"] .dropdown-menu {
   background: rgba(10,12,18,0.58) !important;
   backdrop-filter: blur(28px) saturate(170%);
