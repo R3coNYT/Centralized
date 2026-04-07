@@ -7,6 +7,7 @@
 ## Features
 
 ### Audit & Client Management
+
 - **Login system** with role-based access: Admin / Analyst
 - **Dashboard** with live charts: severity distribution, top vulnerable services, monthly audit trend
 - **Client & Audit management** — organize engagements by client, track status, scope and dates
@@ -16,6 +17,7 @@
 
 | Format | Data Extracted |
 |--------|----------------|
+
 | Nmap XML (`-oX`) | Hosts, ports, services, versions, OS, CVEs from NSE scripts |
 | Nmap JSON (AutoRecon) | Hosts, ports, services, versions |
 | AutoRecon `report.json` | Full data: hosts, CVEs, risk, WAF, CMS, nuclei, httpx |
@@ -33,7 +35,9 @@
 > **Lynis uploads require a Target IP** — enter it manually on the upload page as Lynis runs locally on the audited machine and does not embed a network address in its output.
 
 ### Multi-Source CVE Enrichment
+
 NVD is the default source. Additional sources can be enabled from **Admin → Settings**:
+
 - **NVD (NIST)** — CVSS v3/v4, official descriptions
 - **CIRCL CVE Search** — CVSS fallback, affected packages
 - **MITRE / cve.org** — authoritative descriptions and CWE weaknesses
@@ -43,6 +47,7 @@ NVD is the default source. Additional sources can be enabled from **Admin → Se
 - **CVE Details, Tenable, Wiz, VulDB, CVEFind** — clickable enrichment links in the CVE modal
 
 ### Analysis & Detection
+
 - **Automatic per-host analysis** — NVD queried for every detected service/version on upload
 - **On-demand analysis** — *Analyze* button on each host or audit to re-run CVE enrichment
 - **CVE modal** — click any CVE ID to instantly load CVSS score, description, references and affected packages
@@ -50,6 +55,7 @@ NVD is the default source. Additional sources can be enabled from **Admin → Se
 - **AD Miner** — Active Directory analysis integration (BloodHound / SharpHound data)
 
 ### Real-Time Notifications
+
 - **Desktop notifications** (Web Push) — instant alerts on every new event
 - **Per-scope preferences** — configurable per client, audit or host
 - **Available events**: new host, new vuln, audit completed, critical CVE, status change, risk score change
@@ -57,6 +63,7 @@ NVD is the default source. Additional sources can be enabled from **Admin → Se
 - **Browser permission** request built into the Notifications page
 
 ### Interface & PWA
+
 - **Progressive Web App (PWA)** — installable on desktop and mobile
 - **Custom icon** — upload a custom icon from Admin → Interface; the PWA manifest and service worker update automatically with cache busting
 - **Glassmorphic theme** — glass-effect toggle from Admin → Interface
@@ -67,6 +74,7 @@ NVD is the default source. Additional sources can be enabled from **Admin → Se
 - **Global search filters** on all list views
 
 ### Administration
+
 - **User management** — create / edit / delete accounts
 - **Interface** — custom logo, GitHub token, glassmorphic theme, colours
 - **Settings** — CVE sources, NVD API key
@@ -154,8 +162,9 @@ Get-Content C:\Tools\Centralized\logs\service.log -Wait
 
 ### Prerequisites Summary
 
-| | Linux | macOS | Windows |
-|---|---|---|---|
+|   | Linux | macOS | Windows |
+|---|-------|-------|---------|
+
 | Python 3.10+ | auto (`apt`) | auto (Homebrew) | manual |
 | Git | auto (`apt`) | auto (Homebrew) | manual |
 | Homebrew | — | required | — |
@@ -180,6 +189,7 @@ python app.py
 The update scripts pull the latest code **without touching your existing data** (clients, audits, uploaded files, database).
 
 Before each update, a timestamped backup is created (`backups/YYYYMMDD_HHMMSS/`) containing:
+
 - `centralized.db` — full database
 - `uploads/` — all uploaded scan files
 - `.env` and `github_token.txt`
@@ -199,10 +209,10 @@ cd C:\Tools\Centralized
 
 ## First Login
 
-The app starts on **http://127.0.0.1:5000**
+The app starts on **https://127.0.0.1:5000**
 
-| Field | Value |
-|-------|-------|
+| Field    |  Value  |
+|----------|---------|
 | Username | `admin` |
 | Password | `admin` |
 
@@ -216,6 +226,7 @@ Edit `config.py` or set environment variables:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
+
 | `SECRET_KEY` | (change me) | Flask session secret — **must change in production** |
 | `DATABASE_URL` | `sqlite:///centralized.db` | SQLAlchemy DB URI |
 | `NVD_API_KEY` | *(empty)* | NVD API key — raises rate limit from 5 to 50 req/30s |
@@ -229,6 +240,7 @@ Without a token the unauthenticated GitHub API is capped at **60 requests/hour**
 A Personal Access Token (PAT) raises this to **5 000 requests/hour**.
 
 **Setup:**
+
 1. Go to <https://github.com/settings/tokens> → **Generate new token (classic)**
 2. Tick only the **`public_repo`** scope
 3. Copy the generated token
@@ -241,7 +253,7 @@ A Personal Access Token (PAT) raises this to **5 000 requests/hour**.
 
 ## Project Structure
 
-```
+``` structure
 Centralized/
 ├── app.py                      # Flask factory + PWA routes
 ├── config.py                   # Configuration
@@ -301,6 +313,7 @@ Centralized/
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
+
 | GET | `/api/cve/lookup?id=CVE-2024-XXXX` | CVE details (NVD + enabled sources) |
 | GET | `/api/cve/search?q=OpenSSH+8.4` | Search CVEs by keyword via NVD |
 | GET | `/api/cve/<id>/affected` | Packages affected by a CVE |
