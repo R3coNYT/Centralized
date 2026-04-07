@@ -91,6 +91,19 @@ self.addEventListener('fetch', (event) => {
   );
 });
 
+/* ── Message — allow pages to request cache operations ──────────────── */
+self.addEventListener('message', (event) => {
+  if (!event.data) return;
+  if (event.data.type === 'CLEAR_ICON_CACHE') {
+    /* Bust both caches so updated icons are re-fetched on next request */
+    event.waitUntil(
+      caches.keys().then((keys) =>
+        Promise.all(keys.map((k) => caches.delete(k)))
+      ).then(() => self.skipWaiting())
+    );
+  }
+});
+
 /* ── Notification click — open or focus the app ──────── */
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
