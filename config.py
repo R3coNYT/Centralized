@@ -23,6 +23,9 @@ class Config:
     # Number of days enriched CVE data is kept in the local DB cache before re-fetching
     CVE_CACHE_TTL_DAYS = int(os.environ.get("CVE_CACHE_TTL_DAYS", "7"))
 
+    # Disable static file caching during development so CSS/JS changes apply without hard refresh
+    SEND_FILE_MAX_AGE_DEFAULT = 0
+
     # Session
     PERMANENT_SESSION_LIFETIME = timedelta(hours=8)
     SESSION_COOKIE_HTTPONLY = True
