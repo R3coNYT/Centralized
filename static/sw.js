@@ -56,6 +56,13 @@ self.addEventListener('fetch', (event) => {
   if (url.origin !== self.location.origin) return;
   if (url.pathname.startsWith('/uploads/')) return;
 
+  /* Manifest + custom app icons → always network (never stale cache) */
+  if (url.pathname === '/manifest.json' ||
+      /\/static\/img\/app_icon_/.test(url.pathname)) {
+    event.respondWith(fetch(request));
+    return;
+  }
+
   /* Static assets → cache-first */
   if (url.pathname.startsWith('/static/')) {
     event.respondWith(

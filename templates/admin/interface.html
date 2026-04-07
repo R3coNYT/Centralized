@@ -576,19 +576,34 @@ async function toggleGlass() {
   }
 }
 
-/* ── Clear SW icon cache after icon update ──────────────────────────────── */
+/* ── Clear SW icon cache + force manifest re-read after icon update ──────── */
 (function () {
   var params = new URLSearchParams(window.location.search);
-  if (params.get('icon_updated') === '1' && 'serviceWorker' in navigator) {
-    navigator.serviceWorker.ready.then(function (reg) {
-      if (reg.active) {
-        reg.active.postMessage({ type: 'CLEAR_ICON_CACHE' });
-      }
-    });
-    /* Clean up URL without reload */
-    var url = window.location.pathname + (window.location.hash || '');
-    history.replaceState(null, '', url);
+  if (params.get('icon_updated') !== '1') return;
+
+  /* Remove param NOW so the reload below doesn't loop */
+  history.replaceState(null, '', window.location.pathname);
+
+  if (!('serviceWorker' in navigator) || !('caches' in window)) {
+    location.reload();
+    return;
   }
+
+  /* 1. Wipe all SW caches directly from the page */
+  var clearCaches = caches.keys().then(function (keys) {
+    return Promise.all(keys.map(function (k) { return caches.delete(k); }));
+  });
+
+  /* 2. Force SW to update its script + re-read the manifest.
+        This is what tells Chrome to pick up the new icon URL in the manifest. */
+  var updateSW = navigator.serviceWorker.ready.then(function (reg) {
+    return reg.update();
+  });
+
+  Promise.all([clearCaches, updateSW]).then(function () {
+    /* 3. Hard-reload so <link rel="icon"> in <head> also switches immediately */
+    location.reload();
+  });
 })();
 
 </script>
