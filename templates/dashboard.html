@@ -103,11 +103,11 @@
             <thead class="table-header"><tr><th>Name</th><th>Target</th><th>Status</th><th>Hosts</th></tr></thead>
             <tbody>
             {% for audit in recent_audits %}
-            <tr>
+            <tr data-audit-id="{{ audit.id }}">
               <td><a href="{{ url_for('audits.detail', audit_id=audit.id) }}" class="text-decoration-none fw-semibold">{{ audit.name }}</a></td>
               <td class="text-muted small">{{ audit.target or '—' }}</td>
-              <td>{% include '_partials/status_badge.html' %}</td>
-              <td><span class="badge bg-secondary">{{ audit.host_count }}</span></td>
+              <td data-status-cell>{% include '_partials/status_badge.html' %}</td>
+              <td><span class="badge bg-secondary" data-host-count>{{ audit.host_count }}</span></td>
             </tr>
             {% else %}
             <tr><td colspan="4" class="text-center text-muted py-4">No audits yet. <a href="{{ url_for('audits.new_audit') }}">Create one</a>.</td></tr>
@@ -181,5 +181,31 @@ const monthLabels = [{% for m, c in monthly_data %}'{{ m }}',{% endfor %}];
 const monthValues = [{% for m, c in monthly_data %}{{ c }},{% endfor %}];
 
 initDashboardCharts(sevData, svcLabels, svcValues, monthLabels, monthValues);
+
+/* ── Live update listener — dashboard ── */
+(function () {
+  var STATUS_BADGE = {
+    'in_progress': '<span class="badge bg-primary">In Progress</span>',
+    'completed':   '<span class="badge bg-success">Completed</span>',
+    'archived':    '<span class="badge bg-secondary">Archived</span>',
+  };
+  document.addEventListener('centralized:live-update', function (e) {
+    var d = e.detail;
+    if (d.type === 'audit_update' && d.audit_id) {
+      var row = document.querySelector('tr[data-audit-id="' + d.audit_id + '"]');
+      if (row) {
+        var cell = row.querySelector('[data-status-cell]');
+        if (cell && d.status) cell.innerHTML = STATUS_BADGE[d.status] || '<span class="badge bg-secondary">' + d.status + '</span>';
+      }
+    }
+    if (d.type === 'new_host' && d.audit_id) {
+      var row = document.querySelector('tr[data-audit-id="' + d.audit_id + '"]');
+      if (row) {
+        var hc = row.querySelector('[data-host-count]');
+        if (hc) hc.textContent = parseInt(hc.textContent || '0', 10) + 1;
+      }
+    }
+  });
+})();
 </script>
 {% endblock %}
