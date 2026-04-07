@@ -6,7 +6,7 @@
   <meta name="csrf-token" content="{{ csrf_token() }}"/>
   <title>{% block title %}Centralized{% endblock %} — Centralized</title>
   <!-- PWA -->
-  <link rel="manifest" href="/manifest.json"/>
+  <link rel="manifest" href="/manifest.json?v={{ app_icon_version }}"/>
   <meta name="theme-color" content="#0f1117"/>
   <meta name="mobile-web-app-capable" content="yes"/>
   <meta name="apple-mobile-web-app-capable" content="yes"/>

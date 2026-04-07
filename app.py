@@ -58,9 +58,21 @@ def create_app():
     # Service worker MUST be served from the root scope to control all pages.
     @app.route('/sw.js')
     def pwa_sw():
-        resp = make_response(
-            send_from_directory(app.static_folder, 'sw.js')
+        from models import SiteSettings
+        import re as _re
+        row = SiteSettings.query.filter_by(key='app_icon').first()
+        icon_val = row.value if row and row.value else ''
+        _m = _re.search(r'app_icon_(\d+)', icon_val)
+        icon_ts = _m.group(1) if _m else '0'
+        # Read sw.js and inject icon version into CACHE_NAME so Chrome sees a new SW
+        sw_path = os.path.join(app.static_folder, 'sw.js')
+        with open(sw_path, 'r', encoding='utf-8') as _f:
+            sw_content = _f.read()
+        sw_content = sw_content.replace(
+            "const STATIC_CACHE = 'centralized-static-v1';",
+            f"const STATIC_CACHE = 'centralized-static-icon{icon_ts}';"
         )
+        resp = make_response(sw_content)
         resp.headers['Content-Type']  = 'application/javascript'
         resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
         resp.headers['Service-Worker-Allowed'] = '/'
@@ -261,10 +273,15 @@ echo "[*] Done. Please restart Chrome."
             _app_icon = _settings.get("app_icon", "")
             _icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "img", _app_icon)
             app_icon_url = f"/static/img/{_app_icon}" if _app_icon and os.path.isfile(_icon_path) else ""
+            # Extract timestamp from filename e.g. app_icon_1744032123.png → "1744032123"
+            import re as _re
+            _m = _re.search(r'app_icon_(\d+)', _app_icon)
+            app_icon_version = _m.group(1) if _m else "0"
         except Exception:
             css = ""
             glass_enabled = False
             app_icon_url = ""
+            app_icon_version = "0"
         autorecon_installed = bool(
             (os.name == "nt" and os.path.isfile(r"C:\Tools\AutoRecon\AutoRecon.bat")) or
             shutil.which("AutoRecon") or
@@ -272,7 +289,7 @@ echo "[*] Done. Please restart Chrome."
             os.path.isfile("/opt/autorecon/autorecon.py") or
             os.path.isfile(os.path.expanduser("~/Tools/AutoRecon/AutoRecon.py"))
         )
-        return {"theme_css": css, "autorecon_installed": autorecon_installed, "glass_enabled": glass_enabled, "app_icon_url": app_icon_url}
+        return {"theme_css": css, "autorecon_installed": autorecon_installed, "glass_enabled": glass_enabled, "app_icon_url": app_icon_url, "app_icon_version": app_icon_version}
 
     # Import models here so SQLAlchemy sees them before create_all()
     import models  # noqa: F401
