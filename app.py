@@ -68,11 +68,41 @@ def create_app():
 
     @app.route('/manifest.json')
     def pwa_manifest():
-        resp = make_response(
-            send_from_directory(app.static_folder, 'manifest.json')
-        )
+        import json as _json
+        from models import SiteSettings
+        row = SiteSettings.query.filter_by(key='app_icon').first()
+        icon_url = f"/static/img/{row.value}" if row and row.value else None
+        icon_img  = icon_url or '/static/img/icon-192.png'
+        icons = [
+            {"src": icon_img, "sizes": "192x192", "type": "image/png", "purpose": "any maskable"},
+            {"src": icon_img, "sizes": "512x512", "type": "image/png", "purpose": "any maskable"},
+        ]
+        if not icon_url:
+            icons.append({"src": "/static/img/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any"})
+        manifest = {
+            "name": "Centralized",
+            "short_name": "Centralized",
+            "description": "Security audit & vulnerability management platform",
+            "start_url": "/",
+            "scope": "/",
+            "display": "standalone",
+            "orientation": "any",
+            "theme_color": "#0f1117",
+            "background_color": "#0f1117",
+            "lang": "en",
+            "categories": ["security", "productivity", "utilities"],
+            "icons": icons,
+            "shortcuts": [
+                {"name": "Dashboard", "short_name": "Dashboard", "url": "/",         "icons": [{"src": icon_img, "sizes": "192x192"}]},
+                {"name": "Audits",    "short_name": "Audits",    "url": "/audits/",  "icons": [{"src": icon_img, "sizes": "192x192"}]},
+                {"name": "CVE Search","short_name": "CVEs",      "url": "/cve/",     "icons": [{"src": icon_img, "sizes": "192x192"}]},
+            ],
+            "screenshots": [],
+            "prefer_related_applications": False,
+        }
+        resp = make_response(_json.dumps(manifest))
         resp.headers['Content-Type']  = 'application/manifest+json'
-        resp.headers['Cache-Control'] = 'public, max-age=86400'
+        resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
         return resp
 
     @app.route('/ssl/cert.pem')

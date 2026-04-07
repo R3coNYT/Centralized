@@ -1,7 +1,9 @@
 import json
 import os
+import glob
 import re
 import subprocess
+import time
 import urllib.error
 import urllib.request
 
@@ -754,7 +756,14 @@ def interface_icon():
     if ext not in _ALLOWED_ICON_EXT:
         flash("Unsupported file type. Use PNG, JPG, WEBP or GIF.", "danger")
         return redirect(url_for("admin.interface"))
-    icon_filename = "app_icon" + ext
+    # Timestamped filename so the URL is always fresh (busts SW cache on every upload)
+    icon_filename = f"app_icon_{int(time.time())}{ext}"
+    # Remove any previously uploaded custom icons
+    for old in glob.glob(os.path.join(_IMG_DIR, "app_icon_*")):
+        try:
+            os.remove(old)
+        except OSError:
+            pass
     f.save(os.path.join(_IMG_DIR, icon_filename))
     row = SiteSettings.query.filter_by(key="app_icon").first()
     if row:
@@ -763,7 +772,7 @@ def interface_icon():
         db.session.add(SiteSettings(key="app_icon", value=icon_filename))
     db.session.commit()
     flash("App icon updated.", "success")
-    return redirect(url_for("admin.interface"))
+    return redirect(url_for("admin.interface") + "?icon_updated=1")
 
 
 @admin_bp.route("/interface/icon/reset", methods=["POST"])

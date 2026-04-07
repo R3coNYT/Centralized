@@ -576,5 +576,20 @@ async function toggleGlass() {
   }
 }
 
+/* ── Clear SW icon cache after icon update ──────────────────────────────── */
+(function () {
+  var params = new URLSearchParams(window.location.search);
+  if (params.get('icon_updated') === '1' && 'serviceWorker' in navigator) {
+    navigator.serviceWorker.ready.then(function (reg) {
+      if (reg.active) {
+        reg.active.postMessage({ type: 'CLEAR_ICON_CACHE' });
+      }
+    });
+    /* Clean up URL without reload */
+    var url = window.location.pathname + (window.location.hash || '');
+    history.replaceState(null, '', url);
+  }
+})();
+
 </script>
 {% endblock %}
