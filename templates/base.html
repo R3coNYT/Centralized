@@ -485,13 +485,18 @@ function downloadTrustScript() {
     })
     .then(function (r) { return r.ok ? r.json() : null; })
     .then(function (data) {
+      if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-check-lg me-1"></i>Save'; }
       if (_notifModal) _notifModal.hide();
+      /* Notify page-level listeners (e.g. notifications page active-alerts update) */
+      document.dispatchEvent(new CustomEvent('centralized:notifSaved', { detail: { scope: _notifScope, entityId: _notifEntityId, events: events } }));
       /* Update bell icon active state on the triggering button */
       var bellBtn = document.querySelector('[data-notif-scope="' + _notifScope + '"][data-notif-id="' + _notifEntityId + '"]');
       if (bellBtn) {
         bellBtn.classList.toggle('btn-outline-secondary', events.length === 0);
         bellBtn.classList.toggle('btn-warning',           events.length  >  0);
         bellBtn.title = events.length > 0 ? events.length + ' notification(s) active' : 'Set notifications';
+        var icon = bellBtn.querySelector('i');
+        if (icon) icon.className = 'bi bi-bell' + (events.length > 0 ? '-fill' : '');
       }
     })
     .catch(function () { if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-check-lg me-1"></i>Save'; } });
