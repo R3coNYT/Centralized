@@ -394,30 +394,35 @@ body {
 /* Items */
 .cs-item {
   color: #c9d1db;
-  border-radius: 0.35rem;
-  margin: 1px 6px;
-  padding: 0.42rem 0.75rem;
+  border-radius: 0.35rem !important;
+  margin: 2px 6px !important;
+  padding: 0.42rem 0.75rem !important;
   font-size: 0.9rem;
   transition: background-color 0.12s ease, color 0.12s ease;
   display: block;
   text-decoration: none;
   user-select: none;
+  width: calc(100% - 12px) !important;
+  box-sizing: border-box;
 }
 
 .cs-item:hover:not(.disabled):not(.cs-item-disabled) {
-  background-color: rgba(255, 255, 255, 0.08);
-  color: #fff;
+  background-color: rgba(255, 255, 255, 0.08) !important;
+  color: #fff !important;
+  border-radius: 0.35rem !important;
 }
 
 .cs-item.active {
-  background-color: rgba(13, 110, 253, 0.26);
-  color: #74b0ff;
+  background-color: rgba(13, 110, 253, 0.26) !important;
+  color: #74b0ff !important;
   font-weight: 500;
+  border-radius: 0.35rem !important;
 }
 
 .cs-item.active:hover {
-  background-color: rgba(13, 110, 253, 0.36);
-  color: #90c0ff;
+  background-color: rgba(13, 110, 253, 0.36) !important;
+  color: #90c0ff !important;
+  border-radius: 0.35rem !important;
 }
 
 .cs-placeholder,
