@@ -79,13 +79,13 @@
           <tbody>
             {% for c in clients %}
             {% set events = prefs.get(('client', c.id), []) %}
-            <tr>
+            <tr data-notif-row-scope="client" data-notif-row-id="{{ c.id }}">
               <td>
                 <a href="{{ url_for('clients.detail', client_id=c.id) }}" class="text-decoration-none fw-semibold">
                   {{ c.name }}
                 </a>
               </td>
-              <td>
+              <td data-events-cell>
                 {% if events %}
                   {% for ev in events %}
                   <span class="badge bg-primary me-1">{{ event_labels.get(ev, ev) }}</span>
@@ -96,6 +96,7 @@
               </td>
               <td class="text-end">
                 <button class="btn btn-sm {% if events %}btn-warning{% else %}btn-outline-secondary{% endif %}"
+                        data-notif-scope="client" data-notif-id="{{ c.id }}"
                         onclick="openNotifModal('client', {{ c.id }}, '{{ c.name | e }}')"
                         title="Manage notifications">
                   <i class="bi bi-bell{% if events %}-fill{% endif %}"></i>
@@ -129,14 +130,14 @@
           <tbody>
             {% for a in audits %}
             {% set events = prefs.get(('audit', a.id), []) %}
-            <tr>
+            <tr data-notif-row-scope="audit" data-notif-row-id="{{ a.id }}">
               <td>
                 <a href="{{ url_for('audits.detail', audit_id=a.id) }}" class="text-decoration-none fw-semibold">
                   {{ a.name }}
                 </a>
               </td>
               <td class="text-muted small">{{ a.client.name if a.client else '—' }}</td>
-              <td>
+              <td data-events-cell>
                 {% if events %}
                   {% for ev in events %}
                   <span class="badge bg-primary me-1">{{ event_labels.get(ev, ev) }}</span>
@@ -147,6 +148,7 @@
               </td>
               <td class="text-end">
                 <button class="btn btn-sm {% if events %}btn-warning{% else %}btn-outline-secondary{% endif %}"
+                        data-notif-scope="audit" data-notif-id="{{ a.id }}"
                         onclick="openNotifModal('audit', {{ a.id }}, '{{ a.name | e }}')"
                         title="Manage notifications">
                   <i class="bi bi-bell{% if events %}-fill{% endif %}"></i>
@@ -180,14 +182,14 @@
           <tbody>
             {% for h in hosts %}
             {% set events = prefs.get(('host', h.id), []) %}
-            <tr>
+            <tr data-notif-row-scope="host" data-notif-row-id="{{ h.id }}">
               <td>
                 <a href="{{ url_for('hosts.detail', host_id=h.id) }}" class="text-decoration-none fw-semibold">
                   {{ h.ip }}{% if h.hostname %} <span class="text-muted small">({{ h.hostname }})</span>{% endif %}
                 </a>
               </td>
               <td class="text-muted small">{{ h.audit.name if h.audit else '—' }}</td>
-              <td>
+              <td data-events-cell>
                 {% if events %}
                   {% for ev in events %}
                   <span class="badge bg-primary me-1">{{ event_labels.get(ev, ev) }}</span>
@@ -198,6 +200,7 @@
               </td>
               <td class="text-end">
                 <button class="btn btn-sm {% if events %}btn-warning{% else %}btn-outline-secondary{% endif %}"
+                        data-notif-scope="host" data-notif-id="{{ h.id }}"
                         onclick="openNotifModal('host', {{ h.id }}, '{{ h.ip | e }}')"
                         title="Manage notifications">
                   <i class="bi bi-bell{% if events %}-fill{% endif %}"></i>
@@ -261,12 +264,35 @@ document.addEventListener('DOMContentLoaded', function () {
   initGlobalToggle();
 });
 
-/* ── Reload page after notif modal saves so badges refresh ─────────── */
-const _origSaveNotifPrefs = window.saveNotifPrefs;
-window.saveNotifPrefs = function () {
-  const origHide = bootstrap && bootstrap.Modal ? bootstrap.Modal.prototype.hide : null;
-  _origSaveNotifPrefs();
-  setTimeout(() => location.reload(), 600);
-};
+/* ── Update active alerts badges in-place when a pref is saved ─────── */
+(function () {
+  var EVENT_LABELS = {{ event_labels | tojson }};
+  document.addEventListener('centralized:notifSaved', function (e) {
+    var d = e.detail;
+    var row = document.querySelector(
+      '[data-notif-row-scope="' + d.scope + '"][data-notif-row-id="' + d.entityId + '"]'
+    );
+    if (!row) return;
+    /* Update active alerts cell */
+    var cell = row.querySelector('[data-events-cell]');
+    if (cell) {
+      if (d.events.length === 0) {
+        cell.innerHTML = '<span class="text-muted small">None</span>';
+      } else {
+        cell.innerHTML = d.events.map(function (ev) {
+          return '<span class="badge bg-primary me-1">' + (EVENT_LABELS[ev] || ev) + '</span>';
+        }).join('');
+      }
+    }
+    /* Update bell button classes + icon */
+    var bellBtn = row.querySelector('[data-notif-scope]');
+    if (bellBtn) {
+      bellBtn.classList.toggle('btn-outline-secondary', d.events.length === 0);
+      bellBtn.classList.toggle('btn-warning',           d.events.length  >  0);
+      var icon = bellBtn.querySelector('i');
+      if (icon) icon.className = 'bi bi-bell' + (d.events.length > 0 ? '-fill' : '');
+    }
+  });
+})();
 </script>
 {% endblock %}
