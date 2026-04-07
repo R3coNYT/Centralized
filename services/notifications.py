@@ -55,6 +55,26 @@ def _push_to_queues(user_id: int, payload: dict) -> None:
             pass
 
 
+def broadcast_live_event(event_type: str, payload: dict) -> None:
+    """Push a live-update event to ALL connected SSE clients (all users).
+
+    The payload is broadcast to every registered queue so every open tab/client
+    receives it instantly.  Pages use this to react to data changes made by
+    other users (e.g. audit status change, new host, new vuln).
+
+    payload should be a plain dict of serialisable values.
+    The key ``_event_type`` is reserved and will be set to ``live_update``.
+    """
+    message = {"_event_type": "live_update", "type": event_type, **payload}
+    with _queues_lock:
+        all_queues = [q for qs in _user_queues.values() for q in qs]
+    for q in all_queues:
+        try:
+            q.put_nowait(message)
+        except queue.Full:
+            pass
+
+
 def fire_notification(
     scope: str,
     entity_id: int,

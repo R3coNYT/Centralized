@@ -102,14 +102,17 @@ def notifications_stream():
 
     @stream_with_context
     def generate():
-        # Send any missed notifications immediately
+        # Send any missed notifications immediately as typed SSE events
         for item in initial:
-            yield f"data: {_json.dumps(item)}\n\n"
+            yield f"event: notification\ndata: {_json.dumps(item)}\n\n"
         # Then block on the in-memory queue
         while True:
             try:
                 item = q.get(timeout=25)
-                yield f"data: {_json.dumps(item)}\n\n"
+                # Items with _event_type='live_update' are broadcast data updates;
+                # anything else is a user notification.
+                ev_type = item.pop("_event_type", "notification")
+                yield f"event: {ev_type}\ndata: {_json.dumps(item)}\n\n"
             except queue.Empty:
                 # SSE keepalive comment — prevents proxies from closing idle connections
                 yield ": keepalive\n\n"

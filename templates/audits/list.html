@@ -60,11 +60,11 @@
         </thead>
         <tbody>
         {% for audit in audits %}
-        <tr>
+        <tr data-audit-id="{{ audit.id }}">
           <td><a href="{{ url_for('audits.detail', audit_id=audit.id) }}" class="fw-semibold text-decoration-none">{{ audit.name }}</a></td>
           <td class="text-muted small">{{ audit.client.name if audit.client else '—' }}</td>
           <td class="text-muted small font-monospace">{{ audit.target or '—' }}</td>
-          <td>{% include '_partials/status_badge.html' %}</td>
+          <td data-status-cell>{% include '_partials/status_badge.html' %}</td>
           <td class="text-center"><span class="badge bg-info text-dark">{{ audit.host_count }}</span></td>
           <td class="text-center"><span class="badge bg-warning text-dark">{{ audit.vuln_count }}</span></td>
           <td class="text-center">
@@ -109,4 +109,69 @@
     </div>
   </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+/* ── Live update listener — audit list ── */
+(function () {
+  var STATUS_BADGE = {
+    'in_progress': '<span class="badge bg-primary">In Progress</span>',
+    'completed':   '<span class="badge bg-success">Completed</span>',
+    'archived':    '<span class="badge bg-secondary">Archived</span>',
+  };
+
+  document.addEventListener('centralized:live-update', function (e) {
+    var d = e.detail;
+
+    /* Audit status changed → update badge in-place */
+    if (d.type === 'audit_update' && d.audit_id) {
+      var row = document.querySelector('tr[data-audit-id="' + d.audit_id + '"]');
+      if (row) {
+        var statusCell = row.querySelector('[data-status-cell]');
+        if (statusCell && d.status) {
+          statusCell.innerHTML = STATUS_BADGE[d.status] || '<span class="badge bg-secondary">' + d.status + '</span>';
+        }
+      }
+    }
+
+    /* New audit created → show a flash banner at top */
+    if (d.type === 'new_audit') {
+      var banner = document.getElementById('live-new-audit-banner');
+      if (!banner) {
+        var card = document.querySelector('.card');
+        if (card) {
+          card.insertAdjacentHTML('beforebegin',
+            '<div id="live-new-audit-banner" class="alert alert-info alert-dismissible d-flex align-items-center gap-2 mb-3" role="alert">' +
+              '<i class="bi bi-arrow-repeat"></i>' +
+              '<span>A new audit <strong>' + d.audit_name.replace(/</g,'&lt;') + '</strong> was created. ' +
+              '<a href="' + d.url + '" class="alert-link">View it</a> or ' +
+              '<a href="#" class="alert-link" onclick="location.reload();return false;">reload the list</a>.</span>' +
+              '<button type="button" class="btn-close" data-bs-dismiss="alert"></button>' +
+            '</div>'
+          );
+        }
+      }
+    }
+
+    /* New host or vuln added → offer a soft reload */
+    if ((d.type === 'new_host' || d.type === 'new_vuln')) {
+      var bid = 'live-reload-banner-' + (d.audit_id || '');
+      if (!document.getElementById(bid)) {
+        var c = document.querySelector('.card');
+        if (c) {
+          c.insertAdjacentHTML('beforebegin',
+            '<div id="' + bid + '" class="alert alert-warning alert-dismissible d-flex align-items-center gap-2 mb-3" role="alert">' +
+              '<i class="bi bi-activity"></i>' +
+              '<span>New data available for audit #' + (d.audit_id || '') + '. ' +
+              '<a href="#" class="alert-link" onclick="location.reload();return false;">Reload</a> to see it.</span>' +
+              '<button type="button" class="btn-close" data-bs-dismiss="alert"></button>' +
+            '</div>'
+          );
+        }
+      }
+    }
+  });
+})();
+</script>
 {% endblock %}

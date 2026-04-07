@@ -9,7 +9,7 @@ from flask_login import login_required, current_user
 from werkzeug.utils import secure_filename
 from models import Audit, Host, Port, Vulnerability, HttpPage, UploadedFile
 from extensions import db
-from services.notifications import fire_notification
+from services.notifications import fire_notification, broadcast_live_event
 from parsers import (
     detect_file_type, parse_file,
     FILE_TYPE_LYNIS_LOG, FILE_TYPE_LYNIS_REPORT,
@@ -421,6 +421,12 @@ def _persist_parsed_data(audit_id: int, parsed_hosts: list, enrich_nvd: bool):
                 f"A new host was added to the audit.",
                 f"/audits/{audit_id}",
             )
+            broadcast_live_event("new_host", {
+                "audit_id": audit_id,
+                "host_id": host.id,
+                "host_ip": ip,
+                "url": f"/audits/{audit_id}",
+            })
 
         # Update host fields if new data is available
         if host_data.get("hostname") and not host.hostname:
@@ -583,6 +589,14 @@ def _persist_parsed_data(audit_id: int, parsed_hosts: list, enrich_nvd: bool):
                 f"Severity: {vuln_sev}",
                 f"/hosts/{host.id}",
             )
+            broadcast_live_event("new_vuln", {
+                "audit_id": audit_id,
+                "host_id": host.id,
+                "host_ip": ip,
+                "severity": vuln_sev,
+                "title": vuln.title[:80],
+                "url": f"/hosts/{host.id}",
+            })
             if vuln_sev in ("CRITICAL", "HIGH"):
                 fire_notification(
                     "host", host.id, "critical_vuln",

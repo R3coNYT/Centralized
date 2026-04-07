@@ -4,7 +4,7 @@ from flask_login import login_required, current_user
 from models import Audit, Client, Host, Vulnerability, Finding, Port
 from extensions import db
 from datetime import datetime
-from services.notifications import fire_notification
+from services.notifications import fire_notification, broadcast_live_event
 
 audits_bp = Blueprint("audits", __name__, url_prefix="/audits")
 
@@ -60,6 +60,13 @@ def new_audit():
                 f"/audits/{audit.id}",
             )
         db.session.commit()
+        broadcast_live_event("new_audit", {
+            "audit_id": audit.id,
+            "audit_name": audit.name,
+            "client_id": audit.client_id,
+            "status": audit.status,
+            "url": f"/audits/{audit.id}",
+        })
         flash(f"Audit '{name}' created.", "success")
         return redirect(url_for("audits.detail", audit_id=audit.id))
 
@@ -179,6 +186,14 @@ def edit_audit(audit_id):
                         f"/audits/{audit.id}",
                     )
         db.session.commit()
+        broadcast_live_event("audit_update", {
+            "audit_id": audit.id,
+            "audit_name": audit.name,
+            "status": audit.status,
+            "old_status": old_status,
+            "client_id": audit.client_id,
+            "url": f"/audits/{audit.id}",
+        })
         flash("Audit updated.", "success")
         return redirect(url_for("audits.detail", audit_id=audit.id))
 

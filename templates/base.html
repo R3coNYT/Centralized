@@ -502,50 +502,119 @@ function downloadTrustScript() {
 
 {% if current_user.is_authenticated %}
 <script>
-/* ── Desktop notifications via polling (every 30s) ─────────────────────── */
+/* ── Real-time notifications + live updates via SSE ─────────────────────── */
 (function () {
   var ICON = '/static/img/icon-192.png';
+  var _es = null;
+  var _fallbackTimer = null;
 
-  function showNotif(title, body, url) {
+  /* ── Desktop notification helper ── */
+  function showDesktopNotif(title, body, url) {
     if (!('Notification' in window) || Notification.permission !== 'granted') return;
     var n = new Notification(title, { body: body || '', icon: ICON, tag: 'centralized-' + Date.now() });
-    if (url) {
-      n.addEventListener('click', function () { window.focus(); window.location.href = url; });
-    }
+    if (url) n.addEventListener('click', function () { window.focus(); window.location.href = url; });
   }
 
-  function poll() {
-    fetch('/api/notifications/pending')
-      .then(function (r) { return r.ok ? r.json() : []; })
-      .then(function (items) {
-        items.forEach(function (n) { showNotif(n.title, n.body, n.url); });
-      })
-      .catch(function () {});
+  /* ── In-app toast helper ── */
+  function showToast(title, body, url) {
+    var container = document.getElementById('notif-toast-container');
+    if (!container) return;
+    var id = 'toast-' + Date.now();
+    var link = url ? ('<a href="' + url + '" class="text-white text-decoration-underline ms-1 small">View</a>') : '';
+    container.insertAdjacentHTML('beforeend',
+      '<div id="' + id + '" class="toast align-items-center text-white bg-primary border-0" role="alert" aria-live="assertive" aria-atomic="true">' +
+        '<div class="d-flex">' +
+          '<div class="toast-body">' +
+            '<strong>' + _esc(title) + '</strong>' +
+            (body ? '<div class="small mt-1">' + _esc(body) + link + '</div>' : link) +
+          '</div>' +
+          '<button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>' +
+        '</div>' +
+      '</div>');
+    var toastEl = document.getElementById(id);
+    if (window.bootstrap) new bootstrap.Toast(toastEl, { delay: 5000 }).show();
+    toastEl.addEventListener('hidden.bs.toast', function () { toastEl.remove(); });
   }
 
-  function start() {
+  function _esc(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  /* ── Live update dispatcher ── */
+  function handleLiveUpdate(data) {
+    /* Dispatch a custom DOM event so page-level scripts can react */
+    document.dispatchEvent(new CustomEvent('centralized:live-update', { detail: data }));
+  }
+
+  /* ── SSE connection ── */
+  function connectSSE() {
+    if (_es) { _es.close(); _es = null; }
+    if (typeof EventSource === 'undefined') { startFallbackPoll(); return; }
+
+    _es = new EventSource('/api/notifications/stream');
+
+    /* Typed event: notification → show toast + desktop notif */
+    _es.addEventListener('notification', function (e) {
+      try {
+        var d = JSON.parse(e.data);
+        showDesktopNotif(d.title, d.body, d.url);
+        showToast(d.title, d.body, d.url);
+      } catch (_) {}
+    });
+
+    /* Typed event: live_update → broadcast to page */
+    _es.addEventListener('live_update', function (e) {
+      try { handleLiveUpdate(JSON.parse(e.data)); } catch (_) {}
+    });
+
+    _es.onerror = function () {
+      _es.close(); _es = null;
+      /* Reconnect after 15s */
+      setTimeout(connectSSE, 15000);
+    };
+  }
+
+  /* ── Fallback polling (when SSE / EventSource not available) ── */
+  function startFallbackPoll() {
+    if (_fallbackTimer) return;
+    var poll = function () {
+      fetch('/api/notifications/pending')
+        .then(function (r) { return r.ok ? r.json() : []; })
+        .then(function (items) {
+          items.forEach(function (n) { showDesktopNotif(n.title, n.body, n.url); showToast(n.title, n.body, n.url); });
+        })
+        .catch(function () {});
+    };
     poll();
-    setInterval(poll, 30000);
+    _fallbackTimer = setInterval(poll, 30000);
   }
 
-  if (!('Notification' in window)) return;
+  /* ── Start ── */
+  function start() {
+    connectSSE();
+    /* Trigger periodic background sync registration */
+    document.dispatchEvent(new Event('notif-permission-granted'));
+  }
+
+  if (!('Notification' in window)) { connectSSE(); return; } /* SSE still needed for live updates */
   if (Notification.permission === 'granted') {
     start();
-  } else if (Notification.permission !== 'denied') {
-    /* Ask on first click so the browser doesn't block the prompt */
-    document.addEventListener('click', function _req() {
-      document.removeEventListener('click', _req);
-      Notification.requestPermission().then(function (p) {
-        if (p === 'granted') {
-          start();
-          /* Trigger periodic background sync registration */
-          document.dispatchEvent(new Event('notif-permission-granted'));
-        }
-      });
-    }, { once: true });
+  } else {
+    connectSSE(); /* Connect SSE for live_update even without notif permission */
+    if (Notification.permission !== 'denied') {
+      document.addEventListener('click', function _req() {
+        document.removeEventListener('click', _req);
+        Notification.requestPermission().then(function (p) {
+          if (p === 'granted') document.dispatchEvent(new Event('notif-permission-granted'));
+        });
+      }, { once: true });
+    }
   }
 })();
 </script>
+
+<!-- Toast container for in-app notifications -->
+<div id="notif-toast-container" class="toast-container position-fixed bottom-0 end-0 p-3" style="z-index:1090"></div>
 {% endif %}
 
 {% if current_user.is_authenticated and current_user.role == 'admin' %}
