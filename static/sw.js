@@ -91,8 +91,55 @@ self.addEventListener('fetch', (event) => {
   );
 });
 
-/* ── Push notifications (stub — ready for future use) ─── */
-self.addEventListener('push', (event) => {
+/* ── Notification click — open or focus the app ──────── */
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const targetUrl = (event.notification.data && event.notification.data.url)
+    ? event.notification.data.url
+    : '/';
+  event.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
+      /* If a window is already open, focus it and navigate */
+      for (const client of windowClients) {
+        if ('focus' in client) {
+          client.focus();
+          if ('navigate' in client) client.navigate(targetUrl);
+          return;
+        }
+      }
+      /* Otherwise open a new window */
+      if (clients.openWindow) return clients.openWindow(targetUrl);
+    })
+  );
+});
+
+/* ── Periodic Background Sync — poll notifications when app is closed ── */
+self.addEventListener('periodicsync', (event) => {
+  if (event.tag !== 'poll-notifications') return;
+  event.waitUntil(
+    fetch('/api/notifications/pending', {
+      credentials: 'include',   /* send session cookie so @login_required passes */
+      headers: { 'Accept': 'application/json' },
+    })
+      .then((r) => (r.ok ? r.json() : []))
+      .then((items) => {
+        if (!Array.isArray(items) || items.length === 0) return;
+        return Promise.all(
+          items.map((n) =>
+            self.registration.showNotification(n.title || 'Centralized', {
+              body:    n.body  || '',
+              icon:    '/static/img/icon-192.png',
+              badge:   '/static/img/icon-192.png',
+              tag:     'centralized-bg-' + (n.id || Date.now()),
+              data:    { url: n.url || '/' },
+              vibrate: [200, 100, 200],
+            })
+          )
+        );
+      })
+      .catch(() => { /* network offline — silently skip */ })
+  );
+});
   const data = event.data ? event.data.json() : {};
   const title   = data.title   || 'Centralized';
   const options = {

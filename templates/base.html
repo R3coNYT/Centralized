@@ -267,6 +267,32 @@
         console.debug('[PWA] SW registered, scope:', reg.scope);
         swReady = true;
 
+        /* ── Periodic Background Sync — notifications when app is closed ── */
+        if ('periodicSync' in reg) {
+          /* Request only if notifications are granted; ask otherwise */
+          var tryRegisterSync = function() {
+            navigator.permissions.query({ name: 'periodic-background-sync' }).then(function(status) {
+              if (status.state === 'granted') {
+                reg.periodicSync.register('poll-notifications', {
+                  minInterval: 30 * 60 * 1000   /* 30 minutes minimum */
+                }).then(function() {
+                  console.debug('[PWA] Periodic background sync registered');
+                }).catch(function(e) {
+                  console.warn('[PWA] Periodic sync registration failed:', e);
+                });
+              }
+            }).catch(function() {});
+          };
+          if (Notification.permission === 'granted') {
+            tryRegisterSync();
+          } else {
+            /* Register after the user grants notification permission */
+            navigator.serviceWorker.ready.then(function() {
+              document.addEventListener('notif-permission-granted', tryRegisterSync, { once: true });
+            });
+          }
+        }
+
         /* SW is active. Show install button only if:
            - not already running as standalone (= installed)
            - and beforeinstallprompt hasn't arrived yet (Chrome v116+ may skip it) */
@@ -509,7 +535,13 @@ function downloadTrustScript() {
     /* Ask on first click so the browser doesn't block the prompt */
     document.addEventListener('click', function _req() {
       document.removeEventListener('click', _req);
-      Notification.requestPermission().then(function (p) { if (p === 'granted') start(); });
+      Notification.requestPermission().then(function (p) {
+        if (p === 'granted') {
+          start();
+          /* Trigger periodic background sync registration */
+          document.dispatchEvent(new Event('notif-permission-granted'));
+        }
+      });
     }, { once: true });
   }
 })();
