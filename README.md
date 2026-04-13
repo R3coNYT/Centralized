@@ -15,22 +15,21 @@
 
 ### Scan File Import & Parsing
 
-| Format | Data Extracted |
-|--------|----------------|
-
-| Nmap XML (`-oX`) | Hosts, ports, services, versions, OS, CVEs from NSE scripts |
-| Nmap JSON (AutoRecon) | Hosts, ports, services, versions |
-| AutoRecon `report.json` | Full data: hosts, CVEs, risk, WAF, CMS, nuclei, httpx |
-| HTTPX JSON | HTTP probes, status codes, titles, technologies |
-| Nuclei JSON / JSONL | Vulnerabilities, severity, CVE IDs, evidence |
-| Nikto XML & JSON | Vulnerabilities, OSVDB IDs, CVEs |
-| Lynis `.log` | Warnings (HIGH) and suggestions (LOW) with category and fix |
-| Lynis `.dat` | Same + host metadata (OS, kernel, hostname) |
-| PDF (AutoRecon / generic) | IPs, CVE IDs, port references (regex extraction) |
-| Dirbust (dirb / gobuster) | Discovered paths and directories |
-| SQLMap | Detected SQL injections, parameters, payload types |
-| SharpHound (BloodHound) | Active Directory data (users, groups, ACLs, attack paths) |
-| ADMiner data | Advanced AD analysis |
+|           Format          |                        Data Extracted                       |
+|---------------------------|-------------------------------------------------------------|
+| Nmap XML (`-oX`)          | Hosts, ports, services, versions, OS, CVEs from NSE scripts |
+| Nmap JSON (AutoRecon)     | Hosts, ports, services, versions                            |
+| AutoRecon `report.json`   | Full data: hosts, CVEs, risk, WAF, CMS, nuclei, httpx       |
+| HTTPX JSON                | HTTP probes, status codes, titles, technologies             |
+| Nuclei JSON / JSONL       | Vulnerabilities, severity, CVE IDs, evidence                |
+| Nikto XML & JSON          | Vulnerabilities, OSVDB IDs, CVEs                            |
+| Lynis `.log`              | Warnings (HIGH) and suggestions (LOW) with category and fix |
+| Lynis `.dat`              | Same + host metadata (OS, kernel, hostname)                 |
+| PDF (AutoRecon / generic) | IPs, CVE IDs, port references (regex extraction)            |
+| Dirbust (dirb / gobuster) | Discovered paths and directories                            |
+| SQLMap                    | Detected SQL injections, parameters, payload types          |
+| SharpHound (BloodHound)   | Active Directory data (users, groups, ACLs, attack paths)   |
+| ADMiner data              | Advanced AD analysis                                        |
 
 > **Lynis uploads require a Target IP** — enter it manually on the upload page as Lynis runs locally on the audited machine and does not embed a network address in its output.
 
@@ -162,12 +161,11 @@ Get-Content C:\Tools\Centralized\logs\service.log -Wait
 
 ### Prerequisites Summary
 
-|   | Linux | macOS | Windows |
-|---|-------|-------|---------|
-
-| Python 3.10+ | auto (`apt`) | auto (Homebrew) | manual |
-| Git | auto (`apt`) | auto (Homebrew) | manual |
-| Homebrew | — | required | — |
+|              |     Linux    |      macOS      | Windows |
+|--------------|--------------|-----------------|---------|
+| Python 3.10+ | auto (`apt`) | auto (Homebrew) | manual  |
+| Git          | auto (`apt`) | auto (Homebrew) | manual  |
+| Homebrew     | —            | required        | —       |
 
 ---
 
