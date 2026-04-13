@@ -309,23 +309,22 @@ Centralized/
 
 ## API Endpoints
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-
-| GET | `/api/cve/lookup?id=CVE-2024-XXXX` | CVE details (NVD + enabled sources) |
-| GET | `/api/cve/search?q=OpenSSH+8.4` | Search CVEs by keyword via NVD |
-| GET | `/api/cve/<id>/affected` | Packages affected by a CVE |
-| GET | `/api/audits/<id>/stats` | JSON stats for an audit |
-| POST | `/api/audits/<id>/analyze` | Re-run CVE analysis for an audit |
-| POST | `/api/audits/<id>/import-assets` | Import assets into an audit |
-| GET | `/api/hosts/<id>/context` | Host context data |
-| POST | `/api/hosts/<id>/analyze` | Re-run CVE analysis for a host |
-| GET | `/api/dashboard/stats` | Global dashboard statistics |
-| PATCH | `/api/vulnerabilities/<id>/status` | Update vulnerability status |
-| POST | `/api/vulnerabilities/<id>/enrich` | Enrich a vulnerability with NVD |
-| GET | `/api/notifications/stream` | Real-time SSE notification stream |
-| GET | `/api/notifications/pending` | Pending notifications (for SW background sync) |
-| GET/POST | `/api/notifications/prefs/<scope>/<id>` | Read / write notification preferences |
+|  Method  |                 Endpoint                |                   Description                  |
+|----------|-----------------------------------------|------------------------------------------------|
+| GET      | `/api/cve/lookup?id=CVE-2024-XXXX`      | CVE details (NVD + enabled sources)            |
+| GET      | `/api/cve/search?q=OpenSSH+8.4`         | Search CVEs by keyword via NVD                 |
+| GET      | `/api/cve/<id>/affected`                | Packages affected by a CVE                     |
+| GET      | `/api/audits/<id>/stats`                | JSON stats for an audit                        |
+| POST     | `/api/audits/<id>/analyze`              | Re-run CVE analysis for an audit               |
+| POST     | `/api/audits/<id>/import-assets`        | Import assets into an audit                    |
+| GET      | `/api/hosts/<id>/context`               | Host context data                              |
+| POST     | `/api/hosts/<id>/analyze`               | Re-run CVE analysis for a host                 |
+| GET      | `/api/dashboard/stats`                  | Global dashboard statistics                    |
+| PATCH    | `/api/vulnerabilities/<id>/status`      | Update vulnerability status                    |
+| POST     | `/api/vulnerabilities/<id>/enrich`      | Enrich a vulnerability with NVD                |
+| GET      | `/api/notifications/stream`             | Real-time SSE notification stream              |
+| GET      | `/api/notifications/pending`            | Pending notifications (for SW background sync) |
+| GET/POST | `/api/notifications/prefs/<scope>/<id>` | Read / write notification preferences          |
 
 ---
 
