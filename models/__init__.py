@@ -479,6 +479,78 @@ class ADData(db.Model):
         return f"<ADData client_id={self.client_id} domain={self.domain_name}>"
 
 
+# ---------------------------------------------------------------------------
+# AutoRecon Scan Snapshots (versioning)
+# ---------------------------------------------------------------------------
+
+class AutoReconSnapshot(db.Model):
+    """
+    Point-in-time snapshot of a host's AutoRecon scan results.
+    Created after each AutoRecon file import (normal JSON, AI JSON, or ZIP).
+    Enables diff-based versioning: compare vulnerability/port state over time.
+    """
+    __tablename__ = "autorecon_snapshots"
+
+    id                = db.Column(db.Integer, primary_key=True)
+    audit_id          = db.Column(db.Integer, db.ForeignKey("audits.id"), nullable=False)
+    host_id           = db.Column(db.Integer, db.ForeignKey("hosts.id"), nullable=False)
+    uploaded_file_id  = db.Column(db.Integer, db.ForeignKey("uploaded_files.id"), nullable=True)
+
+    scan_type         = db.Column(db.String(20), default="normal")   # "normal" | "ai"
+    version_number    = db.Column(db.Integer, nullable=False, default=1)
+    label             = db.Column(db.String(200))                    # e.g. "Scan v2 – 2026-04-18 01:26"
+    scanned_at        = db.Column(db.DateTime, default=utcnow)
+
+    # Risk summary at this point in time
+    risk_score        = db.Column(db.Float)
+    risk_level        = db.Column(db.String(20))
+    vuln_count        = db.Column(db.Integer, default=0)
+    critical_count    = db.Column(db.Integer, default=0)
+    high_count        = db.Column(db.Integer, default=0)
+    medium_count      = db.Column(db.Integer, default=0)
+    low_count         = db.Column(db.Integer, default=0)
+    info_count        = db.Column(db.Integer, default=0)
+
+    # Full JSON snapshots for diff computation
+    # Each vuln: {cve_id, title, severity, source, description}
+    snapshot_vulns    = db.Column(db.Text, default="[]")
+    # Each port: {port, protocol, service, product, version}
+    snapshot_ports    = db.Column(db.Text, default="[]")
+
+    # AI-scan specific fields
+    ai_report_md      = db.Column(db.Text)         # raw markdown AI report
+    suggested_tools   = db.Column(db.Text)         # JSON list of {name, reason}
+
+    host   = db.relationship("Host", backref=db.backref(
+        "autorecon_snapshots", lazy="dynamic", cascade="all, delete-orphan"))
+    audit  = db.relationship("Audit", backref=db.backref(
+        "autorecon_snapshots", lazy="dynamic", cascade="all, delete-orphan"))
+
+    def snapshot_vulns_list(self) -> list:
+        import json as _j
+        try:
+            return _j.loads(self.snapshot_vulns) if self.snapshot_vulns else []
+        except Exception:
+            return []
+
+    def snapshot_ports_list(self) -> list:
+        import json as _j
+        try:
+            return _j.loads(self.snapshot_ports) if self.snapshot_ports else []
+        except Exception:
+            return []
+
+    def suggested_tools_list(self) -> list:
+        import json as _j
+        try:
+            return _j.loads(self.suggested_tools) if self.suggested_tools else []
+        except Exception:
+            return []
+
+    def __repr__(self):
+        return f"<AutoReconSnapshot host_id={self.host_id} v{self.version_number}>"
+
+
 class ADFinding(db.Model):
     """Individual security finding extracted from SharpHound data."""
     __tablename__ = "ad_findings"

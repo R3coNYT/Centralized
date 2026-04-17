@@ -1,0 +1,196 @@
+{% extends "base.html" %}
+{% block title %}AutoRecon Versioning — {{ audit.name }}{% endblock %}
+{% block page_title %}
+  <i class="bi bi-clock-history me-2 text-info"></i>AutoRecon Versioning
+  <span class="text-muted fw-normal fs-5 ms-2">{{ audit.name }}</span>
+{% endblock %}
+
+{% block topbar_actions %}
+<a href="{{ url_for('audits.detail', audit_id=audit.id) }}" class="btn btn-sm btn-outline-secondary">
+  <i class="bi bi-arrow-left me-1"></i>Back to Audit
+</a>
+{% if audit.client %}
+<a href="{{ url_for('autorecon_versioning.client_versioning', client_id=audit.client_id) }}" class="btn btn-sm btn-outline-info ms-2">
+  <i class="bi bi-building me-1"></i>Client View
+</a>
+{% endif %}
+{% endblock %}
+
+{% block content %}
+{% if not hosts_data %}
+<div class="alert alert-info d-flex align-items-center gap-2">
+  <i class="bi bi-info-circle-fill fs-5"></i>
+  <div>No AutoRecon scan versions found for this audit. Import AutoRecon files to start versioning.</div>
+</div>
+{% else %}
+
+{% for item in hosts_data %}
+{% set host = item.host %}
+{% set timeline = item.timeline %}
+<div class="card mb-4">
+  <div class="card-header d-flex align-items-center justify-content-between">
+    <span class="fw-semibold">
+      <i class="bi bi-hdd me-2"></i>
+      <a href="{{ url_for('hosts.host_detail', host_id=host.id) }}" class="text-decoration-none">{{ host.ip }}</a>
+      {% if host.hostname %}<span class="text-muted small ms-1">({{ host.hostname }})</span>{% endif %}
+    </span>
+    <div class="d-flex align-items-center gap-2">
+      {% if host.risk_level %}<span class="badge sev-{{ host.risk_level|lower }}">{{ host.risk_level }}</span>{% endif %}
+      <a href="{{ url_for('autorecon_versioning.host_versioning', host_id=host.id) }}" class="btn btn-sm btn-outline-info py-0">
+        <i class="bi bi-clock-history me-1"></i>Full Timeline
+      </a>
+    </div>
+  </div>
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table table-hover align-middle mb-0 small">
+        <thead class="table-header">
+          <tr>
+            <th>Version</th>
+            <th>Date</th>
+            <th>Type</th>
+            <th>Risk</th>
+            <th>Vulns</th>
+            <th>Changes vs Previous</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for v in timeline %}
+        <tr {% if loop.last %}class="table-active"{% endif %}>
+          <td><span class="badge {% if v.scan_type == 'ai' %}bg-purple{% else %}bg-primary{% endif %}">v{{ v.version_number }}</span></td>
+          <td class="text-muted">{{ v.scanned_at }}</td>
+          <td>
+            {% if v.scan_type == 'ai' %}<span class="badge bg-purple text-white"><i class="bi bi-cpu me-1"></i>AI</span>
+            {% else %}<span class="badge bg-secondary">Normal</span>{% endif %}
+          </td>
+          <td>
+            <span class="badge sev-{{ v.risk_level|lower }}">{{ v.risk_level }}</span>
+            {% if v.risk_score is not none %}<span class="text-muted ms-1">{{ v.risk_score|round(1) }}</span>{% endif %}
+          </td>
+          <td>
+            <div class="d-flex gap-1 flex-wrap">
+              {% if v.critical_count %}<span class="badge sev-critical">{{ v.critical_count }}C</span>{% endif %}
+              {% if v.high_count %}<span class="badge sev-high">{{ v.high_count }}H</span>{% endif %}
+              {% if v.medium_count %}<span class="badge sev-medium">{{ v.medium_count }}M</span>{% endif %}
+              {% if v.low_count %}<span class="badge sev-low">{{ v.low_count }}L</span>{% endif %}
+              {% if not (v.critical_count or v.high_count or v.medium_count or v.low_count) %}
+              <span class="text-success">✓</span>
+              {% endif %}
+            </div>
+          </td>
+          <td>
+            {% if v.diff %}
+            {% set diff = v.diff %}
+            <div class="d-flex gap-1 flex-wrap">
+              {% if diff.new_vulns|length %}<span class="badge bg-danger" title="New vulns">+{{ diff.new_vulns|length }}</span>{% endif %}
+              {% if diff.fixed_vulns|length %}<span class="badge bg-success" title="Fixed vulns">-{{ diff.fixed_vulns|length }}</span>{% endif %}
+              {% if diff.changed_vulns|length %}<span class="badge bg-warning text-dark" title="Changed severity">~{{ diff.changed_vulns|length }}</span>{% endif %}
+              {% if diff.new_ports|length %}<span class="badge bg-info text-dark" title="New ports">+{{ diff.new_ports|length }}p</span>{% endif %}
+              {% if diff.closed_ports|length %}<span class="badge bg-secondary" title="Closed ports">-{{ diff.closed_ports|length }}p</span>{% endif %}
+              {% if diff.risk_delta != 0 %}
+              <span class="badge {% if diff.risk_delta > 0 %}bg-danger{% else %}bg-success{% endif %}">
+                {% if diff.risk_delta > 0 %}▲{% else %}▼{% endif %}{{ diff.risk_delta|abs|round(1) }}
+              </span>
+              {% endif %}
+              {% if not (diff.new_vulns or diff.fixed_vulns or diff.changed_vulns or diff.new_ports or diff.closed_ports or diff.risk_delta) %}
+              <span class="text-muted">—</span>
+              {% endif %}
+            </div>
+            {% else %}
+            <span class="text-muted small">Baseline</span>
+            {% endif %}
+          </td>
+          <td>
+            <div class="d-flex gap-1">
+              <button class="btn btn-xs btn-outline-secondary py-0 px-1" onclick="showSnapshotDetail({{ v.id }})">
+                <i class="bi bi-eye"></i>
+              </button>
+              {% if v.has_ai_report %}
+              <button class="btn btn-xs btn-outline-info py-0 px-1" onclick="showAiReport({{ v.id }})">
+                <i class="bi bi-cpu"></i>
+              </button>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endfor %}
+
+{% endif %}
+
+{# ── Snapshot detail modal ──────────────────────────────────────────────── #}
+<div class="modal fade" id="snapshotModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-camera me-2"></i>Snapshot Details</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body" id="snapshotModalBody"></div>
+    </div>
+  </div>
+</div>
+
+{# ── AI report modal ─────────────────────────────────────────────────────── #}
+<div class="modal fade" id="aiReportModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-cpu me-2 text-info"></i>AI Security Report</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body" id="aiReportModalBody"></div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function sevBadge(sev){const s=(sev||'UNKNOWN').toUpperCase();return `<span class="badge sev-${s.toLowerCase()}">${s}</span>`;}
+function escHtml(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+
+async function showSnapshotDetail(snapId){
+  const modal=new bootstrap.Modal(document.getElementById('snapshotModal'));
+  document.getElementById('snapshotModalBody').innerHTML='<div class="text-center py-4"><div class="spinner-border spinner-border-sm me-2"></div>Loading…</div>';
+  modal.show();
+  const r=await fetch(`/autorecon-versioning/api/snapshot/${snapId}`);
+  const d=await r.json();
+  let html=`<h6 class="mb-3">${d.label} <span class="badge sev-${d.risk_level.toLowerCase()}">${d.risk_level}</span></h6>`;
+  if(d.ports&&d.ports.length){
+    html+=`<h6>Ports (${d.ports.length})</h6><div class="table-responsive mb-3"><table class="table table-sm mb-0"><thead><tr><th>Port</th><th>Proto</th><th>Service</th><th>Product</th><th>Version</th></tr></thead><tbody>`;
+    d.ports.forEach(p=>{html+=`<tr><td class="fw-bold font-monospace">${p.port}</td><td><span class="badge bg-secondary">${p.protocol}</span></td><td>${p.service||'—'}</td><td>${p.product||'—'}</td><td class="text-muted small">${p.version||'—'}</td></tr>`;});
+    html+='</tbody></table></div>';
+  }
+  if(d.vulns&&d.vulns.length){
+    html+=`<h6>Vulnerabilities (${d.vulns.length})</h6><div class="table-responsive mb-3"><table class="table table-sm mb-0"><thead><tr><th>CVE/Title</th><th>Severity</th><th>Source</th></tr></thead><tbody>`;
+    d.vulns.forEach(v=>{html+=`<tr><td class="small fw-semibold">${escHtml(v.cve_id||v.title)}</td><td>${sevBadge(v.severity)}</td><td><span class="badge bg-secondary small">${v.source}</span></td></tr>`;});
+    html+='</tbody></table></div>';
+  }
+  if(d.suggested_tools&&d.suggested_tools.length){
+    html+=`<h6 class="text-warning"><i class="bi bi-tools me-1"></i>AI Suggested Tools</h6><ul class="list-group list-group-flush mb-3">`;
+    d.suggested_tools.forEach(t=>{html+=`<li class="list-group-item bg-transparent"><span class="fw-semibold text-warning">${escHtml(t.name)}</span><span class="text-muted ms-2 small">${escHtml(t.reason||'')}</span></li>`;});
+    html+='</ul>';
+  }
+  document.getElementById('snapshotModalBody').innerHTML=html;
+}
+
+async function showAiReport(snapId){
+  const modal=new bootstrap.Modal(document.getElementById('aiReportModal'));
+  document.getElementById('aiReportModalBody').innerHTML='<div class="text-center py-4"><div class="spinner-border spinner-border-sm me-2"></div>Loading…</div>';
+  modal.show();
+  const r=await fetch(`/autorecon-versioning/api/snapshot/${snapId}`);
+  const d=await r.json();
+  document.getElementById('aiReportModalBody').innerHTML=d.ai_report_md
+    ?`<pre class="text-wrap font-monospace small" style="white-space:pre-wrap">${escHtml(d.ai_report_md)}</pre>`
+    :'<div class="alert alert-warning">No AI report available.</div>';
+}
+</script>
+<style>.bg-purple{background-color:#7b2fbe!important;}.btn-xs{font-size:.75rem;}</style>
+{% endblock %}

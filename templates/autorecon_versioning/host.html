@@ -1,0 +1,434 @@
+{% extends "base.html" %}
+{% block title %}AutoRecon Versioning — {{ host.ip }}{% endblock %}
+{% block page_title %}
+  <i class="bi bi-clock-history me-2 text-info"></i>AutoRecon Versioning
+  <span class="text-muted fw-normal fs-5 ms-2">{{ host.ip }}</span>
+{% endblock %}
+
+{% block topbar_actions %}
+<a href="{{ url_for('hosts.host_detail', host_id=host.id) }}" class="btn btn-sm btn-outline-secondary">
+  <i class="bi bi-arrow-left me-1"></i>Back to Host
+</a>
+<a href="{{ url_for('autorecon_versioning.audit_versioning', audit_id=audit.id) }}" class="btn btn-sm btn-outline-info ms-2">
+  <i class="bi bi-bar-chart-steps me-1"></i>Audit View
+</a>
+{% endblock %}
+
+{% block content %}
+{% if not timeline %}
+<div class="alert alert-info d-flex align-items-center gap-2">
+  <i class="bi bi-info-circle-fill fs-5"></i>
+  <div>No AutoRecon scan versions found for this host yet. Import an AutoRecon JSON, AI JSON, or backup ZIP file to start versioning.</div>
+</div>
+{% else %}
+
+{# ── Summary bar ──────────────────────────────────────────────────────────── #}
+<div class="row g-3 mb-4">
+  <div class="col-md-3">
+    <div class="card text-center">
+      <div class="card-body py-2">
+        <div class="text-muted small mb-1">Scan Versions</div>
+        <div class="fw-bold fs-4">{{ timeline|length }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    {% set last = timeline[-1] %}
+    <div class="card text-center">
+      <div class="card-body py-2">
+        <div class="text-muted small mb-1">Latest Risk</div>
+        <span class="badge sev-{{ last.risk_level|lower }} fs-6">{{ last.risk_level }}</span>
+        {% if last.risk_score %}<span class="text-muted ms-1 small">{{ last.risk_score|round(1) }}</span>{% endif %}
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="card text-center">
+      <div class="card-body py-2">
+        <div class="text-muted small mb-1">Current Vulnerabilities</div>
+        <div class="fw-bold fs-4">{{ last.vuln_count }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="card text-center">
+      <div class="card-body py-2">
+        <div class="text-muted small mb-1">Last Scanned</div>
+        <div class="small fw-semibold">{{ last.scanned_at }}</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# ── Version Timeline ─────────────────────────────────────────────────────── #}
+<div class="card mb-4">
+  <div class="card-header fw-semibold">
+    <i class="bi bi-clock-history me-2"></i>Version Timeline
+  </div>
+  <div class="card-body p-0">
+    <div class="timeline-container p-3">
+      {% for v in timeline %}
+      <div class="timeline-item {% if loop.last %}timeline-item-latest{% endif %} mb-3">
+        <div class="d-flex align-items-start gap-3">
+          {# Version badge #}
+          <div class="timeline-badge flex-shrink-0">
+            <span class="badge {% if v.scan_type == 'ai' %}bg-purple{% else %}bg-primary{% endif %} rounded-pill fs-6 px-3">
+              v{{ v.version_number }}
+            </span>
+          </div>
+
+          {# Card #}
+          <div class="card flex-grow-1">
+            <div class="card-header d-flex align-items-center justify-content-between py-2">
+              <div class="d-flex align-items-center gap-2">
+                <span class="fw-semibold">{{ v.label }}</span>
+                {% if v.scan_type == 'ai' %}
+                <span class="badge bg-purple text-white small"><i class="bi bi-cpu me-1"></i>AI Scan</span>
+                {% endif %}
+              </div>
+              <div class="d-flex align-items-center gap-2">
+                <span class="badge sev-{{ v.risk_level|lower }}">{{ v.risk_level }}</span>
+                {% if v.risk_score is not none %}<span class="text-muted small">{{ v.risk_score|round(1) }}</span>{% endif %}
+                <button class="btn btn-sm btn-outline-secondary py-0" onclick="showSnapshotDetail({{ v.id }})">
+                  <i class="bi bi-eye me-1"></i>Details
+                </button>
+                {% if v.has_ai_report %}
+                <button class="btn btn-sm btn-outline-info py-0" onclick="showAiReport({{ v.id }})">
+                  <i class="bi bi-file-text me-1"></i>AI Report
+                </button>
+                {% endif %}
+              </div>
+            </div>
+            <div class="card-body py-2">
+              <div class="row g-2 align-items-center">
+                {# Vuln counts #}
+                <div class="col-auto">
+                  <div class="d-flex gap-1 flex-wrap">
+                    {% if v.critical_count %}<span class="badge sev-critical">{{ v.critical_count }} CRITICAL</span>{% endif %}
+                    {% if v.high_count %}<span class="badge sev-high">{{ v.high_count }} HIGH</span>{% endif %}
+                    {% if v.medium_count %}<span class="badge sev-medium">{{ v.medium_count }} MEDIUM</span>{% endif %}
+                    {% if v.low_count %}<span class="badge sev-low">{{ v.low_count }} LOW</span>{% endif %}
+                    {% if v.info_count %}<span class="badge sev-info">{{ v.info_count }} INFO</span>{% endif %}
+                    {% if not (v.critical_count or v.high_count or v.medium_count or v.low_count or v.info_count) %}
+                    <span class="text-success small"><i class="bi bi-check-circle me-1"></i>No vulnerabilities</span>
+                    {% endif %}
+                  </div>
+                </div>
+
+                {# Diff pills (only from v2 onwards) #}
+                {% if v.diff %}
+                <div class="col-auto ms-auto">
+                  <div class="d-flex gap-1 flex-wrap">
+                    {% set diff = v.diff %}
+                    {% if diff.new_vulns|length %}
+                    <span class="badge bg-danger" title="{{ diff.new_vulns|length }} new vulnerability(ies)">
+                      +{{ diff.new_vulns|length }} new
+                    </span>
+                    {% endif %}
+                    {% if diff.fixed_vulns|length %}
+                    <span class="badge bg-success" title="{{ diff.fixed_vulns|length }} fixed vulnerability(ies)">
+                      -{{ diff.fixed_vulns|length }} fixed
+                    </span>
+                    {% endif %}
+                    {% if diff.changed_vulns|length %}
+                    <span class="badge bg-warning text-dark" title="{{ diff.changed_vulns|length }} changed severity">
+                      ~{{ diff.changed_vulns|length }} changed
+                    </span>
+                    {% endif %}
+                    {% if diff.new_ports|length %}
+                    <span class="badge bg-info text-dark" title="{{ diff.new_ports|length }} new port(s)">
+                      +{{ diff.new_ports|length }} ports
+                    </span>
+                    {% endif %}
+                    {% if diff.closed_ports|length %}
+                    <span class="badge bg-secondary" title="{{ diff.closed_ports|length }} closed port(s)">
+                      -{{ diff.closed_ports|length }} ports
+                    </span>
+                    {% endif %}
+                    {% if diff.risk_delta != 0 %}
+                    <span class="badge {% if diff.risk_delta > 0 %}bg-danger{% else %}bg-success{% endif %}" title="Risk score change">
+                      {% if diff.risk_delta > 0 %}▲{% else %}▼{% endif %} {{ diff.risk_delta|abs|round(1) }}
+                    </span>
+                    {% endif %}
+                    {% if not (diff.new_vulns or diff.fixed_vulns or diff.changed_vulns or diff.new_ports or diff.closed_ports or diff.risk_delta) %}
+                    <span class="text-muted small"><i class="bi bi-dash me-1"></i>No changes</span>
+                    {% endif %}
+                  </div>
+                </div>
+                {% endif %}
+
+                {# Compare button (not for first version) #}
+                {% if not loop.first %}
+                <div class="col-auto">
+                  <button class="btn btn-sm btn-outline-primary py-0"
+                          onclick="showDiff({{ timeline[loop.index0 - 1].id }}, {{ v.id }})">
+                    <i class="bi bi-arrows-collapse me-1"></i>vs v{{ v.version_number - 1 }}
+                  </button>
+                </div>
+                {% endif %}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {% if not loop.last %}
+        <div class="timeline-connector ms-4 ps-2 my-1" style="border-left:2px dashed #444;height:1rem"></div>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+
+{# ── Custom compare section ───────────────────────────────────────────────── #}
+{% if timeline|length >= 2 %}
+<div class="card mb-4">
+  <div class="card-header fw-semibold"><i class="bi bi-arrows-angle-contract me-2"></i>Custom Compare</div>
+  <div class="card-body">
+    <div class="row g-2 align-items-center">
+      <div class="col-auto">
+        <select id="cmp-from" class="form-select form-select-sm">
+          {% for v in timeline %}
+          <option value="{{ v.id }}">{{ v.label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-auto text-muted">vs</div>
+      <div class="col-auto">
+        <select id="cmp-to" class="form-select form-select-sm">
+          {% for v in timeline %}
+          <option value="{{ v.id }}" {% if loop.last %}selected{% endif %}>{{ v.label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-auto">
+        <button class="btn btn-sm btn-primary" onclick="runCustomCompare()">
+          <i class="bi bi-search me-1"></i>Compare
+        </button>
+      </div>
+    </div>
+    <div id="custom-diff-result" class="mt-3 d-none"></div>
+  </div>
+</div>
+{% endif %}
+
+{% endif %}{# end if timeline #}
+
+{# ── Snapshot detail modal ────────────────────────────────────────────────── #}
+<div class="modal fade" id="snapshotModal" tabindex="-1" aria-labelledby="snapshotModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="snapshotModalLabel"><i class="bi bi-camera me-2"></i>Snapshot Details</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body" id="snapshotModalBody">
+        <div class="text-center py-4"><div class="spinner-border spinner-border-sm me-2"></div>Loading…</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# ── AI report modal ──────────────────────────────────────────────────────── #}
+<div class="modal fade" id="aiReportModal" tabindex="-1" aria-labelledby="aiReportModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="aiReportModalLabel"><i class="bi bi-cpu me-2 text-info"></i>AI Security Report</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body" id="aiReportModalBody">
+        <div class="text-center py-4"><div class="spinner-border spinner-border-sm me-2"></div>Loading…</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# ── Diff modal ───────────────────────────────────────────────────────────── #}
+<div class="modal fade" id="diffModal" tabindex="-1" aria-labelledby="diffModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="diffModalLabel"><i class="bi bi-arrows-collapse me-2"></i>Version Diff</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body" id="diffModalBody">
+        <div class="text-center py-4"><div class="spinner-border spinner-border-sm me-2"></div>Loading…</div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const SEV_CLASS = {CRITICAL:'danger',HIGH:'warning',MEDIUM:'warning',LOW:'info',INFO:'secondary',UNKNOWN:'secondary'};
+
+function sevBadge(sev){
+  const s=(sev||'UNKNOWN').toUpperCase();
+  return `<span class="badge sev-${s.toLowerCase()}">${s}</span>`;
+}
+
+async function showSnapshotDetail(snapId){
+  const modal = new bootstrap.Modal(document.getElementById('snapshotModal'));
+  document.getElementById('snapshotModalBody').innerHTML = '<div class="text-center py-4"><div class="spinner-border spinner-border-sm me-2"></div>Loading…</div>';
+  modal.show();
+  try{
+    const r = await fetch(`/autorecon-versioning/api/snapshot/${snapId}`);
+    const d = await r.json();
+    let html = `<h6 class="mb-3">${d.label} <span class="badge sev-${d.risk_level.toLowerCase()}">${d.risk_level}</span></h6>`;
+
+    // Ports
+    if(d.ports && d.ports.length){
+      html += `<h6 class="mt-3 mb-2"><i class="bi bi-ethernet me-1"></i>Open Ports (${d.ports.length})</h6>
+      <div class="table-responsive mb-3"><table class="table table-sm table-hover mb-0"><thead><tr><th>Port</th><th>Protocol</th><th>Service</th><th>Product</th><th>Version</th></tr></thead><tbody>`;
+      d.ports.forEach(p=>{
+        html += `<tr><td class="font-monospace fw-bold">${p.port}</td><td><span class="badge bg-secondary">${p.protocol}</span></td><td>${p.service||'—'}</td><td>${p.product||'—'}</td><td class="text-muted font-monospace small">${p.version||'—'}</td></tr>`;
+      });
+      html += '</tbody></table></div>';
+    }
+
+    // Vulns
+    if(d.vulns && d.vulns.length){
+      html += `<h6 class="mt-3 mb-2"><i class="bi bi-shield-exclamation me-1"></i>Vulnerabilities (${d.vulns.length})</h6>
+      <div class="table-responsive mb-3"><table class="table table-sm table-hover mb-0"><thead><tr><th>CVE / Title</th><th>Severity</th><th>Source</th><th>Status</th></tr></thead><tbody>`;
+      d.vulns.forEach(v=>{
+        html += `<tr><td class="small fw-semibold">${v.cve_id||v.title}</td><td>${sevBadge(v.severity)}</td><td><span class="badge bg-secondary small">${v.source}</span></td><td><span class="badge bg-secondary small">${v.cve_status||'active'}</span></td></tr>`;
+      });
+      html += '</tbody></table></div>';
+    }
+
+    // Suggested tools (AI)
+    if(d.suggested_tools && d.suggested_tools.length){
+      html += `<h6 class="mt-3 mb-2"><i class="bi bi-tools me-1 text-warning"></i>AI Suggested Tools</h6><ul class="list-group list-group-flush mb-3">`;
+      d.suggested_tools.forEach(t=>{
+        html += `<li class="list-group-item bg-transparent"><span class="fw-semibold text-warning">${t.name}</span><span class="text-muted ms-2 small">${t.reason||''}</span></li>`;
+      });
+      html += '</ul>';
+    }
+
+    document.getElementById('snapshotModalBody').innerHTML = html;
+  }catch(e){
+    document.getElementById('snapshotModalBody').innerHTML = `<div class="alert alert-danger">Failed to load snapshot: ${e}</div>`;
+  }
+}
+
+async function showAiReport(snapId){
+  const modal = new bootstrap.Modal(document.getElementById('aiReportModal'));
+  document.getElementById('aiReportModalBody').innerHTML = '<div class="text-center py-4"><div class="spinner-border spinner-border-sm me-2"></div>Loading…</div>';
+  modal.show();
+  try{
+    const r = await fetch(`/autorecon-versioning/api/snapshot/${snapId}`);
+    const d = await r.json();
+    if(d.ai_report_md){
+      // Render markdown as pre-formatted text (no external lib needed)
+      document.getElementById('aiReportModalBody').innerHTML =
+        `<pre class="text-wrap font-monospace small" style="white-space:pre-wrap">${escHtml(d.ai_report_md)}</pre>`;
+    } else {
+      document.getElementById('aiReportModalBody').innerHTML = '<div class="alert alert-warning">No AI report available for this version.</div>';
+    }
+  }catch(e){
+    document.getElementById('aiReportModalBody').innerHTML = `<div class="alert alert-danger">Failed to load AI report: ${e}</div>`;
+  }
+}
+
+async function showDiff(fromId, toId){
+  const modal = new bootstrap.Modal(document.getElementById('diffModal'));
+  document.getElementById('diffModalBody').innerHTML = '<div class="text-center py-4"><div class="spinner-border spinner-border-sm me-2"></div>Loading…</div>';
+  modal.show();
+  try{
+    const r = await fetch(`/autorecon-versioning/api/diff?from=${fromId}&to=${toId}`);
+    const diff = await r.json();
+    renderDiff(diff, 'diffModalBody');
+  }catch(e){
+    document.getElementById('diffModalBody').innerHTML = `<div class="alert alert-danger">Failed to load diff: ${e}</div>`;
+  }
+}
+
+async function runCustomCompare(){
+  const fromId = document.getElementById('cmp-from').value;
+  const toId   = document.getElementById('cmp-to').value;
+  const el = document.getElementById('custom-diff-result');
+  el.classList.remove('d-none');
+  el.innerHTML = '<div class="text-center py-3"><div class="spinner-border spinner-border-sm me-2"></div>Computing diff…</div>';
+  try{
+    const r = await fetch(`/autorecon-versioning/api/diff?from=${fromId}&to=${toId}`);
+    const diff = await r.json();
+    renderDiff(diff, 'custom-diff-result');
+  }catch(e){
+    el.innerHTML = `<div class="alert alert-danger">Failed: ${e}</div>`;
+  }
+}
+
+function renderDiff(diff, containerId){
+  const el = document.getElementById(containerId);
+  let html = '';
+
+  // Risk delta
+  if(diff.risk_delta !== 0){
+    const cls = diff.risk_delta > 0 ? 'danger' : 'success';
+    const icon = diff.risk_delta > 0 ? '▲' : '▼';
+    html += `<div class="alert alert-${cls} py-2 mb-3"><i class="bi bi-graph-${diff.risk_delta>0?'up':'down'}-arrow me-1"></i>Risk score ${icon} ${Math.abs(diff.risk_delta).toFixed(1)}</div>`;
+  }
+
+  // New vulns
+  if(diff.new_vulns && diff.new_vulns.length){
+    html += `<h6 class="text-danger"><i class="bi bi-plus-circle me-1"></i>New Vulnerabilities (${diff.new_vulns.length})</h6>
+    <div class="table-responsive mb-3"><table class="table table-sm table-hover mb-0"><thead><tr><th>CVE / Title</th><th>Severity</th><th>Source</th></tr></thead><tbody>`;
+    diff.new_vulns.forEach(v=>{
+      html += `<tr class="table-danger"><td class="small fw-semibold">${escHtml(v.cve_id||v.title)}</td><td>${sevBadge(v.severity)}</td><td><span class="badge bg-secondary small">${v.source}</span></td></tr>`;
+    });
+    html += '</tbody></table></div>';
+  }
+
+  // Fixed vulns
+  if(diff.fixed_vulns && diff.fixed_vulns.length){
+    html += `<h6 class="text-success"><i class="bi bi-check-circle me-1"></i>Fixed Vulnerabilities (${diff.fixed_vulns.length})</h6>
+    <div class="table-responsive mb-3"><table class="table table-sm table-hover mb-0"><thead><tr><th>CVE / Title</th><th>Severity</th><th>Source</th></tr></thead><tbody>`;
+    diff.fixed_vulns.forEach(v=>{
+      html += `<tr class="table-success"><td class="small fw-semibold">${escHtml(v.cve_id||v.title)}</td><td>${sevBadge(v.severity)}</td><td><span class="badge bg-secondary small">${v.source}</span></td></tr>`;
+    });
+    html += '</tbody></table></div>';
+  }
+
+  // Changed vulns
+  if(diff.changed_vulns && diff.changed_vulns.length){
+    html += `<h6 class="text-warning"><i class="bi bi-arrow-left-right me-1"></i>Severity Changes (${diff.changed_vulns.length})</h6>
+    <div class="table-responsive mb-3"><table class="table table-sm table-hover mb-0"><thead><tr><th>CVE / Title</th><th>Before</th><th>After</th></tr></thead><tbody>`;
+    diff.changed_vulns.forEach(c=>{
+      html += `<tr><td class="small fw-semibold">${escHtml(c.from.cve_id||c.from.title)}</td><td>${sevBadge(c.from.severity)}</td><td>${sevBadge(c.to.severity)}</td></tr>`;
+    });
+    html += '</tbody></table></div>';
+  }
+
+  // Port changes
+  if((diff.new_ports && diff.new_ports.length) || (diff.closed_ports && diff.closed_ports.length)){
+    html += `<h6><i class="bi bi-ethernet me-1"></i>Port Changes</h6>`;
+    if(diff.new_ports && diff.new_ports.length){
+      html += `<p class="mb-1 text-info small fw-semibold">New ports (${diff.new_ports.length})</p>`;
+      diff.new_ports.forEach(p=>{ html+=`<span class="badge bg-info text-dark me-1">${p.port}/${p.protocol}</span>`; });
+      html += '<br class="mb-2">';
+    }
+    if(diff.closed_ports && diff.closed_ports.length){
+      html += `<p class="mb-1 text-secondary small fw-semibold mt-2">Closed ports (${diff.closed_ports.length})</p>`;
+      diff.closed_ports.forEach(p=>{ html+=`<span class="badge bg-secondary me-1">${p.port}/${p.protocol}</span>`; });
+    }
+  }
+
+  if(!diff.new_vulns?.length && !diff.fixed_vulns?.length && !diff.changed_vulns?.length && !diff.new_ports?.length && !diff.closed_ports?.length && diff.risk_delta === 0){
+    html = '<div class="alert alert-secondary"><i class="bi bi-check-all me-2"></i>No differences found between the selected versions.</div>';
+  }
+
+  el.innerHTML = html;
+  el.classList.remove('d-none');
+}
+
+function escHtml(s){
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+</script>
+<style>
+.bg-purple { background-color: #7b2fbe !important; }
+.sev-potential { background-color: #6f42c1 !important; color: #fff; }
+</style>
+{% endblock %}

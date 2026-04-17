@@ -38,6 +38,7 @@ def create_app():
     from routes.admin import admin_bp
     from routes.autorecon_results import autorecon_results_bp
     from routes.autorecon_launch import autorecon_launch_bp
+    from routes.autorecon_versioning import autorecon_versioning_bp
     from routes.ad_miner import ad_miner_bp
 
     app.register_blueprint(auth_bp)
@@ -52,6 +53,7 @@ def create_app():
     app.register_blueprint(admin_bp)
     app.register_blueprint(autorecon_results_bp)
     app.register_blueprint(autorecon_launch_bp)
+    app.register_blueprint(autorecon_versioning_bp)
     app.register_blueprint(ad_miner_bp)
 
     # ── PWA routes ───────────────────────────────────────────────────────────
