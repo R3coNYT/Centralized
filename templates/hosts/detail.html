@@ -9,6 +9,9 @@
 <button class="btn btn-sm btn-outline-info ms-2" id="analyzeBtn" onclick="analyzeHost({{ host.id }})">
   <i class="bi bi-cpu me-1"></i>Analyze Risk &amp; CVEs
 </button>
+<a href="{{ url_for('autorecon_versioning.host_versioning', host_id=host.id) }}" class="btn btn-sm btn-outline-warning ms-2">
+  <i class="bi bi-clock-history me-1"></i>AutoRecon versioning
+</a>
 <button class="btn btn-sm btn-outline-secondary ms-2"
         data-notif-scope="host" data-notif-id="{{ host.id }}"
         onclick="openNotifModal('host', {{ host.id }}, '{{ host.ip }}')"

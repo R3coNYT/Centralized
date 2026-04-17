@@ -16,11 +16,12 @@ from parsers import (
     FILE_TYPE_SQLMAP_TXT, FILE_TYPE_SQLMAP_CSV,
     FILE_TYPE_DIRBUST_JSON, FILE_TYPE_DIRBUST_TXT,
     FILE_TYPE_SCREENSHOT,
+    FILE_TYPE_AUTORECON_JSON, FILE_TYPE_AUTORECON_ZIP, FILE_TYPE_AUTORECON_AI_JSON,
 )
 
 uploads_bp = Blueprint("uploads", __name__, url_prefix="/uploads")
 
-ALLOWED_EXTENSIONS = {"xml", "json", "pdf", "log", "dat", "txt", "csv", "png", "jpg", "jpeg"}
+ALLOWED_EXTENSIONS = {"xml", "json", "pdf", "log", "dat", "txt", "csv", "png", "jpg", "jpeg", "zip"}
 
 # File types that require the user to supply a target IP
 _NEEDS_TARGET_IP = {
@@ -29,6 +30,9 @@ _NEEDS_TARGET_IP = {
     FILE_TYPE_DIRBUST_JSON, FILE_TYPE_DIRBUST_TXT,
     FILE_TYPE_SCREENSHOT,
 }
+
+# AutoRecon file types that trigger snapshot versioning
+_AUTORECON_TYPES = {FILE_TYPE_AUTORECON_JSON, FILE_TYPE_AUTORECON_ZIP, FILE_TYPE_AUTORECON_AI_JSON}
 
 
 def _allowed_file(filename: str) -> bool:
@@ -138,6 +142,17 @@ def upload(audit_id):
             else:
                 try:
                     _persist_parsed_data(audit_id, result["hosts"], enrich_nvd)
+                    # Create versioning snapshots for AutoRecon scans
+                    if file_type in _AUTORECON_TYPES:
+                        from services.autorecon_snapshot_service import create_snapshots_for_upload
+                        affected_ips = [h.get("ip") for h in result["hosts"] if h.get("ip")]
+                        create_snapshots_for_upload(
+                            audit_id=audit_id,
+                            host_ips=affected_ips,
+                            uploaded_file_id=uploaded.id,
+                            file_type=file_type,
+                            ai_scan_data=result.get("ai_scan_data"),
+                        )
                     uploaded.parsed = True
                     saved_count += 1
                 except Exception as exc:

@@ -10,6 +10,8 @@ import re
 FILE_TYPE_NMAP_XML = "nmap_xml"
 FILE_TYPE_NMAP_JSON = "nmap_json"
 FILE_TYPE_AUTORECON_JSON = "autorecon_json"
+FILE_TYPE_AUTORECON_ZIP = "autorecon_zip"   # AutoRecon backup ZIP (normal or AI scan)
+FILE_TYPE_AUTORECON_AI_JSON = "autorecon_ai_json"  # Standalone AI conversation.json
 FILE_TYPE_HTTPX_JSON = "httpx_json"
 FILE_TYPE_NUCLEI_JSON = "nuclei_json"
 FILE_TYPE_NIKTO_XML = "nikto_xml"
@@ -36,6 +38,19 @@ def detect_file_type(file_path: str, original_filename: str) -> str:
 
     if ext in (".png", ".jpg", ".jpeg", ".gif", ".webp"):
         return FILE_TYPE_SCREENSHOT
+
+    if ext == ".zip":
+        # Detect AutoRecon backup ZIPs by inspecting the archive's member list.
+        # A valid AutoRecon ZIP contains "target.txt" at its root.
+        import zipfile as _zf
+        try:
+            with _zf.ZipFile(file_path, "r") as zf:
+                names = zf.namelist()
+            if "target.txt" in names:
+                return FILE_TYPE_AUTORECON_ZIP
+        except Exception:
+            pass
+        return FILE_TYPE_UNKNOWN
 
     if ext == ".log":
         try:
@@ -124,6 +139,12 @@ def detect_file_type(file_path: str, original_filename: str) -> str:
         try:
             with open(file_path, "r", encoding="utf-8", errors="replace") as f:
                 data = json.load(f)
+
+            # AutoRecon AI conversation.json: list of turn dicts with "iteration" and "status"
+            if isinstance(data, list) and len(data) > 0:
+                first = data[0]
+                if isinstance(first, dict) and "iteration" in first and "status" in first:
+                    return FILE_TYPE_AUTORECON_AI_JSON
 
             # AutoRecon JSON: has "input_target" and "subdomains"
             if isinstance(data, dict) and "input_target" in data and "subdomains" in data:
@@ -232,6 +253,19 @@ def parse_file(file_path: str, file_type: str, audit_id: int, db_session, extra:
             "error": None,
         }
 
+    # AutoRecon backup ZIP — extract and dispatch to sub-parsers
+    if file_type == FILE_TYPE_AUTORECON_ZIP:
+        return _parse_autorecon_zip(file_path, extra or {})
+
+    # Standalone AI conversation.json
+    if file_type == FILE_TYPE_AUTORECON_AI_JSON:
+        from parsers.ai_scan_parser import parse_autorecon_ai_conversation
+        target = (extra or {}).get("target", "").strip()
+        try:
+            return parse_autorecon_ai_conversation(file_path, target)
+        except Exception as exc:
+            return {"hosts": [], "error": str(exc), "ai_scan_data": {}}
+
     dispatch = {
         FILE_TYPE_NMAP_XML: parse_nmap_xml,
         FILE_TYPE_NMAP_JSON: parse_nmap_json,
@@ -251,3 +285,89 @@ def parse_file(file_path: str, file_type: str, audit_id: int, db_session, extra:
         return parser_fn(file_path)
     except Exception as exc:
         return {"hosts": [], "error": str(exc)}
+
+
+def _parse_autorecon_zip(zip_path: str, extra: dict) -> dict:
+    """
+    Extract an AutoRecon backup ZIP to a temporary directory, run sub-parsers
+    on the contents, and return a merged result.
+
+    Expected ZIP structure (either normal or AI scan)::
+
+        target.txt            – scan target (IP/domain/CIDR)
+        logs/recon.log        – scan log (ignored)
+        report.json           – normal AutoRecon JSON report  [optional]
+        report.pdf            – PDF report  [ignored]
+        screenshots/          – screenshot directory  [ignored here]
+        ai_scan/
+            conversation.json – AI conversation log
+            ai_report.md      – AI final report
+            suggested_tools.json
+            step_NNN.txt      – individual step outputs  [ignored]
+    """
+    import zipfile as _zf
+    import tempfile
+    import shutil
+
+    tmp_dir = tempfile.mkdtemp(prefix="centralized_zip_")
+    try:
+        with _zf.ZipFile(zip_path, "r") as zf:
+            zf.extractall(tmp_dir)
+
+        # Read scan target from target.txt
+        target_file = os.path.join(tmp_dir, "target.txt")
+        target = ""
+        if os.path.isfile(target_file):
+            try:
+                target = open(target_file, encoding="utf-8").read().strip()
+            except Exception:
+                pass
+        if not target:
+            target = extra.get("target", "").strip()
+
+        merged_hosts: list  = []
+        ai_scan_data: dict  = {}
+        errors: list        = []
+
+        # ── Normal AutoRecon report.json ──────────────────────────────────
+        report_json = os.path.join(tmp_dir, "report.json")
+        if os.path.isfile(report_json):
+            from parsers.autorecon_parser import parse_autorecon_json as _parse_ar
+            try:
+                r = _parse_ar(report_json)
+                if r.get("error"):
+                    errors.append(f"report.json: {r['error']}")
+                else:
+                    merged_hosts.extend(r.get("hosts", []))
+            except Exception as exc:
+                errors.append(f"report.json parse error: {exc}")
+
+        # ── AI scan directory ─────────────────────────────────────────────
+        ai_dir = os.path.join(tmp_dir, "ai_scan")
+        if os.path.isdir(ai_dir):
+            from parsers.ai_scan_parser import parse_autorecon_ai_directory
+            try:
+                ai_result = parse_autorecon_ai_directory(ai_dir, target)
+                if ai_result.get("error"):
+                    errors.append(f"ai_scan: {ai_result['error']}")
+                ai_scan_data = ai_result.get("ai_scan_data", {})
+                # Merge AI-derived vulns into existing hosts or add new ones
+                for ai_host in ai_result.get("hosts", []):
+                    ai_ip = ai_host.get("ip", "")
+                    existing = next((h for h in merged_hosts if h.get("ip") == ai_ip), None)
+                    if existing:
+                        seen = {v["title"] for v in existing.get("vulnerabilities", [])}
+                        for v in ai_host.get("vulnerabilities", []):
+                            if v["title"] not in seen:
+                                existing.setdefault("vulnerabilities", []).append(v)
+                                seen.add(v["title"])
+                    else:
+                        merged_hosts.append(ai_host)
+            except Exception as exc:
+                errors.append(f"ai_scan parse error: {exc}")
+
+        error_str = "; ".join(errors) if errors and not merged_hosts else None
+        return {"hosts": merged_hosts, "error": error_str, "ai_scan_data": ai_scan_data}
+
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
