@@ -351,18 +351,45 @@ def _parse_autorecon_zip(zip_path: str, extra: dict) -> dict:
                 if ai_result.get("error"):
                     errors.append(f"ai_scan: {ai_result['error']}")
                 ai_scan_data = ai_result.get("ai_scan_data", {})
-                # Merge AI-derived vulns into existing hosts or add new ones
+                # Merge AI-derived vulns into existing hosts or add new ones.
+                # For CIDR / domain targets the AI host IP won't match any
+                # individual host from report.json, so we distribute its vulns
+                # to all existing hosts rather than creating a phantom CIDR host.
+                import ipaddress as _ipaddress
                 for ai_host in ai_result.get("hosts", []):
                     ai_ip = ai_host.get("ip", "")
                     existing = next((h for h in merged_hosts if h.get("ip") == ai_ip), None)
                     if existing:
+                        # Exact match — merge into that host
                         seen = {v["title"] for v in existing.get("vulnerabilities", [])}
                         for v in ai_host.get("vulnerabilities", []):
                             if v["title"] not in seen:
                                 existing.setdefault("vulnerabilities", []).append(v)
                                 seen.add(v["title"])
                     else:
-                        merged_hosts.append(ai_host)
+                        # Check if ai_ip is a plain routable IP address
+                        try:
+                            _ipaddress.ip_address(ai_ip)
+                            is_plain_ip = True
+                        except ValueError:
+                            is_plain_ip = False
+
+                        if is_plain_ip:
+                            # New individual host discovered by the AI scan
+                            merged_hosts.append(ai_host)
+                        elif merged_hosts:
+                            # CIDR or domain target: distribute AI vulns to all
+                            # known hosts (the AI analysed the whole range)
+                            for mh in merged_hosts:
+                                seen = {v["title"] for v in mh.get("vulnerabilities", [])}
+                                for v in ai_host.get("vulnerabilities", []):
+                                    if v["title"] not in seen:
+                                        mh.setdefault("vulnerabilities", []).append(v)
+                                        seen.add(v["title"])
+                        else:
+                            # No hosts from report.json either; keep as-is so
+                            # the persist layer can decide what to do
+                            merged_hosts.append(ai_host)
             except Exception as exc:
                 errors.append(f"ai_scan parse error: {exc}")
 
