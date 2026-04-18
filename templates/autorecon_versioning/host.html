@@ -6,7 +6,7 @@
 {% endblock %}
 
 {% block topbar_actions %}
-<a href="{{ url_for('hosts.host_detail', host_id=host.id) }}" class="btn btn-sm btn-outline-secondary">
+<a href="{{ url_for('hosts.detail', host_id=host.id) }}" class="btn btn-sm btn-outline-secondary">
   <i class="bi bi-arrow-left me-1"></i>Back to Host
 </a>
 <a href="{{ url_for('autorecon_versioning.audit_versioning', audit_id=audit.id) }}" class="btn btn-sm btn-outline-info ms-2">

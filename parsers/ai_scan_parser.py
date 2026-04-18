@@ -45,9 +45,18 @@ _VULN_PATTERNS = [
         re.IGNORECASE,
     ),
     # "** Finding: … **" markdown bold headings
-    re.compile(r"\*\*\s*(?:Finding|Vulnerability|Issue|Risk)[:\s]+([^\*\n]+)\*\*", re.IGNORECASE),
-    # "### CVE-…" or "## Finding …" markdown headings
-    re.compile(r"^#{2,4}\s+(CVE-\d{4}-\d{4,7}[^\n]*)", re.MULTILINE),
+    re.compile(r"\*\*\s*(?:Finding|Vulnerability|Issue|Risk|Weakness)[:\s]+([^\*\n]+)\*\*", re.IGNORECASE),
+    # Markdown section headings: "### CVE-…", "### Finding N: …",
+    # "### [HIGH] - Title", "### Vulnerability: …", "### N. Title (High)"
+    re.compile(
+        r"^#{2,4}\s+("
+        r"(?:CVE-\d{4}-\d{4,7}[^\n]*)"
+        r"|(?:(?:Finding|Vulnerability|Issue|Risk|Weakness)\s*[\d#]*\s*[:\-\u2013]+\s*[^\n]{3,})"
+        r"|(?:\[?(?:CRITICAL|HIGH|MEDIUM|LOW|INFO)\]?\s*[-:\u2013]\s*[^\n]{3,})"
+        r"|(?:\d+[\.):]\s+[^\n]{5,80}\s*(?:[-\u2013(]\s*(?:critical|high|medium|low|info)[)\s]*)?$)"
+        r")",
+        re.MULTILINE | re.IGNORECASE,
+    ),
 ]
 
 
@@ -220,16 +229,27 @@ def parse_autorecon_ai_directory(ai_dir: str, target: str = "") -> dict:
             with open(report_path, "r", encoding="utf-8") as f:
                 md = f.read()
             result["ai_scan_data"]["ai_report_md"] = md
-            # Re-extract vulns from the dedicated report file
+            # Re-extract vulns from the dedicated report file and merge into host.
+            # If no host exists yet (e.g. conversation.json was absent), create one.
             if target:
                 vulns = _extract_vulns_from_report(md, target)
-                for h in result["hosts"]:
-                    if h.get("ip") == target:
-                        seen_titles = {v["title"] for v in h.get("vulnerabilities", [])}
-                        for v in vulns:
-                            if v["title"] not in seen_titles:
-                                h["vulnerabilities"].append(v)
-                        break
+                existing_host = next(
+                    (h for h in result["hosts"] if h.get("ip") == target), None
+                )
+                if existing_host is None:
+                    existing_host = {
+                        "ip": target,
+                        "vulnerabilities": [],
+                        "ports": [],
+                        "http_pages": [],
+                        "extra_data": {},
+                    }
+                    result["hosts"].append(existing_host)
+                seen_titles = {v["title"] for v in existing_host.get("vulnerabilities", [])}
+                for v in vulns:
+                    if v["title"] not in seen_titles:
+                        existing_host["vulnerabilities"].append(v)
+                        seen_titles.add(v["title"])
         except Exception:
             pass
 

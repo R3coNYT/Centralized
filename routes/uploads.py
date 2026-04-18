@@ -443,23 +443,20 @@ def _persist_parsed_data(audit_id: int, parsed_hosts: list, enrich_nvd: bool):
                 "url": f"/audits/{audit_id}",
             })
 
-        # Update host fields if new data is available
-        if host_data.get("hostname") and not host.hostname:
-            host.hostname = host_data["hostname"]
-        if host_data.get("os_info"):
-            host.os_info = host_data["os_info"]
-        if host_data.get("mac_address"):
-            host.mac_address = host_data["mac_address"]
-        if host_data.get("mac_vendor"):
-            host.mac_vendor = host_data["mac_vendor"]
-        if host_data.get("risk_score") is not None:
-            host.risk_score = host_data["risk_score"]
-        if host_data.get("risk_level"):
-            host.risk_level = host_data["risk_level"]
-        if host_data.get("cms"):
-            host.cms = host_data["cms"]
-        if host_data.get("waf"):
-            host.waf = host_data["waf"]
+        # Update host fields — fill-blank strategy so that data from multiple
+        # scans accumulates: the first non-null value wins for scalar fields.
+        # Scanner-provided risk_score/risk_level are ignored here because we
+        # always recompute risk from the full merged state at the end.
+        for _attr, _val in (
+            ("hostname",    host_data.get("hostname")),
+            ("os_info",     host_data.get("os_info")),
+            ("mac_address", host_data.get("mac_address")),
+            ("mac_vendor",  host_data.get("mac_vendor")),
+            ("cms",         host_data.get("cms")),
+            ("waf",         host_data.get("waf")),
+        ):
+            if _val and not getattr(host, _attr):
+                setattr(host, _attr, _val)
         if host_data.get("extra_data") is not None:
             # Merge incoming extra_data with whatever is already stored so that
             # uploading a dirbust file or screenshot does not wipe data from a
@@ -563,6 +560,22 @@ def _persist_parsed_data(audit_id: int, parsed_hosts: list, enrich_nvd: bool):
                     technology=page.get("technology"),
                     redirect_location=page.get("redirect_location"),
                 ))
+            else:
+                # Enrich existing page with any missing fields from this scan
+                _page_changed = False
+                for _attr, _val in (
+                    ("status_code",       page.get("status_code")),
+                    ("title",             page.get("title")),
+                    ("content_type",      page.get("content_type")),
+                    ("content_length",    page.get("content_length")),
+                    ("technology",        page.get("technology")),
+                    ("redirect_location", page.get("redirect_location")),
+                ):
+                    if _val is not None and not getattr(existing_page, _attr):
+                        setattr(existing_page, _attr, _val)
+                        _page_changed = True
+                if _page_changed:
+                    db.session.flush()
 
         # Vulnerabilities from the parser
         for vdata in host_data.get("vulnerabilities", []):
@@ -574,10 +587,31 @@ def _persist_parsed_data(audit_id: int, parsed_hosts: list, enrich_nvd: bool):
             if not dup and title:
                 dup = Vulnerability.query.filter_by(host_id=host.id, title=title).first()
             if dup:
-                # Backfill recommendation if the existing record is missing it
-                new_rec = vdata.get("recommendation")
-                if not dup.recommendation and new_rec:
-                    dup.recommendation = new_rec
+                # Enrich the existing record with any data this scan adds
+                _vuln_changed = False
+                # Severity: upgrade from UNKNOWN to a real value
+                _new_sev = (vdata.get("severity") or "UNKNOWN").upper()
+                if dup.severity in (None, "UNKNOWN") and _new_sev not in (None, "UNKNOWN"):
+                    dup.severity = _new_sev
+                    _vuln_changed = True
+                # Fill missing scalar fields
+                for _attr, _val in (
+                    ("description",   vdata.get("description")),
+                    ("cvss_score",     vdata.get("cvss_score")),
+                    ("cvss_vector",    vdata.get("cvss_vector")),
+                    ("evidence",       vdata.get("evidence")),
+                    ("references",     vdata.get("references")),
+                    ("recommendation", vdata.get("recommendation")),
+                    ("template_id",    vdata.get("template_id")),
+                ):
+                    if _val is not None and not getattr(dup, _attr):
+                        setattr(dup, _attr, _val)
+                        _vuln_changed = True
+                # Re-trigger NVD enrichment if CVSS is still missing and we have a CVE ID
+                if cve_id and dup.cvss_score is None:
+                    _nvd_enrich_vuln(dup, cve_id)
+                if _vuln_changed:
+                    db.session.flush()
                 continue
 
             vuln = Vulnerability(
@@ -663,12 +697,13 @@ def _persist_parsed_data(audit_id: int, parsed_hosts: list, enrich_nvd: bool):
 
         db.session.flush()
 
-        # ── Risk score: compute from ports+vulns if not already provided ──────
-        needs_risk = not host_data.get("risk_score") and not host_data.get("risk_level")
-        if needs_risk:
-            score, level = _compute_host_risk(host)
-            host.risk_score = score
-            host.risk_level = level
+        # ── Risk score: always recompute from the full merged state ────────────
+        # This ensures the score reflects accumulated data from all sources,
+        # regardless of the order files were imported or what each scanner
+        # reported individually.
+        score, level = _compute_host_risk(host)
+        host.risk_score = score
+        host.risk_level = level
 
         db.session.flush()
 

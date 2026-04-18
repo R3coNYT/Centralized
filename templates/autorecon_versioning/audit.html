@@ -31,7 +31,7 @@
   <div class="card-header d-flex align-items-center justify-content-between">
     <span class="fw-semibold">
       <i class="bi bi-hdd me-2"></i>
-      <a href="{{ url_for('hosts.host_detail', host_id=host.id) }}" class="text-decoration-none">{{ host.ip }}</a>
+      <a href="{{ url_for('hosts.detail', host_id=host.id) }}" class="text-decoration-none">{{ host.ip }}</a>
       {% if host.hostname %}<span class="text-muted small ms-1">({{ host.hostname }})</span>{% endif %}
     </span>
     <div class="d-flex align-items-center gap-2">
