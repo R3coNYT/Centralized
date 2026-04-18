@@ -3,11 +3,18 @@ Parse PDF audit reports.
 Extracts:
   - IP addresses
   - CVE IDs  (scoped per host section — not globally assigned)
-  - Open ports / services
-  - Severity mentions
+  - Open ports / services  (including product and version strings)
+  - Structured findings with severity, evidence, and recommendations
+  - Resolved hostname and OS information
 Supports AutoRecon PDF format and generic pentest PDF reports.
 """
 import re
+from parsers.ai_scan_parser import (  # shared rich-extraction helpers
+    _extract_ports_from_report    as _extract_ports_rich,
+    _extract_hostname_from_report as _extract_hostname_from_text,
+    _extract_os_from_report       as _extract_os_from_text,
+    _extract_vulns_from_report    as _extract_vulns_rich,
+)
 
 IP_RE = re.compile(r"\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b")
 CVE_RE = re.compile(r"CVE-\d{4}-\d{4,7}", re.IGNORECASE)
@@ -188,24 +195,34 @@ def parse_pdf(file_path: str) -> dict:
 
     hosts = []
     for ip, section_text in sections.items():
-        vulns = _extract_vulns_from_text(section_text)
-        ports = _extract_ports_from_text(section_text)
+        # Rich extraction: structured findings, service/product/version per port, hostname, OS
+        vulns    = _extract_vulns_rich(section_text, ip)
+        ports    = _extract_ports_rich(section_text)
+        if not ports:
+            ports = _extract_ports_from_text(section_text)
+        hostname = _extract_hostname_from_text(section_text)
+        os_info  = _extract_os_from_text(section_text)
 
         hosts.append({
-            "ip": ip,
-            "hostname": None,
+            "ip":          ip,
+            "hostname":    hostname,
             "mac_address": None,
-            "mac_vendor": None,
-            "os_info": None,
-            "ports": ports,
+            "mac_vendor":  None,
+            "os_info":     os_info,
+            "ports":       ports,
             "vulnerabilities": vulns,
-            "http_pages": [],
+            "http_pages":  [],
         })
 
-    # If only one IP was found but CVEs exist in the whole doc, make sure they're attached
-    if len(hosts) == 1 and not hosts[0]["vulnerabilities"]:
-        hosts[0]["vulnerabilities"] = _extract_vulns_from_text(full_text)
-    if len(hosts) == 1 and not hosts[0]["ports"]:
-        hosts[0]["ports"] = _extract_ports_from_text(full_text)
+    # Single-IP document: try whole-document extraction as fallback
+    if len(hosts) == 1:
+        if not hosts[0]["vulnerabilities"]:
+            hosts[0]["vulnerabilities"] = _extract_vulns_rich(full_text, hosts[0]["ip"])
+        if not hosts[0]["ports"]:
+            hosts[0]["ports"] = _extract_ports_rich(full_text) or _extract_ports_from_text(full_text)
+        if not hosts[0]["hostname"]:
+            hosts[0]["hostname"] = _extract_hostname_from_text(full_text)
+        if not hosts[0]["os_info"]:
+            hosts[0]["os_info"] = _extract_os_from_text(full_text)
 
     return {"hosts": hosts, "error": None}
