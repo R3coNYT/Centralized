@@ -20,7 +20,7 @@
             <p class="mb-1 fw-semibold">Drag & drop files here</p>
             <p class="text-muted small mb-3">or click to browse — <strong>you can add files in multiple batches</strong></p>
             <input type="file" id="fileInput" name="files" multiple
-                   accept=".xml,.json,.pdf,.log,.dat,.md" class="d-none"/>
+                   accept=".xml,.json,.pdf,.log,.dat,.md,.zip" class="d-none"/>
             <button type="button" class="btn btn-outline-primary btn-sm" onclick="document.getElementById('fileInput').click()">
               <i class="bi bi-folder2-open me-1"></i>Browse Files
             </button>
@@ -155,7 +155,7 @@ const progressWrap = document.getElementById('progressWrap');
 const progressBar  = document.getElementById('progressBar');
 const progressPct  = document.getElementById('progressPct');
 
-const ALLOWED = new Set(['xml', 'json', 'pdf', 'log', 'dat', 'txt', 'csv', 'png', 'jpg', 'jpeg', 'md']);
+const ALLOWED = new Set(['xml', 'json', 'pdf', 'log', 'dat', 'txt', 'csv', 'png', 'jpg', 'jpeg', 'md', 'zip']);
 // Extensions that ALWAYS need a target IP (Lynis logs/reports, screenshots)
 const IP_REQUIRED_EXTS = new Set(['log', 'dat', 'png', 'jpg', 'jpeg']);
 // Extensions that MAY need a target IP (sqlmap/gobuster .txt/.csv) — optional, not blocking
@@ -175,7 +175,7 @@ function addFiles(newFiles) {
     fileMap.set(f.name, f); // overwrite same name → keeps latest
   });
   if (rejected) {
-    showToast(`${rejected} file(s) skipped — only .xml, .json, .pdf, .log and .dat are accepted.`, 'warning');
+    showToast(`${rejected} file(s) skipped — unsupported format. Accepted: .xml, .json, .pdf, .log, .dat, .txt, .csv, .png, .jpg, .jpeg, .md, .zip`, 'warning');
   }
   renderList();
   syncInput();
@@ -251,7 +251,8 @@ function syncInput() {
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 function iconForExt(e) {
-  return e === 'pdf'  ? 'bi-file-earmark-pdf'  :
+  return e === 'zip'  ? 'bi-file-earmark-zip'  :
+         e === 'pdf'  ? 'bi-file-earmark-pdf'  :
          e === 'xml'  ? 'bi-file-earmark-code' :
          e === 'md'   ? 'bi-file-earmark-text' :
          e === 'log'  ? 'bi-file-earmark-text' :
