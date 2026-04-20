@@ -20,7 +20,7 @@
             <p class="mb-1 fw-semibold">Drag & drop files here</p>
             <p class="text-muted small mb-3">or click to browse — <strong>you can add files in multiple batches</strong></p>
             <input type="file" id="fileInput" name="files" multiple
-                   accept=".xml,.json,.pdf,.log,.dat" class="d-none"/>
+                   accept=".xml,.json,.pdf,.log,.dat,.md" class="d-none"/>
             <button type="button" class="btn btn-outline-primary btn-sm" onclick="document.getElementById('fileInput').click()">
               <i class="bi bi-folder2-open me-1"></i>Browse Files
             </button>
@@ -63,7 +63,7 @@
                 <div class="col-sm-6"><i class="bi bi-check2 text-success me-1"></i>Lynis audit report (<code>.log</code> / <code>.dat</code>)</div>
                 <div class="col-sm-6"><i class="bi bi-check2 text-success me-1"></i>PDF audit reports (AutoRecon)</div>
                 <div class="col-sm-6"><i class="bi bi-check2 text-success me-1"></i>SQLmap output (<code>sqlmap_output.txt</code> or <code>--results-file .csv</code>)</div>
-                <div class="col-sm-6"><i class="bi bi-check2 text-success me-1"></i>Dir bruteforce — gobuster .txt / ffuf .json</div>
+                <div class="col-sm-6"><i class="bi bi-check2 text-success me-1"></i>AI scan report (<code>ai_report.md</code>, <code>conversation.json</code>, <code>step_NNN.txt</code>)</div>
                 <div class="col-sm-6"><i class="bi bi-check2 text-success me-1"></i>Screenshots (<code>.png</code> / <code>.jpg</code>)</div>
               </div>
             </div>
@@ -155,7 +155,7 @@ const progressWrap = document.getElementById('progressWrap');
 const progressBar  = document.getElementById('progressBar');
 const progressPct  = document.getElementById('progressPct');
 
-const ALLOWED = new Set(['xml', 'json', 'pdf', 'log', 'dat', 'txt', 'csv', 'png', 'jpg', 'jpeg']);
+const ALLOWED = new Set(['xml', 'json', 'pdf', 'log', 'dat', 'txt', 'csv', 'png', 'jpg', 'jpeg', 'md']);
 // Extensions that ALWAYS need a target IP (Lynis logs/reports, screenshots)
 const IP_REQUIRED_EXTS = new Set(['log', 'dat', 'png', 'jpg', 'jpeg']);
 // Extensions that MAY need a target IP (sqlmap/gobuster .txt/.csv) — optional, not blocking
@@ -253,6 +253,7 @@ function syncInput() {
 function iconForExt(e) {
   return e === 'pdf'  ? 'bi-file-earmark-pdf'  :
          e === 'xml'  ? 'bi-file-earmark-code' :
+         e === 'md'   ? 'bi-file-earmark-text' :
          e === 'log'  ? 'bi-file-earmark-text' :
          e === 'dat'  ? 'bi-file-earmark-text' :         e === 'txt'  ? 'bi-file-earmark-text' :
          e === 'csv'  ? 'bi-file-earmark-spreadsheet' :
