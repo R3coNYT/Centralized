@@ -269,6 +269,17 @@ def reprocess_files(audit_id):
             continue
         try:
             _persist_parsed_data(audit_id, result["hosts"], enrich_nvd=False)
+            # Re-create versioning snapshots (including AI scan data)
+            if uf.file_type in _AUTORECON_TYPES:
+                from services.autorecon_snapshot_service import create_snapshots_for_upload
+                affected_ips = [h.get("ip") for h in result["hosts"] if h.get("ip")]
+                create_snapshots_for_upload(
+                    audit_id=audit_id,
+                    host_ips=affected_ips,
+                    uploaded_file_id=uf.id,
+                    file_type=uf.file_type,
+                    ai_scan_data=result.get("ai_scan_data"),
+                )
             enriched += 1
         except Exception as exc:
             db.session.rollback()
@@ -277,7 +288,7 @@ def reprocess_files(audit_id):
     db.session.commit()
 
     if enriched:
-        flash(f"Reprocessed {enriched} file(s) — ports and CVEs updated.", "success")
+        flash(f"Reprocessed {enriched} file(s) — ports, CVEs and AI data updated.", "success")
     for err in errors:
         flash(err, "danger")
 

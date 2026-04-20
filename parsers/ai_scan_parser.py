@@ -30,81 +30,18 @@ import json
 import re
 import os
 
-# ── Regex patterns used to extract structured findings from free-text ──────
+# ── Regex helpers ──────────────────────────────────────────────────────────
 _CVE_RE       = re.compile(r"CVE-\d{4}-\d{4,7}", re.IGNORECASE)
 _SEVERITY_MAP = {
     "critical": "CRITICAL", "high": "HIGH", "medium": "MEDIUM",
     "low": "LOW", "info": "INFO", "informational": "INFO",
 }
 
-# Heuristic patterns that indicate a vulnerability mention in the AI report
-_VULN_PATTERNS = [
-    # "CVE-2021-12345 (Critical)" or "CVE-2021-12345: description"
-    re.compile(
-        r"(CVE-\d{4}-\d{4,7})[^\n]*?(critical|high|medium|low|info)?",
-        re.IGNORECASE,
-    ),
-    # "** Finding: … **" markdown bold headings
-    re.compile(r"\*\*\s*(?:Finding|Vulnerability|Issue|Risk|Weakness)[:\s]+([^\*\n]+)\*\*", re.IGNORECASE),
-    # Markdown section headings: "### CVE-…", "### Finding N: …",
-    # "### [HIGH] - Title", "### Vulnerability: …", "### N. Title (High)"
-    re.compile(
-        r"^#{2,4}\s+("
-        r"(?:CVE-\d{4}-\d{4,7}[^\n]*)"
-        r"|(?:(?:Finding|Vulnerability|Issue|Risk|Weakness)\s*[\d#]*\s*[:\-\u2013]+\s*[^\n]{3,})"
-        r"|(?:\[?(?:CRITICAL|HIGH|MEDIUM|LOW|INFO)\]?\s*[-:\u2013]\s*[^\n]{3,})"
-        r"|(?:\d+[\.):]\s+[^\n]{5,80}\s*(?:[-\u2013(]\s*(?:critical|high|medium|low|info)[)\s]*)?$)"
-        r")",
-        re.MULTILINE | re.IGNORECASE,
-    ),
-]
-
-# ── Rich port / host / finding extraction ─────────────────────────────────
-
-# "- `22/tcp` — OpenSSH 10.0p2 Debian 7"  or plain "- 22/tcp — SSH"
+# ── Port extraction ────────────────────────────────────────────────────────
+# "- `22/tcp` — OpenSSH 10.0p2 Debian 7"  or  "- 22/tcp — SSH"
 _PORT_LINE_RE = re.compile(
     r"^\s*[-*\u2022]\s+`?(\d{1,5})/(tcp|udp)`?\s*[—–\-]{1,3}\s*(.+)",
     re.IGNORECASE | re.MULTILINE,
-)
-
-# "**Resolved name:** device-64.home"  /  "Resolved name: device-64.home"
-# Note: in markdown **Label:** the colon is INSIDE the bold, closing ** comes after it.
-_RESOLVED_NAME_RE = re.compile(
-    r"Resolved\s+name\s*:+\s*\*{0,2}\s*`?([a-zA-Z0-9][a-zA-Z0-9._-]{1,})`?",
-    re.IGNORECASE,
-)
-_HOSTNAME_LABEL_RE = re.compile(
-    r"\b(?:hostname|fqdn|rdns|ptr)\b\s*:+\s*\*{0,2}\s*`?([a-zA-Z0-9][a-zA-Z0-9._-]{2,})`?",
-    re.IGNORECASE,
-)
-
-# Finding section headings (markdown or plain text)
-_FINDING_SECTION_RE = re.compile(
-    r"^#{0,4}\s*Finding\s+\d+[:.)\s]+(.+?)$",
-    re.MULTILINE,
-)
-# Sub-block patterns inside a finding section.
-# Pattern handles both plain "Label: value" and markdown "**Label:** value"
-# (in markdown the colon is inside the bold, closing ** appears AFTER it).
-_SEV_IN_SECTION_RE    = re.compile(r"Severity\s*:+\s*\*{0,2}\s*(Critical|High|Medium|Low|Info(?:rmational)?)", re.IGNORECASE)
-_SVC_IN_SECTION_RE    = re.compile(r"Service\s*:+\s*\*{0,2}\s*(.+?)(?:\n|$)", re.IGNORECASE)
-_EVI_IN_SECTION_RE    = re.compile(
-    r"Evidence\s*:+\s*\*{0,2}\s*([\s\S]+?)(?=\nService\s*:|\nSeverity\s*:|\nInterpretation\s*:|\nRecommendations?\s*:|$)",
-    re.IGNORECASE,
-)
-_INTERP_IN_SECTION_RE = re.compile(
-    r"Interpretation\s*:+\s*\*{0,2}\s*([\s\S]+?)(?=\nSeverity\s*:|\nRecommendations?\s*:|$)",
-    re.IGNORECASE,
-)
-_REC_IN_SECTION_RE    = re.compile(
-    r"Recommendations?\s*:+\s*\*{0,2}\s*([\s\S]+?)(?=\n#{1,4}\s|$)",
-    re.IGNORECASE,
-)
-
-# "Additional Tools Not Installed" section
-_TOOLS_SECTION_RE = re.compile(
-    r"(?:Additional\s+Tools?\s+(?:Not\s+Installed|Recommended|That\s+Would\s+Help)|Tools?\s+(?:Not\s+Installed|Recommended))[^\n]*\n([\s\S]+?)(?=\n#{1,4}\s|\Z)",
-    re.IGNORECASE,
 )
 
 # Port → default service name
@@ -117,7 +54,6 @@ _PORT_SVC_MAP: dict = {
     10050: "zabbix-agent", 27017: "mongodb",
 }
 
-# Product keyword → service name
 _PRODUCT_SVC_MAP: dict = {
     "openssh": "ssh", "apache": "http", "nginx": "http",
     "express": "https", "node": "https", "nodejs": "https",
@@ -131,12 +67,321 @@ _PRODUCT_SVC_MAP: dict = {
     "dovecot": "imap", "ssl": "https", "tls": "https",
 }
 
+# ── Hostname / OS ──────────────────────────────────────────────────────────
+_RESOLVED_NAME_RE = re.compile(
+    r"Resolved\s+name\s*:+\s*\*{0,2}\s*`?([a-zA-Z0-9][a-zA-Z0-9._-]{1,})`?",
+    re.IGNORECASE,
+)
+_HOSTNAME_LABEL_RE = re.compile(
+    r"\b(?:hostname|fqdn|rdns|ptr)\b\s*:+\s*\*{0,2}\s*`?([a-zA-Z0-9][a-zA-Z0-9._-]{2,})`?",
+    re.IGNORECASE,
+)
+
+# ── Tools section detection ────────────────────────────────────────────────
+# Any top-level heading that talks about missing / recommended / suggested tools
+_TOOLS_HEADING_RE = re.compile(
+    r"^#{1,4}\s+(?:Additional\s+)?Tools?\s+(?:Not\s+Installed|Recommended|Suggested|That\s+Would\s+Help)[^\n]*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+# ── Finding detection ──────────────────────────────────────────────────────
+# 1. AutoRecon-AI primary format: ### [SEVERITY] - Title
+#    e.g.  ### [CRITICAL] - Insecure credential storage
+_SEV_HEADING_RE = re.compile(
+    r"^#{1,4}\s+\[?(CRITICAL|HIGH|MEDIUM|LOW|INFO(?:RMATIONAL)?)\]?\s*[-–:]\s*(.+?)$",
+    re.MULTILINE | re.IGNORECASE,
+)
+
+# 2. "Finding N: Title" (with or without leading #)
+_FINDING_N_RE = re.compile(
+    r"^#{0,4}\s*(?:Finding|Vuln(?:erability)?|Issue)\s+\d+\s*[:.)\s]\s*(.+?)$",
+    re.MULTILINE | re.IGNORECASE,
+)
+
+# 3. Bold heading  **Finding: title**  or  **[HIGH] title**
+_BOLD_FINDING_RE = re.compile(
+    r"\*\*\s*(?:\[(?:CRITICAL|HIGH|MEDIUM|LOW|INFO)\]\s*[-–:]?\s*)?(.+?)\*\*",
+    re.IGNORECASE,
+)
+
+# Sub-field labels inside a finding block
+_SEV_LABEL_RE  = re.compile(r"\*{0,2}Severit(?:y|é)\*{0,2}\s*:+\s*\*{0,2}\s*(Critical|High|Medium|Low|Info(?:rmational)?)", re.IGNORECASE)
+_EVI_LABEL_RE  = re.compile(r"\*{0,2}(?:Evidence|Évidence)\*{0,2}\s*:+\s*\*{0,2}\s*([\s\S]+?)(?=\n\*{0,2}(?:Service|Severity|Interpretation|Recommendation|$))", re.IGNORECASE)
+_INTERP_RE     = re.compile(r"\*{0,2}Interpretation\*{0,2}\s*:+\s*\*{0,2}\s*([\s\S]+?)(?=\n\*{0,2}(?:Severity|Recommendation|Finding|$))", re.IGNORECASE)
+_REC_RE        = re.compile(r"\*{0,2}Recommendations?\*{0,2}\s*:+\s*\*{0,2}\s*([\s\S]+?)(?=\n#{1,4}\s|\Z)", re.IGNORECASE)
+
+# ── False-positive guards ──────────────────────────────────────────────────
+# Lines/headings that look like vulnerability headings but are NOT vuln titles
+_PORT_HEADING_RE = re.compile(
+    r"^\s*(?:\d+\.\s+)?(?:Port\s+)?\d{1,5}/(tcp|udp)\b",
+    re.IGNORECASE,
+)
+_TOOL_HEADING_RE = re.compile(
+    r"^`[a-zA-Z0-9_\-]+`\s*$",           # bare `` `toolname` ``
+)
+_SECTION_NOISE_RE = re.compile(
+    r"^(?:Executive\s+Summary|Detailed\s+Findings?|Open\s+Ports?|Network\s+Services?|"
+    r"Recommendations?|Conclusion|Appendix|Summary|Overview|Introduction|"
+    r"Host\s+Information|Scan\s+Results?|Services?\s+(?:Detected|Found)|"
+    r"Additional\s+Tools?|Tools?\s+(?:Not\s+Installed|Recommended))",
+    re.IGNORECASE,
+)
+
+
+def _is_noise_title(title: str) -> bool:
+    """Return True if the title is a section header, port line, or tool name — not a real vuln."""
+    t = title.strip()
+    if _SECTION_NOISE_RE.match(t):
+        return True
+    if _PORT_HEADING_RE.match(t):
+        return True
+    if _TOOL_HEADING_RE.match(t):
+        return True
+    # Numbered port entries: "1. Port 22/tcp — SSH" or "2. Port 4000/tcp"
+    if re.match(r"^\d+\.\s+(?:Port\s+)?\d{1,5}/(tcp|udp)", t, re.IGNORECASE):
+        return True
+    # Pure tool names with backticks: "1. `zabbix_get`", "2. `ssh-audit`"
+    if re.match(r"^\d+\.\s+`[a-zA-Z0-9_\-]+`\s*$", t):
+        return True
+    # Very short (< 8 chars) or very long (> 200 chars) — skip
+    if len(t) < 8 or len(t) > 200:
+        return True
+    return False
+
+
+def _normalise_key(title: str) -> str:
+    """Normalise a title for deduplication.
+
+    Strips port numbers, port/tcp/udp references, and punctuation so that
+    near-duplicate titles like "SSH exposed on port 22" and "SSH exposed on
+    22/tcp" both collapse to the same key.
+    """
+    t = title.lower()
+    # Remove port references: "port 22", "22/tcp", "22/udp", "on port 22"
+    t = re.sub(r"\bport\s+\d+\b", "", t)
+    t = re.sub(r"\b\d{1,5}/(tcp|udp)\b", "", t)
+    t = re.sub(r"\bon\s+\d+\b", "", t)
+    return re.sub(r"\W+", "", t)[:80]
+
+
+def _sev_from_label(text: str) -> str:
+    m = _SEV_LABEL_RE.search(text)
+    if m:
+        return _SEVERITY_MAP.get(m.group(1).lower(), "UNKNOWN")
+    return "UNKNOWN"
+
+
+def _sev_from_context(text: str) -> str:
+    ltext = text.lower()
+    for kw, sev in sorted(_SEVERITY_MAP.items(), key=lambda x: -len(x[0])):
+        if kw in ltext:
+            return sev
+    return "UNKNOWN"
+
+
+# ── Tools-section boundary detection ──────────────────────────────────────
+
+def _tools_section_spans(text: str) -> list:
+    """Return list of (start, end) byte spans that belong to tool-listing sections."""
+    # Collect all candidate headings, dedup by start position
+    seen_starts: set = set()
+    candidates = []
+    for m in re.finditer(
+        r"^#{1,4}\s+(?:\d+\.\s+)?(?:Additional\s+)?Tools?\s+(?:Not\s+Installed|Recommended|Suggested|That\s+Would\s+Help)[^\n]*$",
+        text, re.MULTILINE | re.IGNORECASE,
+    ):
+        if m.start() not in seen_starts:
+            seen_starts.add(m.start())
+            candidates.append(m)
+    spans = []
+    for m in candidates:
+        level = len(re.match(r"^(#{1,4})", m.group()).group(1))
+        rest  = text[m.end():]
+        end_m = re.search(r"^#{1," + str(level) + r"}\s", rest, re.MULTILINE)
+        end   = m.end() + (end_m.start() if end_m else len(rest))
+        spans.append((m.start(), end))
+    return spans
+
+
+def _in_tools_section(pos: int, spans: list) -> bool:
+    return any(s <= pos < e for s, e in spans)
+
+
+# ── Primary extraction: [SEVERITY] headings ───────────────────────────────
+
+def _extract_severity_headed_findings(text: str, tools_spans: list) -> list:
+    """
+    Extract findings from ``### [HIGH] - Title`` style headings.
+    This is the primary format produced by the AutoRecon AI engine.
+    """
+    findings = []
+    seen: set = set()
+    matches = list(_SEV_HEADING_RE.finditer(text))
+    for i, m in enumerate(matches):
+        if _in_tools_section(m.start(), tools_spans):
+            continue
+        raw_sev = m.group(1).upper()
+        severity = _SEVERITY_MAP.get(raw_sev.lower(), "UNKNOWN")
+        title = m.group(2).strip()
+        if _is_noise_title(title):
+            continue
+
+        # Section body = text until the next same-or-higher level heading
+        level = len(re.match(r"^(#{1,4})", m.group()).group(1))
+        section_start = m.end()
+        # Find next heading of same or higher level
+        rest = text[section_start:]
+        next_heading = re.search(r"^#{1," + str(level) + r"}\s", rest, re.MULTILINE)
+        section_body = rest[:next_heading.start()] if next_heading else rest
+
+        # Try to extract sub-fields from section body
+        evi_m    = _EVI_LABEL_RE.search(section_body)
+        evidence = evi_m.group(1).strip()[:600] if evi_m else ""
+        interp_m = _INTERP_RE.search(section_body)
+        interp   = interp_m.group(1).strip()[:600] if interp_m else ""
+        rec_m    = _REC_RE.search(section_body)
+        rec      = rec_m.group(1).strip()[:600] if rec_m else ""
+
+        # Override severity from inline label if present
+        inline_sev = _sev_from_label(section_body)
+        if inline_sev != "UNKNOWN":
+            severity = inline_sev
+
+        description = (interp or evidence or "")[:600] or None
+
+        key = _normalise_key(title)
+        if key in seen:
+            continue
+        seen.add(key)
+        findings.append({
+            "cve_id":         None,
+            "title":          title[:200],
+            "severity":       severity,
+            "description":    description,
+            "evidence":       evidence[:600] if evidence else None,
+            "recommendation": rec or None,
+            "source":         "ai_analysis",
+        })
+    return findings
+
+
+# ── Secondary extraction: "Finding N: Title" sections ─────────────────────
+
+def _extract_finding_n_sections(text: str, tools_spans: list) -> list:
+    findings = []
+    seen: set = set()
+    matches = list(_FINDING_N_RE.finditer(text))
+    for i, m in enumerate(matches):
+        if _in_tools_section(m.start(), tools_spans):
+            continue
+        title = m.group(1).strip()
+        if _is_noise_title(title):
+            continue
+        section_start = m.end()
+        section_end   = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+        section       = text[section_start:section_end]
+
+        severity    = _sev_from_label(section)
+        if severity == "UNKNOWN":
+            severity = _sev_from_context(m.group())
+
+        evi_m    = _EVI_LABEL_RE.search(section)
+        evidence = evi_m.group(1).strip()[:600] if evi_m else ""
+        interp_m = _INTERP_RE.search(section)
+        interp   = interp_m.group(1).strip()[:600] if interp_m else ""
+        rec_m    = _REC_RE.search(section)
+        rec      = rec_m.group(1).strip()[:600] if rec_m else ""
+        description = (interp or evidence or "")[:600] or None
+
+        key = _normalise_key(title)
+        if key in seen:
+            continue
+        seen.add(key)
+        findings.append({
+            "cve_id":         None,
+            "title":          title[:200],
+            "severity":       severity,
+            "description":    description,
+            "evidence":       evidence[:600] if evidence else None,
+            "recommendation": rec or None,
+            "source":         "ai_analysis",
+        })
+    return findings
+
+
+# ── CVE extraction (standalone, not inside a known finding) ───────────────
+
+def _extract_cve_lines(text: str, seen_titles: set) -> list:
+    """Extract CVE IDs from lines — skip ones already captured as findings."""
+    vulns = []
+    seen_cves: set = set()
+    for line in text.splitlines():
+        for cve_id in _CVE_RE.findall(line):
+            cve_upper = cve_id.upper()
+            if cve_upper in seen_cves or cve_upper in seen_titles:
+                continue
+            seen_cves.add(cve_upper)
+            seen_titles.add(cve_upper)
+            # Build a clean description: just the raw line, stripped of any
+            # "n CVE-… | CVSS: … (POTENTIAL…)" noise injected by the NVD enricher
+            clean_line = re.sub(
+                r"\bn\s+CVE-\d{4}-\d{4,7}\s*\|[^\n]*", "", line
+            ).strip()
+            vulns.append({
+                "cve_id":      cve_upper,
+                "title":       cve_upper,
+                "severity":    _sev_from_context(line),
+                "description": clean_line[:400] if clean_line else None,
+                "source":      "ai_analysis",
+            })
+    return vulns
+
+
+# ── Public extraction entry point ─────────────────────────────────────────
+
+def _extract_vulns_from_report(report_md: str, target: str) -> list:
+    """
+    Extract vulnerabilities from the AI final report markdown.
+
+    Strategy (in priority order):
+      1. ``### [SEVERITY] - Title`` headings  (AutoRecon AI primary format)
+      2. ``Finding N: Title`` / ``Vulnerability N: Title`` sections
+      3. Standalone CVE IDs not already captured
+    Tools sections are skipped entirely so tool names never appear as vulns.
+    Noise headings (ports, section titles) are filtered out.
+    Duplicate titles (case-insensitive, normalised) are deduplicated.
+    """
+    if not report_md:
+        return []
+
+    tools_spans = _tools_section_spans(report_md)
+
+    # Pass 1 — [SEVERITY] headings
+    sev_findings = _extract_severity_headed_findings(report_md, tools_spans)
+
+    # Pass 2 — Finding N sections (complementary, not overlapping)
+    seen_keys = {_normalise_key(f["title"]) for f in sev_findings}
+    n_findings = [
+        f for f in _extract_finding_n_sections(report_md, tools_spans)
+        if _normalise_key(f["title"]) not in seen_keys
+    ]
+    for f in n_findings:
+        seen_keys.add(_normalise_key(f["title"]))
+
+    all_findings = sev_findings + n_findings
+
+    # Pass 3 — Standalone CVEs
+    seen_titles = {_normalise_key(f["title"]) for f in all_findings}
+    seen_titles.update({_normalise_key(f["cve_id"]) for f in all_findings if f.get("cve_id")})
+    cve_vulns = _extract_cve_lines(report_md, seen_titles)
+
+    return all_findings + cve_vulns
+
+
+# ── Port / hostname / OS extraction (unchanged from original) ─────────────
 
 def _parse_port_service(desc: str, port: int) -> tuple:
-    """Parse a service-description string into (service, product, version)."""
     raw = re.sub(r"`", "", desc).strip()
-
-    # tcpwrapped — try inline hint "/ likely X"
     if re.match(r"tcpwrapped", raw, re.IGNORECASE):
         likely = re.search(r"/?(?:likely|probably)\s+(.+)", raw, re.IGNORECASE)
         if likely:
@@ -144,22 +389,16 @@ def _parse_port_service(desc: str, port: int) -> tuple:
             kw = hint.lower().split()[0]
             return (_PRODUCT_SVC_MAP.get(kw, kw), hint[:100], None)
         return (_PORT_SVC_MAP.get(port), None, None)
-
-    # Service name from product keyword
     service = _PORT_SVC_MAP.get(port)
     for kw, svc in _PRODUCT_SVC_MAP.items():
         if kw in raw.lower():
             service = svc
             break
-
-    # Version: first standalone version token (e.g. "10.0p2", "10.0p2 Debian 7")
     ver_m = re.search(
         r"\b(\d+\.\d+(?:\.\d+)?(?:[a-z]\d+)?(?:p\d+)?(?:\s+(?:Debian|Ubuntu|RHEL|CentOS)\s+\d+)?)\b",
         raw, re.IGNORECASE,
     )
     version = ver_m.group(1).strip() if ver_m else None
-
-    # Product: full description, cleaned of trailing noise and version suffix
     product = re.sub(
         r"\s*(?:application|interface|service|server|agent|daemon|running)\s*$",
         "", raw, flags=re.IGNORECASE,
@@ -167,12 +406,10 @@ def _parse_port_service(desc: str, port: int) -> tuple:
     if version and product.endswith(version):
         product = product[: -len(version)].strip()
     product = product[:120] or None
-
     return (service, product, version)
 
 
 def _extract_ports_from_report(text: str) -> list:
-    """Extract open-port records from a markdown or plain-text security report."""
     ports: list = []
     seen: set = set()
     for m in _PORT_LINE_RE.finditer(text):
@@ -185,20 +422,14 @@ def _extract_ports_from_report(text: str) -> list:
         seen.add(key)
         service, product, version = _parse_port_service(desc, port_num)
         ports.append({
-            "port":       port_num,
-            "protocol":   proto,
-            "service":    service,
-            "product":    product,
-            "version":    version,
-            "extra_info": None,
-            "state":      "open",
-            "cpe":        None,
+            "port": port_num, "protocol": proto, "service": service,
+            "product": product, "version": version,
+            "extra_info": None, "state": "open", "cpe": None,
         })
     return ports
 
 
 def _extract_hostname_from_report(text: str) -> "str | None":
-    """Extract resolved hostname from the report text."""
     m = _RESOLVED_NAME_RE.search(text)
     if m:
         return m.group(1).strip()
@@ -211,8 +442,6 @@ def _extract_hostname_from_report(text: str) -> "str | None":
 
 
 def _extract_os_from_report(text: str) -> "str | None":
-    """Extract OS information from the report text."""
-    # "Host is Linux-based" / "host appears to be a Linux-based system"
     m = re.search(
         r"host\s+(?:is|appears?\s+to\s+be)\s+(?:a\s+)?([A-Za-z][A-Za-z0-9\s\-\.]{2,50}?)"
         r"(?:\s+based|\s+system|\s*[.\n])",
@@ -222,11 +451,9 @@ def _extract_os_from_report(text: str) -> "str | None":
         val = m.group(1).strip()
         if 3 < len(val) < 80:
             return val
-    # "Operating System: ..." / "OS: ..."
     m = re.search(r"\b(?:operating\s+system|os)\s*:+\s*([^\n]{3,80})", text, re.IGNORECASE)
     if m:
         return m.group(1).strip()
-    # Standalone OS name in a bullet
     m = re.search(
         r"-\s+(?:Host\s+is\s+)?((?:Linux|Debian|Ubuntu|Windows\s+Server|CentOS|RHEL|FreeBSD)[^\n]{0,50})",
         text, re.IGNORECASE,
@@ -236,96 +463,41 @@ def _extract_os_from_report(text: str) -> "str | None":
     return None
 
 
-def _extract_structured_findings(text: str) -> list:
-    """
-    Parse 'Finding N: Title' sections from a security report (markdown or plain text).
-    Each section becomes a rich vulnerability dict with severity, evidence, and recommendations.
-    """
-    findings: list = []
-    seen_keys: set = set()
-    matches = list(_FINDING_SECTION_RE.finditer(text))
-    if not matches:
-        return findings
-    for i, m in enumerate(matches):
-        title = m.group(1).strip()
-        section_start = m.end()
-        section_end   = matches[i + 1].start() if i + 1 < len(matches) else len(text)
-        section       = text[section_start:section_end]
-
-        sev_m    = _SEV_IN_SECTION_RE.search(section)
-        severity = _SEVERITY_MAP.get((sev_m.group(1) if sev_m else "").lower(), "UNKNOWN")
-
-        svc_m        = _SVC_IN_SECTION_RE.search(section)
-        service_desc = svc_m.group(1).strip() if svc_m else ""
-
-        evi_m   = _EVI_IN_SECTION_RE.search(section)
-        evidence = evi_m.group(1).strip()[:800] if evi_m else ""
-
-        interp_m      = _INTERP_IN_SECTION_RE.search(section)
-        interpretation = interp_m.group(1).strip()[:800] if interp_m else ""
-
-        rec_m           = _REC_IN_SECTION_RE.search(section)
-        recommendations = rec_m.group(1).strip()[:800] if rec_m else ""
-
-        desc_parts = []
-        if service_desc:
-            desc_parts.append(f"Service: {service_desc}")
-        if interpretation:
-            desc_parts.append(interpretation)
-        elif evidence:
-            desc_parts.append(evidence[:400])
-        description = "\n\n".join(desc_parts)[:800]
-
-        key = re.sub(r"\W+", "", title.lower())[:80]
-        if key in seen_keys:
-            continue
-        seen_keys.add(key)
-
-        findings.append({
-            "cve_id":         None,
-            "title":          title[:200],
-            "severity":       severity,
-            "description":    description or None,
-            "evidence":       evidence[:600] if evidence else None,
-            "recommendation": recommendations[:600] if recommendations else None,
-            "source":         "ai_analysis",
-        })
-    return findings
-
-
 def _extract_suggested_tools_from_report(text: str) -> list:
-    """Extract suggested tool list from the 'Additional Tools Not Installed' section."""
-    section_m = _TOOLS_SECTION_RE.search(text)
-    if not section_m:
+    """Extract suggested-tools list from the report's tool section."""
+    spans = _tools_section_spans(text)
+    if not spans:
         return []
-    section = section_m.group(1)
     tools: list = []
     seen: set   = set()
-    # Each tool appears as a name line followed by a description line (numbered list)
-    tool_block_re = re.compile(
-        r"(?:^\d+\.\s+|\n\d+\.\s+|\n-\s+|\n\*\s+)?\*{0,2}([a-zA-Z0-9_\-]{2,30})\*{0,2}\s*\n+\s*([^\n]{10,200})",
-        re.MULTILINE,
-    )
-    for tm in tool_block_re.finditer(section):
-        name   = tm.group(1).strip()
-        reason = tm.group(2).strip()
-        if name.lower() in ("useful", "provides", "helpful", "valuable", "this", "the", "and"):
-            continue
-        if name.lower() not in seen:
+    for start, end in spans:
+        section = text[start:end]
+        # Numbered items: "### 1. `toolname`\nReason: ..." or "1. **toolname** — reason"
+        for m in re.finditer(
+            r"(?:^#{1,4}\s+\d+\.\s+`?(\S+?)`?\s*\n([\s\S]+?)(?=^#{1,4}\s+\d+\.|\Z))"
+            r"|(?:^\d+\.\s+\*{0,2}`?([a-zA-Z0-9_\-]+)`?\*{0,2}[^\n]*\n\s*([^\n]{10,200}))",
+            section, re.MULTILINE,
+        ):
+            name   = (m.group(1) or m.group(3) or "").strip().strip("`")
+            reason = (m.group(2) or m.group(4) or "").strip().split("\n")[0][:200]
+            if not name or name.lower() in seen:
+                continue
             seen.add(name.lower())
             tools.append({"name": name, "reason": reason})
     if not tools:
-        # Fallback: bold/code tool names
-        for name_m in re.finditer(r"(?:\*\*|``)([a-zA-Z0-9_\-]{2,30})(?:\*\*|``)", section):
-            name = name_m.group(1)
-            if name.lower() not in seen:
-                seen.add(name.lower())
-                tools.append({"name": name, "reason": ""})
+        # Fallback: backtick-quoted names inside tool sections
+        for start, end in spans:
+            for m in re.finditer(r"`([a-zA-Z0-9_\-]{2,30})`", text[start:end]):
+                name = m.group(1)
+                if name.lower() not in seen:
+                    seen.add(name.lower())
+                    tools.append({"name": name, "reason": ""})
     return tools
 
 
+# ── Conversation helpers ───────────────────────────────────────────────────
+
 def _extract_suggestions_from_turns(turns: list) -> list:
-    """Collect deduplicated suggested_tools from all conversation turns."""
     seen: set = set()
     out = []
     for turn in turns:
@@ -338,14 +510,11 @@ def _extract_suggestions_from_turns(turns: list) -> list:
 
 
 def _extract_final_report(turns: list) -> str:
-    """Return the final_report string from the last complete turn."""
     for turn in reversed(turns):
         if turn.get("status") == "complete" and turn.get("final_report"):
             return turn["final_report"]
-        # Fallback: last turn with any analysis
         if turn.get("final_report"):
             return turn["final_report"]
-    # If no explicit final_report, return the last analysis block
     for turn in reversed(turns):
         if turn.get("analysis"):
             return turn["analysis"]
@@ -353,13 +522,11 @@ def _extract_final_report(turns: list) -> str:
 
 
 def _extract_target_from_turns(turns: list) -> str:
-    """Try to guess the scan target from the first user message."""
     for turn in turns:
         analysis = turn.get("analysis") or turn.get("command_explanation") or ""
         m = re.search(r"(?:target|host|ip)[:\s]+(\d{1,3}(?:\.\d{1,3}){3}(?:/\d+)?)", analysis, re.IGNORECASE)
         if m:
             return m.group(1).strip()
-        # Also check in command
         cmd = turn.get("command") or ""
         m = re.search(r"(\d{1,3}(?:\.\d{1,3}){3}(?:/\d+)?)", cmd)
         if m:
@@ -367,85 +534,9 @@ def _extract_target_from_turns(turns: list) -> str:
     return ""
 
 
-def _severity_from_context(text: str) -> str:
-    """Guess severity from surrounding text."""
-    ltext = text.lower()
-    for kw, sev in _SEVERITY_MAP.items():
-        if kw in ltext:
-            return sev
-    return "UNKNOWN"
-
-
-def _extract_vulns_from_report(report_md: str, target: str) -> list:
-    """
-    Build a rich list of vulnerability dicts from the AI's markdown report.
-
-    Priority:
-      1. Structured 'Finding N:' sections (title + severity + evidence + recommendations)
-      2. Remaining CVE IDs not already inside a captured finding
-      3. Fallback bold/heading patterns when no structured findings exist
-    """
-    if not report_md:
-        return []
-
-    vulns: list      = []
-    seen_titles: set = set()
-
-    # 1. Structured findings (primary extraction path)
-    structured = _extract_structured_findings(report_md)
-    for f in structured:
-        vulns.append(f)
-        seen_titles.add(re.sub(r"\W+", "", (f["title"] or "").lower())[:80])
-
-    # 2. CVE IDs not already inside a structured finding
-    seen_cves: set = set()
-    for line in report_md.splitlines():
-        for cve_id in _CVE_RE.findall(line):
-            cve_upper = cve_id.upper()
-            if cve_upper in seen_cves:
-                continue
-            seen_cves.add(cve_upper)
-            sev = _severity_from_context(line)
-            vulns.append({
-                "cve_id":      cve_upper,
-                "title":       cve_upper,
-                "severity":    sev,
-                "description": line.strip()[:400],
-                "source":      "ai_analysis",
-            })
-
-    # 3. Fallback bold/heading findings (only when no structured sections found)
-    if not structured:
-        for pat in (_VULN_PATTERNS[1], _VULN_PATTERNS[2]):
-            for m in pat.finditer(report_md):
-                title = m.group(1).strip()
-                if _CVE_RE.search(title):
-                    continue
-                key = re.sub(r"\W+", "", title.lower())[:80]
-                if key in seen_titles:
-                    continue
-                seen_titles.add(key)
-                context = report_md[max(0, m.start() - 200): m.end() + 200]
-                sev = _severity_from_context(context)
-                vulns.append({
-                    "cve_id":      None,
-                    "title":       title[:200],
-                    "severity":    sev,
-                    "description": context.strip()[:400],
-                    "source":      "ai_analysis",
-                })
-
-    return vulns
-
+# ── Public parse functions (interface unchanged) ───────────────────────────
 
 def parse_autorecon_ai_conversation(conversation_path: str, target: str = "") -> dict:
-    """
-    Parse an ai_scan/conversation.json file.
-
-    :param conversation_path: absolute path to conversation.json
-    :param target: known scan target (IP/domain) — used to build the host record
-    :returns: {hosts, error, ai_scan_data}
-    """
     try:
         with open(conversation_path, "r", encoding="utf-8") as f:
             turns = json.load(f)
@@ -459,7 +550,6 @@ def parse_autorecon_ai_conversation(conversation_path: str, target: str = "") ->
     final_report    = _extract_final_report(turns)
     iterations      = len(turns)
 
-    # Try to infer target if not provided
     if not target:
         target = _extract_target_from_turns(turns)
 
@@ -471,51 +561,40 @@ def parse_autorecon_ai_conversation(conversation_path: str, target: str = "") ->
     hosts: list = []
     if target:
         hosts.append({
-            "ip":              target,
-            "hostname":        hostname,
-            "os_info":         os_info,
-            "vulnerabilities": vulns,
-            "ports":           ports,
-            "http_pages":      [],
-            "extra_data":      {},
+            "ip": target, "hostname": hostname, "os_info": os_info,
+            "vulnerabilities": vulns, "ports": ports,
+            "http_pages": [], "extra_data": {},
         })
 
-    ai_scan_data = {
-        "ai_report_md":    final_report,
-        "suggested_tools": suggested_tools,
-        "iterations":      iterations,
+    return {
+        "hosts": hosts,
+        "error": None,
+        "ai_scan_data": {
+            "ai_report_md":    final_report,
+            "suggested_tools": suggested_tools,
+            "iterations":      iterations,
+        },
     }
-    return {"hosts": hosts, "error": None, "ai_scan_data": ai_scan_data}
 
 
 def parse_autorecon_ai_directory(ai_dir: str, target: str = "") -> dict:
-    """
-    Parse a full ai_scan/ directory.
-
-    :param ai_dir: path to the ai_scan/ directory
-    :param target: known scan target
-    :returns: {hosts, error, ai_scan_data}
-    """
     conv_path   = os.path.join(ai_dir, "conversation.json")
     report_path = os.path.join(ai_dir, "ai_report.md")
     tools_path  = os.path.join(ai_dir, "suggested_tools.json")
 
     result: dict = {"hosts": [], "error": None, "ai_scan_data": {}}
 
-    # --- conversation.json ---
     if os.path.isfile(conv_path):
         result = parse_autorecon_ai_conversation(conv_path, target)
     else:
         result["ai_scan_data"] = {}
 
-    # --- ai_report.md (authoritative report — extract all rich data) ---
     if os.path.isfile(report_path):
         try:
             with open(report_path, "r", encoding="utf-8") as f:
                 md = f.read()
             result["ai_scan_data"]["ai_report_md"] = md
 
-            # If target still unknown, try to find it in the report
             if not target:
                 tm = re.search(
                     r"(?:Target|Host|IP)[:\s*`]+`?(\d{1,3}(?:\.\d{1,3}){3})`?",
@@ -535,41 +614,35 @@ def parse_autorecon_ai_directory(ai_dir: str, target: str = "") -> dict:
 
             if existing_host is None and target:
                 existing_host = {
-                    "ip":              target,
-                    "hostname":        report_hostname,
-                    "os_info":         report_os,
-                    "vulnerabilities": [],
-                    "ports":           [],
-                    "http_pages":      [],
-                    "extra_data":      {},
+                    "ip": target, "hostname": report_hostname, "os_info": report_os,
+                    "vulnerabilities": [], "ports": [], "http_pages": [], "extra_data": {},
                 }
                 result["hosts"].append(existing_host)
 
             if existing_host:
-                # Fill hostname / OS only when missing
                 if not existing_host.get("hostname") and report_hostname:
                     existing_host["hostname"] = report_hostname
                 if not existing_host.get("os_info") and report_os:
                     existing_host["os_info"] = report_os
-                # Merge ports (avoid duplicates)
-                existing_port_keys = {
-                    (p["port"], p["protocol"]) for p in existing_host.get("ports", [])
-                }
+                existing_port_keys = {(p["port"], p["protocol"]) for p in existing_host.get("ports", [])}
                 for p in report_ports:
                     key = (p["port"], p["protocol"])
                     if key not in existing_port_keys:
                         existing_host.setdefault("ports", []).append(p)
                         existing_port_keys.add(key)
-                # Merge vulnerabilities
-                seen_titles = {v["title"] for v in existing_host.get("vulnerabilities", [])}
-                for v in report_vulns:
-                    if v["title"] not in seen_titles:
-                        existing_host["vulnerabilities"].append(v)
-                        seen_titles.add(v["title"])
+                # Replace conversation-derived vulns with richer report-derived ones
+                # when report_vulns is non-empty (ai_report.md is authoritative)
+                if report_vulns:
+                    existing_host["vulnerabilities"] = report_vulns
+                else:
+                    seen_titles = {v["title"] for v in existing_host.get("vulnerabilities", [])}
+                    for v in report_vulns:
+                        if v["title"] not in seen_titles:
+                            existing_host["vulnerabilities"].append(v)
+                            seen_titles.add(v["title"])
         except Exception:
             pass
 
-    # --- suggested_tools.json (or fall back to extracting from the report text) ---
     if os.path.isfile(tools_path):
         try:
             with open(tools_path, "r", encoding="utf-8") as f:
@@ -586,3 +659,4 @@ def parse_autorecon_ai_directory(ai_dir: str, target: str = "") -> dict:
                 result["ai_scan_data"]["suggested_tools"] = tools_from_report
 
     return result
+
