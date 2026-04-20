@@ -156,8 +156,12 @@ const progressBar  = document.getElementById('progressBar');
 const progressPct  = document.getElementById('progressPct');
 
 const ALLOWED = new Set(['xml', 'json', 'pdf', 'log', 'dat', 'txt', 'csv', 'png', 'jpg', 'jpeg']);
-const LYNIS_EXTS = new Set(['log', 'dat', 'txt', 'csv', 'png', 'jpg', 'jpeg']);
-let ipInputMap = new Map(); // filename → ip input element
+// Extensions that ALWAYS need a target IP (Lynis logs/reports, screenshots)
+const IP_REQUIRED_EXTS = new Set(['log', 'dat', 'png', 'jpg', 'jpeg']);
+// Extensions that MAY need a target IP (sqlmap/gobuster .txt/.csv) — optional, not blocking
+const IP_OPTIONAL_EXTS = new Set(['txt', 'csv']);
+let ipInputMap = new Map();      // filename → {input, required}
+let ipInputOptMap = new Map();  // filename → optional ip input (txt/csv)
 
 function ext(name) {
   return name.split('.').pop().toLowerCase();
@@ -181,6 +185,7 @@ function addFiles(newFiles) {
 function renderList() {
   fileList.innerHTML = '';
   ipInputMap.clear();
+  ipInputOptMap.clear();
   fileBar.classList.toggle('d-none', fileMap.size === 0);
   uploadBtn.disabled = fileMap.size === 0;
 
@@ -192,11 +197,13 @@ function renderList() {
 
   fileMap.forEach((f, name) => {
     totalBytes += f.size;
-    const needsIp = LYNIS_EXTS.has(ext(name));
+    const e = ext(name);
+    const needsIp   = IP_REQUIRED_EXTS.has(e);
+    const optIp     = IP_OPTIONAL_EXTS.has(e);
     const li = document.createElement('li');
     li.className = 'list-group-item py-2';
 
-    const icon = iconForExt(ext(name));
+    const icon = iconForExt(e);
     li.innerHTML = `
       <div class="d-flex justify-content-between align-items-center">
         <span class="small d-flex align-items-center gap-2">
@@ -209,10 +216,14 @@ function renderList() {
           <i class="bi bi-x-circle"></i>
         </button>
       </div>
-      ${needsIp ? `<div class="mt-2"><input type="text" class="form-control form-control-sm ip-input-field" placeholder="Target IP / Hostname *"><div class="invalid-feedback">Target IP required for this file.</div></div>` : ''}`;
+      ${needsIp ? `<div class="mt-2"><input type="text" class="form-control form-control-sm ip-input-field ip-required" placeholder="Target IP / Hostname *"><div class="invalid-feedback">Target IP required for this file.</div></div>` : ''}
+      ${optIp ? `<div class="mt-2"><input type="text" class="form-control form-control-sm ip-input-field ip-optional" placeholder="Target IP / Hostname (optional — for SQLmap / gobuster files)"></div>` : ''}`;
 
     if (needsIp) {
-      ipInputMap.set(name, li.querySelector('.ip-input-field'));
+      ipInputMap.set(name, li.querySelector('.ip-required'));
+    }
+    if (optIp) {
+      ipInputOptMap.set(name, li.querySelector('.ip-optional'));
     }
     ul.appendChild(li);
   });
@@ -333,8 +344,10 @@ uploadForm.addEventListener('submit', function(e) {
   if (enrichEl && enrichEl.checked) fd.append('enrich_nvd', '1');
   let fileIdx = 0;
   fileMap.forEach(function(f, name) {
-    const ipInput = ipInputMap.get(name);
-    if (ipInput) fd.append(`target_ip_${fileIdx}`, ipInput.value.trim());
+    const ipRequired = ipInputMap.get(name);
+    const ipOptional = ipInputOptMap.get(name);
+    const ipVal = (ipRequired && ipRequired.value.trim()) || (ipOptional && ipOptional.value.trim()) || '';
+    if (ipVal) fd.append(`target_ip_${fileIdx}`, ipVal);
     fd.append('files', f, f.name);
     fileIdx++;
   });
