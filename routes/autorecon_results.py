@@ -177,7 +177,9 @@ def api_import():
     paths = data.get("paths", [])
     audit_id = data.get("audit_id")
     enrich_nvd = bool(data.get("enrich_nvd", False))
-    target_ip = str(data.get("target_ip") or "").strip()
+    # Per-file IPs dict {rel_path: ip} — preferred; single target_ip kept for backwards compat
+    target_ips = data.get("target_ips") or {}
+    target_ip_global = str(data.get("target_ip") or "").strip()
 
     if not paths:
         return jsonify({"error": "No files selected"}), 400
@@ -221,6 +223,9 @@ def api_import():
 
         file_size = os.path.getsize(save_path)
         file_type = detect_file_type(save_path, original_name)
+
+        # Resolve IP: per-file dict > global fallback
+        target_ip = str(target_ips.get(rel_path) or target_ip_global or "").strip()
 
         if file_type in _NEEDS_TARGET_IP and not target_ip:
             if os.path.exists(save_path):

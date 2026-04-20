@@ -110,16 +110,7 @@
           </label>
         </div>
 
-        <!-- Target IP (required for sqlmap / dirbust / screenshot files) -->
-        <div class="mt-3" id="targetIpWrap" style="display:none">
-          <label class="form-label fw-semibold" for="modal-target-ip">
-            <i class="bi bi-hdd-network me-1 text-primary"></i>
-            Target IP / Hostname <span class="text-danger">*</span>
-          </label>
-          <p class="text-muted small mb-1">Required for SQLmap output, dir bruteforce, and screenshot files.</p>
-          <input type="text" class="form-control" id="modal-target-ip" placeholder="e.g. 192.168.1.50">
-          <div class="invalid-feedback" id="modal-target-ip-error">Please enter the Target IP / Hostname.</div>
-        </div>
+        <!-- Per-file Target IP inputs are injected inline in the file list -->
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
@@ -402,28 +393,34 @@
   /* ── modal population ── */
   const importModal = document.getElementById("importModal");
   if (importModal) {
+    const IP_REQ_EXTS = new Set(['png', 'jpg', 'jpeg']);
+    const IP_OPT_EXTS = new Set(['txt', 'csv']);
+
     importModal.addEventListener("show.bs.modal", () => {
       modalList.innerHTML = "";
       selectedPaths.forEach((meta, path) => {
         const li = document.createElement("li");
-        li.className = "list-group-item d-flex justify-content-between align-items-center py-1 px-2";
+        li.className = "list-group-item py-2 px-2";
         li.dataset.path = path;
+        const fileExt = (meta.ext || '').toLowerCase();
+        const isIpReq = IP_REQ_EXTS.has(fileExt);
+        const isIpOpt = IP_OPT_EXTS.has(fileExt);
         li.innerHTML = `
-          <span class="text-truncate me-2">
-            <i class="bi bi-file-earmark-text me-1 text-info"></i>${esc(meta.name)}
-            <span class="text-muted small ms-1">${esc(path)}</span>
-          </span>
-          <button type="button" class="btn btn-sm btn-outline-danger py-0 btn-remove-file" data-path="${esc(path)}">
-            <i class="bi bi-x"></i>
-          </button>`;
+          <div class="d-flex justify-content-between align-items-center">
+            <span class="text-truncate me-2">
+              <i class="bi bi-file-earmark-text me-1 text-info"></i>${esc(meta.name)}
+              <span class="text-muted small ms-1">${esc(path)}</span>
+            </span>
+            <button type="button" class="btn btn-sm btn-outline-danger py-0 btn-remove-file" data-path="${esc(path)}">
+              <i class="bi bi-x"></i>
+            </button>
+          </div>
+          ${isIpReq ? `<div class="mt-2"><input type="text" class="form-control form-control-sm file-ip-input ip-required" placeholder="Target IP / Hostname *" data-path="${esc(path)}"><div class="invalid-feedback">IP requis pour les screenshots.</div></div>` : ''}
+          ${isIpOpt ? `<div class="mt-2"><input type="text" class="form-control form-control-sm file-ip-input ip-optional" placeholder="Target IP / Hostname (optionnel — SQLmap / gobuster)" data-path="${esc(path)}"></div>` : ''}`;
         modalList.appendChild(li);
       });
       bindRemoveButtons();
-      // Show/hide the target IP field based on selected files
-      const IP_EXTS_MODAL = new Set(['txt', 'csv', 'png', 'jpg', 'jpeg']);
-      const needsIpOnOpen = [...selectedPaths.values()].some(m => IP_EXTS_MODAL.has((m.ext || '').toLowerCase()));
-      const tiWrap = document.getElementById('targetIpWrap');
-      if (tiWrap) tiWrap.style.display = needsIpOnOpen ? '' : 'none';    });
+    });
   }
 
   function bindRemoveButtons() {
@@ -455,21 +452,24 @@
 
       const paths = Array.from(selectedPaths.keys());
 
-      // Check if any selected file needs a target IP
-      const IP_EXTS = new Set(['txt', 'csv', 'png', 'jpg', 'jpeg']);
-      const needsIp = paths.some(p => {
-        const e = (p.split('.').pop() || '').toLowerCase();
-        return IP_EXTS.has(e);
+      // Collect per-file IPs from inline inputs
+      let ipValid = true;
+      const target_ips = {};
+      modalList.querySelectorAll('.file-ip-input.ip-required').forEach(inp => {
+        if (!inp.value.trim()) {
+          inp.classList.add('is-invalid');
+          if (ipValid) inp.focus();
+          ipValid = false;
+        } else {
+          inp.classList.remove('is-invalid');
+          target_ips[inp.dataset.path] = inp.value.trim();
+        }
       });
-      const targetIpWrap = document.getElementById('targetIpWrap');
-      if (targetIpWrap) targetIpWrap.style.display = needsIp ? '' : 'none';
-      const targetIpEl = document.getElementById('modal-target-ip');
-      const targetIp = (targetIpEl?.value || '').trim();
-      if (needsIp && !targetIp) {
-        if (targetIpEl) { targetIpEl.classList.add('is-invalid'); targetIpEl.focus(); }
-        return;
-      }
-      if (targetIpEl) targetIpEl.classList.remove('is-invalid');
+      if (!ipValid) return;
+      modalList.querySelectorAll('.file-ip-input.ip-optional').forEach(inp => {
+        inp.classList.remove('is-invalid');
+        if (inp.value.trim()) target_ips[inp.dataset.path] = inp.value.trim();
+      });
 
       btnConfirm.disabled = true;
       btnConfirm.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Importing…';
@@ -482,7 +482,7 @@
           "Content-Type": "application/json",
           "X-CSRFToken": csrfToken,
         },
-        body: JSON.stringify({paths, audit_id: auditId, enrich_nvd: enrichNvd.checked, target_ip: targetIp || undefined}),
+        body: JSON.stringify({paths, audit_id: auditId, enrich_nvd: enrichNvd.checked, target_ips}),
       })
         .then(r => r.json())
         .then(data => {
