@@ -365,6 +365,57 @@
 </div>
 {% endif %}
 
+{# ── AI Security Report ───────────────────────────────────────────────────── #}
+{% if ai_report_md %}
+<div class="card mb-4" id="ai-report-card">
+  <div class="card-header d-flex align-items-center justify-content-between">
+    <span class="fw-semibold">
+      <i class="bi bi-cpu me-2 text-info"></i>AI Security Report
+      {% if ai_report_label %}<span class="badge bg-secondary fw-normal ms-2 small">{{ ai_report_label }}</span>{% endif %}
+    </span>
+    <div class="d-flex gap-2 align-items-center">
+      <a href="{{ url_for('autorecon_versioning.host_versioning', host_id=host.id) }}" class="btn btn-sm btn-outline-info py-0 small">
+        <i class="bi bi-clock-history me-1"></i>Versioning
+      </a>
+      <button class="btn btn-sm btn-outline-secondary py-0" data-bs-toggle="collapse" data-bs-target="#aiReportCollapse" aria-expanded="true">
+        <i class="bi bi-chevron-up" id="aiReportChevron"></i>
+      </button>
+    </div>
+  </div>
+  <div class="collapse show" id="aiReportCollapse">
+    <div class="card-body p-0">
+      <div id="ai-report-rendered" class="p-4 ai-report-body"></div>
+      <noscript>
+        <pre class="p-4 m-0 small font-monospace" style="white-space:pre-wrap;background:transparent">{{ ai_report_md }}</pre>
+      </noscript>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+{# ── AI Suggested Tools ───────────────────────────────────────────────────── #}
+{% if ai_suggested_tools %}
+<div class="card mb-4">
+  <div class="card-header fw-semibold">
+    <i class="bi bi-tools me-2 text-warning"></i>AI Suggested Tools
+    <span class="badge bg-secondary ms-2">{{ ai_suggested_tools|length }}</span>
+  </div>
+  <div class="card-body p-0">
+    <ul class="list-group list-group-flush">
+      {% for tool in ai_suggested_tools %}
+      <li class="list-group-item bg-transparent d-flex gap-2 align-items-start">
+        <span class="badge bg-warning text-dark mt-1 flex-shrink-0">{{ loop.index }}</span>
+        <div>
+          <span class="fw-semibold text-warning">{{ tool.name }}</span>
+          {% if tool.reason %}<span class="text-muted ms-2 small">{{ tool.reason }}</span>{% endif %}
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+</div>
+{% endif %}
+
 <!-- Vulnerabilities -->
 <div class="card">
   <div class="card-header fw-semibold"><i class="bi bi-shield-exclamation me-2"></i>Vulnerabilities ({{ vulns|length }})</div>
@@ -558,6 +609,43 @@
 {% endblock %}
 
 {% block scripts %}
+{% if ai_report_md %}
+<script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
+<script>
+(function(){
+  const raw = {{ ai_report_md | tojson }};
+  const el  = document.getElementById('ai-report-rendered');
+  if(el && typeof marked !== 'undefined'){
+    el.innerHTML = marked.parse(raw);
+  } else if(el) {
+    el.innerHTML = '<pre class="text-wrap small font-monospace" style="white-space:pre-wrap">' +
+      raw.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</pre>';
+  }
+  // Chevron toggle
+  document.getElementById('aiReportCollapse').addEventListener('hide.bs.collapse', function(){
+    const ch = document.getElementById('aiReportChevron');
+    if(ch){ ch.className = 'bi bi-chevron-down'; }
+  });
+  document.getElementById('aiReportCollapse').addEventListener('show.bs.collapse', function(){
+    const ch = document.getElementById('aiReportChevron');
+    if(ch){ ch.className = 'bi bi-chevron-up'; }
+  });
+})();
+</script>
+<style>
+.ai-report-body h1,.ai-report-body h2{font-size:1.1rem;font-weight:700;border-bottom:1px solid #444;padding-bottom:.25rem;margin-top:1rem}
+.ai-report-body h3{font-size:1rem;font-weight:600;margin-top:.75rem}
+.ai-report-body h4,.ai-report-body h5{font-size:.95rem;font-weight:600}
+.ai-report-body code{background:#1e1e2e;padding:.1em .3em;border-radius:.25rem;font-size:.85em}
+.ai-report-body pre{background:#1e1e2e;padding:.75rem 1rem;border-radius:.4rem;overflow-x:auto}
+.ai-report-body pre code{background:none;padding:0}
+.ai-report-body table{width:100%;border-collapse:collapse;font-size:.85rem;margin:.75rem 0}
+.ai-report-body th,.ai-report-body td{border:1px solid #444;padding:.35rem .6rem}
+.ai-report-body th{background:#1e1e2e;font-weight:600}
+.ai-report-body ul,.ai-report-body ol{padding-left:1.5rem}
+.ai-report-body blockquote{border-left:3px solid #0dcaf0;padding-left:.75rem;color:#adb5bd}
+</style>
+{% endif %}
 {% if vulns %}
 <script>
 const hostSevData = {

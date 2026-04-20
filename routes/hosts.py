@@ -2,7 +2,7 @@ import json
 import re
 from flask import Blueprint, render_template, request, jsonify
 from flask_login import login_required
-from models import Host, Port, Vulnerability, HttpPage, CVE_STATUS_VALUES
+from models import Host, Port, Vulnerability, HttpPage, CVE_STATUS_VALUES, AutoReconSnapshot
 from extensions import db
 
 hosts_bp = Blueprint("hosts", __name__, url_prefix="/hosts")
@@ -56,6 +56,18 @@ def detail(host_id):
         except Exception:
             extra_data = {}
 
+    # Latest AI snapshot (for AI report card on host page)
+    latest_ai_snap = (
+        AutoReconSnapshot.query
+        .filter_by(host_id=host_id)
+        .filter(AutoReconSnapshot.ai_report_md.isnot(None))
+        .order_by(AutoReconSnapshot.version_number.desc())
+        .first()
+    )
+    ai_report_md        = latest_ai_snap.ai_report_md        if latest_ai_snap else None
+    ai_suggested_tools  = latest_ai_snap.suggested_tools_list() if latest_ai_snap else []
+    ai_report_label     = latest_ai_snap.label                if latest_ai_snap else None
+
     return render_template(
         "hosts/detail.html",
         host=host,
@@ -64,6 +76,9 @@ def detail(host_id):
         pages=pages,
         cve_status_values=CVE_STATUS_VALUES,
         extra_data=extra_data,
+        ai_report_md=ai_report_md,
+        ai_suggested_tools=ai_suggested_tools,
+        ai_report_label=ai_report_label,
     )
 
 
