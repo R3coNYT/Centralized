@@ -17,11 +17,12 @@ from parsers import (
     FILE_TYPE_DIRBUST_JSON, FILE_TYPE_DIRBUST_TXT,
     FILE_TYPE_SCREENSHOT,
     FILE_TYPE_AUTORECON_JSON, FILE_TYPE_AUTORECON_ZIP, FILE_TYPE_AUTORECON_AI_JSON,
+    FILE_TYPE_AUTORECON_AI_MD, FILE_TYPE_AUTORECON_AI_STEP, FILE_TYPE_AUTORECON_AI_TOOLS,
 )
 
 uploads_bp = Blueprint("uploads", __name__, url_prefix="/uploads")
 
-ALLOWED_EXTENSIONS = {"xml", "json", "pdf", "log", "dat", "txt", "csv", "png", "jpg", "jpeg", "zip"}
+ALLOWED_EXTENSIONS = {"xml", "json", "pdf", "log", "dat", "txt", "csv", "png", "jpg", "jpeg", "zip", "md"}
 
 # File types that require the user to supply a target IP
 _NEEDS_TARGET_IP = {
@@ -32,7 +33,8 @@ _NEEDS_TARGET_IP = {
 }
 
 # AutoRecon file types that trigger snapshot versioning
-_AUTORECON_TYPES = {FILE_TYPE_AUTORECON_JSON, FILE_TYPE_AUTORECON_ZIP, FILE_TYPE_AUTORECON_AI_JSON}
+_AUTORECON_TYPES = {FILE_TYPE_AUTORECON_JSON, FILE_TYPE_AUTORECON_ZIP, FILE_TYPE_AUTORECON_AI_JSON,
+                    FILE_TYPE_AUTORECON_AI_MD, FILE_TYPE_AUTORECON_AI_TOOLS}
 
 
 def _allowed_file(filename: str) -> bool:

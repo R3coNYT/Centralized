@@ -18,17 +18,19 @@ from parsers import (
     FILE_TYPE_DIRBUST_JSON, FILE_TYPE_DIRBUST_TXT,
     FILE_TYPE_SCREENSHOT,
     FILE_TYPE_AUTORECON_JSON, FILE_TYPE_AUTORECON_ZIP, FILE_TYPE_AUTORECON_AI_JSON,
+    FILE_TYPE_AUTORECON_AI_MD, FILE_TYPE_AUTORECON_AI_STEP, FILE_TYPE_AUTORECON_AI_TOOLS,
 )
 
 autorecon_results_bp = Blueprint("autorecon_results", __name__, url_prefix="/autorecon-results")
 
-ALLOWED_EXTENSIONS = {"xml", "json", "pdf", "txt", "csv", "png", "jpg", "jpeg", "zip"}
+ALLOWED_EXTENSIONS = {"xml", "json", "pdf", "txt", "csv", "png", "jpg", "jpeg", "zip", "md"}
 
 # Types that require a target IP
 _NEEDS_TARGET_IP = {FILE_TYPE_SQLMAP_TXT, FILE_TYPE_SQLMAP_CSV, FILE_TYPE_DIRBUST_JSON, FILE_TYPE_DIRBUST_TXT, FILE_TYPE_SCREENSHOT}
 
 # AutoRecon types that trigger versioning snapshots
-_AUTORECON_TYPES = {FILE_TYPE_AUTORECON_JSON, FILE_TYPE_AUTORECON_ZIP, FILE_TYPE_AUTORECON_AI_JSON}
+_AUTORECON_TYPES = {FILE_TYPE_AUTORECON_JSON, FILE_TYPE_AUTORECON_ZIP, FILE_TYPE_AUTORECON_AI_JSON,
+                    FILE_TYPE_AUTORECON_AI_MD, FILE_TYPE_AUTORECON_AI_TOOLS}
 
 
 # ---------------------------------------------------------------------------

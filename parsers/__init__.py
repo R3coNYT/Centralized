@@ -12,6 +12,9 @@ FILE_TYPE_NMAP_JSON = "nmap_json"
 FILE_TYPE_AUTORECON_JSON = "autorecon_json"
 FILE_TYPE_AUTORECON_ZIP = "autorecon_zip"   # AutoRecon backup ZIP (normal or AI scan)
 FILE_TYPE_AUTORECON_AI_JSON = "autorecon_ai_json"  # Standalone AI conversation.json
+FILE_TYPE_AUTORECON_AI_MD    = "autorecon_ai_md"    # Standalone ai_report.md
+FILE_TYPE_AUTORECON_AI_STEP  = "autorecon_ai_step"  # step_NNN.txt raw tool output
+FILE_TYPE_AUTORECON_AI_TOOLS = "autorecon_ai_tools" # suggested_tools.json
 FILE_TYPE_HTTPX_JSON = "httpx_json"
 FILE_TYPE_NUCLEI_JSON = "nuclei_json"
 FILE_TYPE_NIKTO_XML = "nikto_xml"
@@ -96,6 +99,9 @@ def detect_file_type(file_path: str, original_filename: str) -> str:
 
     if ext == ".txt":
         fname_lower = original_filename.lower()
+        # AI scan step output: step_NNN.txt
+        if re.match(r'^step_\d+\.txt$', fname_lower):
+            return FILE_TYPE_AUTORECON_AI_STEP
         if "sqlmap_output" in fname_lower or "sqlmap" in fname_lower:
             return FILE_TYPE_SQLMAP_TXT
         # Gobuster plain-text output: check for lines matching gobuster format
@@ -134,6 +140,10 @@ def detect_file_type(file_path: str, original_filename: str) -> str:
         except Exception:
             pass
         return FILE_TYPE_UNKNOWN
+
+    if ext == ".md":
+        # AI scan Markdown report
+        return FILE_TYPE_AUTORECON_AI_MD
 
     if ext == ".json":
         try:
@@ -174,6 +184,16 @@ def detect_file_type(file_path: str, original_filename: str) -> str:
             from parsers.dirbust_parser import is_ffuf_json, is_gobuster_json
             if is_ffuf_json(data) or is_gobuster_json(data):
                 return FILE_TYPE_DIRBUST_JSON
+
+            # AI suggested_tools.json: list of {name/tool, reason/description} dicts
+            fname_lower = original_filename.lower()
+            if fname_lower == "suggested_tools.json" or (
+                isinstance(data, list) and len(data) > 0
+                and isinstance(data[0], dict)
+                and ("name" in data[0] or "tool" in data[0])
+                and ("reason" in data[0] or "description" in data[0])
+            ):
+                return FILE_TYPE_AUTORECON_AI_TOOLS
 
         except (json.JSONDecodeError, UnicodeDecodeError):
             pass
@@ -266,6 +286,27 @@ def parse_file(file_path: str, file_type: str, audit_id: int, db_session, extra:
         except Exception as exc:
             return {"hosts": [], "error": str(exc), "ai_scan_data": {}}
 
+    # Standalone ai_report.md
+    if file_type == FILE_TYPE_AUTORECON_AI_MD:
+        from parsers.ai_scan_parser import parse_autorecon_ai_report_md
+        target = (extra or {}).get("target", "").strip() or (extra or {}).get("target_ip", "").strip()
+        try:
+            return parse_autorecon_ai_report_md(file_path, target)
+        except Exception as exc:
+            return {"hosts": [], "error": str(exc), "ai_scan_data": {}}
+
+    # Standalone suggested_tools.json
+    if file_type == FILE_TYPE_AUTORECON_AI_TOOLS:
+        from parsers.ai_scan_parser import parse_autorecon_ai_tools
+        try:
+            return parse_autorecon_ai_tools(file_path)
+        except Exception as exc:
+            return {"hosts": [], "error": str(exc), "ai_scan_data": {}}
+
+    # AI scan step_NNN.txt — raw tool output, already captured in conversation.json
+    if file_type == FILE_TYPE_AUTORECON_AI_STEP:
+        return {"hosts": [], "error": None, "ai_scan_data": {}}
+
     dispatch = {
         FILE_TYPE_NMAP_XML: parse_nmap_xml,
         FILE_TYPE_NMAP_JSON: parse_nmap_json,
@@ -287,6 +328,49 @@ def parse_file(file_path: str, file_type: str, audit_id: int, db_session, extra:
         return {"hosts": [], "error": str(exc)}
 
 
+def _zip_merge_host(merged_hosts: list, new_host: dict) -> None:
+    """
+    Merge *new_host* into *merged_hosts* by IP.
+
+    - If a host with the same IP already exists: add any new ports and
+      vulnerabilities (deduplication by port key and vuln title).
+    - Otherwise: append the new host as-is.
+    """
+    ip = new_host.get("ip", "")
+    existing = next((h for h in merged_hosts if h.get("ip") == ip), None)
+    if existing is None:
+        merged_hosts.append(new_host)
+        return
+
+    # Merge ports
+    seen_ports = {(p["port"], p.get("protocol", "tcp")) for p in existing.get("ports", [])}
+    for p in new_host.get("ports", []):
+        key = (p["port"], p.get("protocol", "tcp"))
+        if key not in seen_ports:
+            existing.setdefault("ports", []).append(p)
+            seen_ports.add(key)
+
+    # Merge vulnerabilities
+    seen_vulns = {v["title"] for v in existing.get("vulnerabilities", [])}
+    for v in new_host.get("vulnerabilities", []):
+        if v["title"] not in seen_vulns:
+            existing.setdefault("vulnerabilities", []).append(v)
+            seen_vulns.add(v["title"])
+
+    # Merge http_pages
+    seen_pages = {p.get("url") for p in existing.get("http_pages", []) if p.get("url")}
+    for p in new_host.get("http_pages", []):
+        url = p.get("url")
+        if url and url not in seen_pages:
+            existing.setdefault("http_pages", []).append(p)
+            seen_pages.add(url)
+
+    # Fill missing scalar fields (hostname, os_info, mac…) from new_host
+    for field in ("hostname", "os_info", "mac_address", "mac_vendor"):
+        if not existing.get(field) and new_host.get(field):
+            existing[field] = new_host[field]
+
+
 def _parse_autorecon_zip(zip_path: str, extra: dict) -> dict:
     """
     Extract an AutoRecon backup ZIP to a temporary directory, run sub-parsers
@@ -298,6 +382,18 @@ def _parse_autorecon_zip(zip_path: str, extra: dict) -> dict:
         logs/recon.log        – scan log (ignored)
         report.json           – normal AutoRecon JSON report  [optional]
         report.pdf            – PDF report  [ignored]
+        nmap/
+            nmap_<IP>.xml     – per-host Nmap XML output
+            nmap_<IP>.json    – per-host Nmap simplified JSON
+        httpx/
+            httpx_<IP>.json   – per-host HTTPX probe JSON
+        nuclei/
+            nuclei_<IP>.json  – per-host Nuclei JSON output  [optional]
+        nikto/
+            nikto_<IP>.xml    – per-host Nikto XML output    [optional]
+        sqlmap/
+            <url_slug>/
+                sqlmap_output.txt
         screenshots/          – screenshot directory  [ignored here]
         ai_scan/
             conversation.json – AI conversation log
@@ -341,6 +437,88 @@ def _parse_autorecon_zip(zip_path: str, extra: dict) -> dict:
                     merged_hosts.extend(r.get("hosts", []))
             except Exception as exc:
                 errors.append(f"report.json parse error: {exc}")
+
+        # ── Per-host Nmap XML files ───────────────────────────────────────
+        nmap_dir = os.path.join(tmp_dir, "nmap")
+        if os.path.isdir(nmap_dir):
+            from parsers.nmap_xml_parser import parse_nmap_xml as _parse_nxml
+            for fn in sorted(os.listdir(nmap_dir)):
+                if not fn.lower().endswith(".xml"):
+                    continue
+                fpath = os.path.join(nmap_dir, fn)
+                try:
+                    r = _parse_nxml(fpath)
+                    for host in r.get("hosts", []):
+                        _zip_merge_host(merged_hosts, host)
+                except Exception as exc:
+                    errors.append(f"nmap/{fn}: {exc}")
+
+        # ── Per-host HTTPX JSON files ─────────────────────────────────────
+        httpx_dir = os.path.join(tmp_dir, "httpx")
+        if os.path.isdir(httpx_dir):
+            from parsers.httpx_parser import parse_httpx_json as _parse_hx
+            for fn in sorted(os.listdir(httpx_dir)):
+                if not fn.lower().endswith(".json"):
+                    continue
+                fpath = os.path.join(httpx_dir, fn)
+                try:
+                    r = _parse_hx(fpath)
+                    for host in r.get("hosts", []):
+                        _zip_merge_host(merged_hosts, host)
+                except Exception:
+                    pass  # Empty or malformed httpx files are common — skip silently
+
+        # ── Per-host Nuclei JSON files ────────────────────────────────────
+        nuclei_dir = os.path.join(tmp_dir, "nuclei")
+        if os.path.isdir(nuclei_dir):
+            from parsers.nuclei_parser import parse_nuclei_json as _parse_nuc
+            for fn in sorted(os.listdir(nuclei_dir)):
+                if not fn.lower().endswith(".json"):
+                    continue
+                fpath = os.path.join(nuclei_dir, fn)
+                try:
+                    r = _parse_nuc(fpath)
+                    for host in r.get("hosts", []):
+                        _zip_merge_host(merged_hosts, host)
+                except Exception as exc:
+                    errors.append(f"nuclei/{fn}: {exc}")
+
+        # ── Per-host Nikto XML files ──────────────────────────────────────
+        nikto_dir = os.path.join(tmp_dir, "nikto")
+        if os.path.isdir(nikto_dir):
+            from parsers.nikto_parser import parse_nikto_xml as _parse_nkt
+            for fn in sorted(os.listdir(nikto_dir)):
+                if not fn.lower().endswith(".xml"):
+                    continue
+                fpath = os.path.join(nikto_dir, fn)
+                try:
+                    r = _parse_nkt(fpath)
+                    for host in r.get("hosts", []):
+                        _zip_merge_host(merged_hosts, host)
+                except Exception as exc:
+                    errors.append(f"nikto/{fn}: {exc}")
+
+        # ── SQLmap output files ───────────────────────────────────────────
+        sqlmap_dir = os.path.join(tmp_dir, "sqlmap")
+        if os.path.isdir(sqlmap_dir):
+            from parsers.sqlmap_parser import parse_sqlmap_txt as _parse_sq
+            for url_slug in sorted(os.listdir(sqlmap_dir)):
+                slug_dir = os.path.join(sqlmap_dir, url_slug)
+                if not os.path.isdir(slug_dir):
+                    continue
+                # Extract target IP from the URL slug (http___192_168_1_13_ → 192.168.1.13)
+                m = re.search(r"(\d{1,3}(?:[_\.]\d{1,3}){3})", url_slug)
+                slug_ip = m.group(0).replace("_", ".") if m else ""
+                for fn in sorted(os.listdir(slug_dir)):
+                    if not fn.lower().endswith(".txt"):
+                        continue
+                    fpath = os.path.join(slug_dir, fn)
+                    try:
+                        r = _parse_sq(fpath, slug_ip)
+                        for host in r.get("hosts", []):
+                            _zip_merge_host(merged_hosts, host)
+                    except Exception as exc:
+                        errors.append(f"sqlmap/{url_slug}/{fn}: {exc}")
 
         # ── AI scan directory ─────────────────────────────────────────────
         ai_dir = os.path.join(tmp_dir, "ai_scan")

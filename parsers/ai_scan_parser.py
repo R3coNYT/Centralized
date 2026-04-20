@@ -35,6 +35,13 @@ _CVE_RE       = re.compile(r"CVE-\d{4}-\d{4,7}", re.IGNORECASE)
 _SEVERITY_MAP = {
     "critical": "CRITICAL", "high": "HIGH", "medium": "MEDIUM",
     "low": "LOW", "info": "INFO", "informational": "INFO",
+    # French
+    "critique": "CRITICAL",
+    "élevée": "HIGH", "élevé": "HIGH", "elevee": "HIGH", "elevé": "HIGH",
+    "haute": "HIGH", "haut": "HIGH",
+    "moyenne à élevée": "HIGH", "haute à élevée": "HIGH",
+    "moyenne": "MEDIUM", "moyen": "MEDIUM",
+    "faible": "LOW", "basse": "LOW", "bas": "LOW",
 }
 
 # ── Port extraction ────────────────────────────────────────────────────────
@@ -80,7 +87,8 @@ _HOSTNAME_LABEL_RE = re.compile(
 # ── Tools section detection ────────────────────────────────────────────────
 # Any top-level heading that talks about missing / recommended / suggested tools
 _TOOLS_HEADING_RE = re.compile(
-    r"^#{1,4}\s+(?:Additional\s+)?Tools?\s+(?:Not\s+Installed|Recommended|Suggested|That\s+Would\s+Help)[^\n]*$",
+    r"^#{1,4}\s+(?:(?:Additional\s+)?Tools?\s+(?:Not\s+Installed|Recommended|Suggested|That\s+Would\s+Help)"
+    r"|Outils?\s+[^\n]*)[^\n]*$",
     re.IGNORECASE | re.MULTILINE,
 )
 
@@ -105,10 +113,30 @@ _BOLD_FINDING_RE = re.compile(
 )
 
 # Sub-field labels inside a finding block
-_SEV_LABEL_RE  = re.compile(r"\*{0,2}Severit(?:y|é)\*{0,2}\s*:+\s*\*{0,2}\s*(Critical|High|Medium|Low|Info(?:rmational)?)", re.IGNORECASE)
-_EVI_LABEL_RE  = re.compile(r"\*{0,2}(?:Evidence|Évidence)\*{0,2}\s*:+\s*\*{0,2}\s*([\s\S]+?)(?=\n\*{0,2}(?:Service|Severity|Interpretation|Recommendation|$))", re.IGNORECASE)
-_INTERP_RE     = re.compile(r"\*{0,2}Interpretation\*{0,2}\s*:+\s*\*{0,2}\s*([\s\S]+?)(?=\n\*{0,2}(?:Severity|Recommendation|Finding|$))", re.IGNORECASE)
+_SEV_LABEL_RE  = re.compile(
+    r"\*{0,2}(?:Severit(?:y|é)|Gravit[eé])\*{0,2}\s*:+\s*\*{0,2}\s*([^\n\*]{1,50})",
+    re.IGNORECASE,
+)
+_EVI_LABEL_RE  = re.compile(r"\*{0,2}(?:Evidence|Évidence)\*{0,2}\s*:+\s*\*{0,2}\s*([\s\S]+?)(?=\n\*{0,2}(?:Service|Severity|Gravit|Interpretation|Recommendation|$))", re.IGNORECASE)
+_INTERP_RE     = re.compile(r"\*{0,2}Interpretation\*{0,2}\s*:+\s*\*{0,2}\s*([\s\S]+?)(?=\n\*{0,2}(?:Severity|Gravit|Recommendation|Finding|$))", re.IGNORECASE)
 _REC_RE        = re.compile(r"\*{0,2}Recommendations?\*{0,2}\s*:+\s*\*{0,2}\s*([\s\S]+?)(?=\n#{1,4}\s|\Z)", re.IGNORECASE)
+
+# ── French-format: Constat N — Title ────────────────────────────────────────
+_CONSTAT_RE      = re.compile(
+    r"^#{1,4}\s+Constat\s+\d+\s*[\u2014\u2013\-]\s*(.+?)$",
+    re.MULTILINE | re.IGNORECASE,
+)
+_CONSTAT_HOST_RE = re.compile(
+    r"\*{0,2}[Hh][oô]te?\*{0,2}\s*:+\s*`(\d{1,3}(?:\.\d{1,3}){3})`",
+)
+_IMPACT_RE = re.compile(
+    r"\*{0,2}Impact\*{0,2}\s*:+\s*\*{0,2}\s*([^\n]+)",
+    re.IGNORECASE,
+)
+_FRENCH_REC_RE = re.compile(
+    r"\*{0,2}Recommandations?\*{0,2}\s*:+\s*\*{0,2}\s*([\s\S]+?)(?=\n#{1,4}\s|\Z)",
+    re.IGNORECASE,
+)
 
 # ── False-positive guards ──────────────────────────────────────────────────
 # Lines/headings that look like vulnerability headings but are NOT vuln titles
@@ -167,7 +195,15 @@ def _normalise_key(title: str) -> str:
 def _sev_from_label(text: str) -> str:
     m = _SEV_LABEL_RE.search(text)
     if m:
-        return _SEVERITY_MAP.get(m.group(1).lower(), "UNKNOWN")
+        raw = m.group(1).strip().lower()
+        # Try direct map
+        direct = _SEVERITY_MAP.get(raw)
+        if direct:
+            return direct
+        # Try substring match (handles "Moyenne \u00e0 \u00e9lev\u00e9e" etc.)
+        for kw, sev in sorted(_SEVERITY_MAP.items(), key=lambda x: -len(x[0])):
+            if kw in raw:
+                return sev
     return "UNKNOWN"
 
 
@@ -183,13 +219,9 @@ def _sev_from_context(text: str) -> str:
 
 def _tools_section_spans(text: str) -> list:
     """Return list of (start, end) byte spans that belong to tool-listing sections."""
-    # Collect all candidate headings, dedup by start position
     seen_starts: set = set()
     candidates = []
-    for m in re.finditer(
-        r"^#{1,4}\s+(?:\d+\.\s+)?(?:Additional\s+)?Tools?\s+(?:Not\s+Installed|Recommended|Suggested|That\s+Would\s+Help)[^\n]*$",
-        text, re.MULTILINE | re.IGNORECASE,
-    ):
+    for m in _TOOLS_HEADING_RE.finditer(text):
         if m.start() not in seen_starts:
             seen_starts.add(m.start())
             candidates.append(m)
@@ -378,7 +410,50 @@ def _extract_vulns_from_report(report_md: str, target: str) -> list:
     return all_findings + cve_vulns
 
 
-# ── Port / hostname / OS extraction (unchanged from original) ─────────────
+def _extract_constat_sections(text: str) -> list:
+    """
+    Extract ``### Constat N \u2014 Title`` findings from French-format AI reports.
+    Returns findings with an extra ``host_ip`` key (may be None).
+    """
+    findings = []
+    seen: set = set()
+    matches = list(_CONSTAT_RE.finditer(text))
+    for i, m in enumerate(matches):
+        title = m.group(1).strip()
+        if _is_noise_title(title):
+            continue
+        section_start = m.end()
+        section_end   = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+        section       = text[section_start:section_end]
+
+        host_m  = _CONSTAT_HOST_RE.search(section)
+        host_ip = host_m.group(1) if host_m else None
+
+        severity = _sev_from_label(section)
+        if severity == "UNKNOWN":
+            severity = _sev_from_context(section)
+
+        impact_m    = _IMPACT_RE.search(section)
+        description = impact_m.group(1).strip()[:600] if impact_m else None
+
+        rec_m = _FRENCH_REC_RE.search(section) or _REC_RE.search(section)
+        rec   = rec_m.group(1).strip()[:600] if rec_m else None
+
+        key = _normalise_key(title)
+        if key in seen:
+            continue
+        seen.add(key)
+        findings.append({
+            "cve_id":         None,
+            "title":          title[:200],
+            "severity":       severity,
+            "description":    description,
+            "evidence":       None,
+            "recommendation": rec,
+            "source":         "ai_analysis",
+            "host_ip":        host_ip,  # caller pops this
+        })
+    return findings
 
 def _parse_port_service(desc: str, port: int) -> tuple:
     raw = re.sub(r"`", "", desc).strip()
@@ -472,6 +547,17 @@ def _extract_suggested_tools_from_report(text: str) -> list:
     seen: set   = set()
     for start, end in spans:
         section = text[start:end]
+        # Pattern A: ### `toolname`\nReason paragraph (French AI report style)
+        for m in re.finditer(
+            r"^#{1,4}\s+`([a-zA-Z0-9_\-]+)`[^\n]*\n[ \t]*([^\n#][^\n]{0,300})",
+            section, re.MULTILINE,
+        ):
+            name   = m.group(1).strip()
+            reason = m.group(2).strip()[:200]
+            if not name or name.lower() in seen:
+                continue
+            seen.add(name.lower())
+            tools.append({"name": name, "reason": reason})
         # Numbered items: "### 1. `toolname`\nReason: ..." or "1. **toolname** — reason"
         for m in re.finditer(
             r"(?:^#{1,4}\s+\d+\.\s+`?(\S+?)`?\s*\n([\s\S]+?)(?=^#{1,4}\s+\d+\.|\Z))"
@@ -659,4 +745,133 @@ def parse_autorecon_ai_directory(ai_dir: str, target: str = "") -> dict:
                 result["ai_scan_data"]["suggested_tools"] = tools_from_report
 
     return result
+
+
+# ── Standalone file parsers (individual file upload without ZIP) ────────────
+
+def parse_autorecon_ai_report_md(md_path: str, target: str = "") -> dict:
+    """Parse a standalone ai_report.md file.
+    Handles both single-host reports and multi-host/CIDR reports with
+    per-host ``## H\u00f4te `IP` \u2014 `hostname``` sections.
+    """
+    try:
+        with open(md_path, "r", encoding="utf-8") as f:
+            md = f.read()
+    except Exception as exc:
+        return {"hosts": [], "error": f"Cannot read ai_report.md: {exc}", "ai_scan_data": {}}
+
+    tools = _extract_suggested_tools_from_report(md)
+
+    # ── Detect per-host sections: ## H\u00f4te `IP` [— `hostname`]
+    host_section_re = re.compile(
+        r"^#{1,3}\s+[Hh][o\u00f4]te?\s+`(\d{1,3}(?:\.\d{1,3}){3})`"
+        r"(?:\s*[\u2014\u2013\-]+\s*`([^`]+)`)?[^\n]*$",
+        re.MULTILINE,
+    )
+    host_matches = list(host_section_re.finditer(md))
+
+    if host_matches:
+        # ── Multi-host report ──
+        host_by_ip: dict = {}
+        hosts: list = []
+
+        for i, m in enumerate(host_matches):
+            ip       = m.group(1)
+            hostname = m.group(2) if m.group(2) else None
+            sec_end  = host_matches[i + 1].start() if i + 1 < len(host_matches) else len(md)
+            section  = md[m.start():sec_end]
+
+            ports   = _extract_ports_from_report(section)
+            os_info = _extract_os_from_report(section)
+            if not hostname:
+                hostname = _extract_hostname_from_report(section)
+
+            host = {
+                "ip": ip, "hostname": hostname, "os_info": os_info,
+                "vulnerabilities": [], "ports": ports,
+                "http_pages": [], "extra_data": {},
+            }
+            hosts.append(host)
+            host_by_ip[ip] = host
+
+        # Distribute Constat findings to their respective host
+        for constat in _extract_constat_sections(md):
+            h_ip = constat.pop("host_ip", None)
+            if h_ip and h_ip in host_by_ip:
+                host_by_ip[h_ip]["vulnerabilities"].append(constat)
+            else:
+                for h in hosts:
+                    h["vulnerabilities"].append(dict(constat))
+
+        # Fallback: if no constats found, try generic extraction on each section
+        if not any(h["vulnerabilities"] for h in hosts):
+            for i, m in enumerate(host_matches):
+                ip      = m.group(1)
+                sec_end = host_matches[i + 1].start() if i + 1 < len(host_matches) else len(md)
+                section = md[m.start():sec_end]
+                vulns   = _extract_vulns_from_report(section, ip)
+                host_by_ip[ip]["vulnerabilities"] = vulns
+
+    else:
+        # ── Single-host report ──
+        if not target:
+            tm = re.search(
+                r"(?:Target|Host|IP|Cible)[:\s*`]+`?(\d{1,3}(?:\.\d{1,3}){3}(?:/\d+)?)`?",
+                md, re.IGNORECASE,
+            )
+            if tm:
+                target = tm.group(1).strip()
+
+        vulns    = _extract_vulns_from_report(md, target)
+        ports    = _extract_ports_from_report(md)
+        hostname = _extract_hostname_from_report(md)
+        os_info  = _extract_os_from_report(md)
+
+        hosts = []
+        if target:
+            hosts.append({
+                "ip": target, "hostname": hostname, "os_info": os_info,
+                "vulnerabilities": vulns, "ports": ports,
+                "http_pages": [], "extra_data": {},
+            })
+
+    return {
+        "hosts": hosts,
+        "error": None,
+        "ai_scan_data": {
+            "ai_report_md":    md,
+            "suggested_tools": tools,
+            "iterations":      0,
+        },
+    }
+
+
+def parse_autorecon_ai_tools(tools_path: str) -> dict:
+    """Parse a standalone suggested_tools.json file."""
+    try:
+        with open(tools_path, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+    except Exception as exc:
+        return {"hosts": [], "error": f"Cannot read suggested_tools.json: {exc}", "ai_scan_data": {}}
+
+    normalized: list = []
+    if isinstance(raw, list):
+        for item in raw:
+            if isinstance(item, dict):
+                normalized.append({
+                    "name":   item.get("name") or item.get("tool", ""),
+                    "reason": item.get("reason") or item.get("description", ""),
+                })
+            elif isinstance(item, str):
+                normalized.append({"name": item, "reason": ""})
+
+    return {
+        "hosts": [],
+        "error": None,
+        "ai_scan_data": {
+            "ai_report_md":    "",
+            "suggested_tools": normalized,
+            "iterations":      0,
+        },
+    }
 
